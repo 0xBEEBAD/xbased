@@ -50,6 +50,10 @@ SDL_Renderer *ui_renderer(void);
 /* The frame: its size (pixels) and scale (1 at 720 lines: sizes are given
  * in 720p units and scaled), then drawing, then ui_end presents. */
 void ui_begin(void);
+/* The interface in a centered 4:3 area of a wider window (the settings'
+ * "ui43"); ui_ox: that area's left edge in window pixels (0: the window). */
+void ui_set_frame43(bool on);
+int ui_ox(void);
 void ui_end(void);
 /* The overlay's frame drawn so far set as the presenter's, without
  * presenting (the window's loop presents); cover: it draws the whole

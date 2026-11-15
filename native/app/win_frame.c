@@ -17,6 +17,7 @@
 #include <d3d12.h>
 #include <dxgi1_5.h>
 #include "hw/xbox/hle/vk/share.h"
+#include "native/app/ui/config.h"    /* cfg_data_dir */
 
 #define WM_FRAME_TOGGLE (WM_APP + 1)
 #define WM_FRAME_CLOSE  (WM_APP + 2)
@@ -28,6 +29,67 @@
 
 static HWND g_fw;
 static bool g_fs, g_fs60, g_mode_set, g_had_child;
+
+/* The game window's place, kept for the next session (#246): window.txt in
+ * the data folder, its normal rectangle (GetWindowPlacement's, workspace
+ * coordinates) and whether it was maximized. Taken only while it is a
+ * window (not full screen, not minimized), and used only where its title
+ * bar lands on a monitor's work area at a size the monitor holds: a monitor
+ * since unplugged, or a lower resolution, leaves it centered as before. */
+static void place_path(char *out, size_t n)
+{
+    snprintf(out, n, "%swindow.txt", cfg_data_dir());
+}
+
+static void place_save(void)
+{
+    WINDOWPLACEMENT wp = {sizeof(wp)};
+    if (!g_fw || g_fs || IsIconic(g_fw) || !IsWindowVisible(g_fw) || !GetWindowPlacement(g_fw, &wp)) {
+        return;
+    }
+    const RECT r = wp.rcNormalPosition;
+    char p[1100];
+    place_path(p, sizeof(p));
+    FILE *f = fopen(p, "w");
+    if (f) {
+        fprintf(f, "%ld %ld %ld %ld %d\n", (long)r.left, (long)r.top, (long)(r.right - r.left), (long)(r.bottom - r.top),
+                IsZoomed(g_fw) ? 1 : 0);
+        fclose(f);
+    }
+}
+
+static bool place_load(RECT *out, bool *maximized)
+{
+    char p[1100];
+    place_path(p, sizeof(p));
+    FILE *f = fopen(p, "r");
+    if (!f) {
+        return false;
+    }
+    long x, y, w, h;
+    int mx = 0;
+    const bool got = fscanf(f, "%ld %ld %ld %ld %d", &x, &y, &w, &h, &mx) >= 4;
+    fclose(f);
+    if (!got || w < 320 || h < 240) {
+        return false;
+    }
+    /* the title bar's middle, in screen coordinates: on a monitor's work area */
+    const POINT top = {(LONG)(x + w / 2), (LONG)(y + 8)};
+    HMONITOR m = MonitorFromPoint(top, MONITOR_DEFAULTTONULL);
+    MONITORINFO mi = {sizeof(mi)};
+    if (!m || !GetMonitorInfoA(m, &mi)) {
+        return false;
+    }
+    const LONG ox = mi.rcWork.left - mi.rcMonitor.left, oy = mi.rcWork.top - mi.rcMonitor.top;
+    const POINT top_screen = {top.x + ox, top.y + oy};   /* workspace to screen (a taskbar on top or left) */
+    if (!PtInRect(&mi.rcWork, top_screen) || w > mi.rcWork.right - mi.rcWork.left + 64 ||
+        h > mi.rcWork.bottom - mi.rcWork.top + 64) {
+        return false;
+    }
+    *out = (RECT){(LONG)x, (LONG)y, (LONG)(x + w), (LONG)(y + h)};
+    *maximized = mx != 0;
+    return true;
+}
 static RECT g_wrect;                /* windowed, the place to go back to */
 static char g_dev[CCHDEVICENAME];   /* the monitor whose mode was set */
 static ULONGLONG g_t0, g_gone_at;
@@ -924,7 +986,17 @@ static LRESULT CALLBACK frame_proc(HWND h, UINT m, WPARAM w, LPARAM l)
         FillRect((HDC)w, &rc, (HBRUSH)GetStockObject(BLACK_BRUSH));
         return 1;
     }
+    case WM_EXITSIZEMOVE:
+        place_save();
+        break;
     case WM_SIZE:
+        if (w == SIZE_MAXIMIZED || w == SIZE_RESTORED) {
+            static WPARAM last = SIZE_RESTORED;
+            if (w != last) {
+                last = w;
+                place_save();   /* maximized, or back from it: no size-move loop */
+            }
+        }
         fit_children();
         if (g_sh && LOWORD(l) && HIWORD(l)) {
             g_sh->cw = LOWORD(l);   /* the runs draw at this size from their next picture */
@@ -1024,6 +1096,7 @@ static LRESULT CALLBACK frame_proc(HWND h, UINT m, WPARAM w, LPARAM l)
         return 0;
     }
     case WM_DESTROY:
+        place_save();
         mode_restore();
         PostQuitMessage(0);
         return 0;
@@ -1098,6 +1171,16 @@ int nc_frame_main(int argc, char **argv)
     if (!g_fw) {
         return 4;
     }
+    RECT placed;
+    bool maximized = false;
+    const bool place = place_load(&placed, &maximized);
+    if (place) {
+        WINDOWPLACEMENT wp = {sizeof(wp)};
+        GetWindowPlacement(g_fw, &wp);
+        wp.showCmd = SW_HIDE;
+        wp.rcNormalPosition = placed;
+        SetWindowPlacement(g_fw, &wp);
+    }
     g_t0 = GetTickCount64();
     fp_start(token);    /* the runs' pictures presented here (hw/xbox/hle/vk/share.h) */
     if (fs) {
@@ -1109,7 +1192,7 @@ int nc_frame_main(int argc, char **argv)
     BOOL cloak = TRUE;
     DwmSetWindowAttribute(g_fw, DWMWA_TRANSITIONS_FORCEDISABLED, &cloak, sizeof(cloak));
     DwmSetWindowAttribute(g_fw, DWMWA_CLOAK, &cloak, sizeof(cloak));
-    ShowWindow(g_fw, SW_SHOW);
+    ShowWindow(g_fw, place && maximized && !fs ? SW_SHOWMAXIMIZED : SW_SHOW);
     UpdateWindow(g_fw);
     cloak = FALSE;
     DwmSetWindowAttribute(g_fw, DWMWA_CLOAK, &cloak, sizeof(cloak));

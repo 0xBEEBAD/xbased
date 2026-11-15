@@ -254,6 +254,17 @@ const char *cfg_exe_dir(void)
     return b ? b : "./";
 }
 
+const char *cfg_global_path(void)
+{
+    const char *e = getenv("XBASED_CONFIG");
+    if (e && e[0]) {
+        return e;
+    }
+    static char p[1100];
+    snprintf(p, sizeof(p), "%sxbased.ini", cfg_data_dir());
+    return p;
+}
+
 const char *cfg_data_dir(void)
 {
     static char dir[1024];

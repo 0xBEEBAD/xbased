@@ -61,7 +61,9 @@ static struct {
     Glyph g[GLYPHS];
     int shelf_x, shelf_y, shelf_h;
     float scale;            /* pixels per 720p unit */
-    int pw, ph;
+    int pw, ph;             /* the drawing area's (4:3: inside the window, U.ox from its left) */
+    int ox;
+    bool shifted;           /* the overlay's vertices moved by ox (ui_overlay_submit) */
     uint64_t t0;
     float alpha;            /* ui_set_alpha */
     SDL_Texture *targets[8];   /* the layers' render targets under the one drawn into */
@@ -75,6 +77,8 @@ static struct {
     HleOvCmd *c;
     int nv, cv, nc, cc;
 } U;
+
+static bool g_frame43;     /* ui_set_frame43 (kept past ui_init) */
 
 static UiTex g_scene = {.ov = HLE_OV_SCENE, .blend = UB_BLEND};
 static UiTex g_scene_blur = {.ov = HLE_OV_SCENE_BLUR, .blend = UB_BLEND};
@@ -493,15 +497,39 @@ void ui_begin(void)
     } else {
         SDL_GetCurrentRenderOutputSize(U.r, &U.pw, &U.ph);
     }
+    /* the interface in a centered 4:3 area, the sides black (#289): a bezel
+     * or a shader's frame over a 4:3 picture covers no menu */
+    U.ox = 0;
+    U.shifted = false;
+    if (g_frame43 && U.pw * 3 > U.ph * 4) {
+        const int w43 = U.ph * 4 / 3;
+        U.ox = (U.pw - w43) / 2;
+        U.pw = w43;
+    }
     U.scale = U.ph / 720.0f;
     if (U.pw / U.scale < 960) {
         U.scale = U.pw / 960.0f;   /* narrow windows: at least 960 units wide */
     }
     U.alpha = 1.0f;
     if (!U.ov) {
+        SDL_SetRenderViewport(U.r, NULL);
         SDL_SetRenderDrawColor(U.r, 0, 0, 0, 255);
         SDL_RenderClear(U.r);
+        if (U.ox) {
+            const SDL_Rect vp = {U.ox, 0, U.pw, U.ph};
+            SDL_SetRenderViewport(U.r, &vp);   /* everything after it inside, clip rects too */
+        }
     }
+}
+
+void ui_set_frame43(bool on)
+{
+    g_frame43 = on;
+}
+
+int ui_ox(void)
+{
+    return U.ox;
 }
 
 void ui_overlay_submit(bool cover)
@@ -513,6 +541,18 @@ void ui_overlay_submit(bool cover)
         /* nothing drawn, still covering: black, not the picture */
         HleOvVert *o = ov_room(0, UB_BLEND, 3);
         memset(o, 0, 3 * sizeof(*o));
+    }
+    if (U.ox && !U.shifted) {
+        /* the 4:3 area's place in the window (ui_begin) */
+        U.shifted = true;
+        for (int i = 0; i < U.nv; i++) {
+            U.v[i].x += (float)U.ox;
+        }
+        for (int i = 0; i < U.nc; i++) {
+            if (U.c[i].clip[2]) {
+                U.c[i].clip[0] += U.ox;
+            }
+        }
     }
     hle_present_set_overlay(U.v, (uint32_t)U.nv, U.c, (uint32_t)U.nc, cover ? HLE_OV_COVER : 0);
 }

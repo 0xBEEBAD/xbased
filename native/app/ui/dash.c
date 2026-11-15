@@ -299,11 +299,25 @@ static void poll_input(void)
         case SDL_EVENT_QUIT:
             D.quit = true;
             break;
+        case SDL_EVENT_WINDOW_FOCUS_GAINED:
+        case SDL_EVENT_WINDOW_FOCUS_LOST:
+            /* Alt+Tab's Alt let go elsewhere: not taken as still held (#276) */
+            SDL_SetModState(SDL_GetModState() & ~(SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_SHIFT | SDL_KMOD_GUI));
+            break;
         case SDL_EVENT_KEY_DOWN: {
             in->pad = false;
             cursor(false);
             in->key = e.key.key;
             in->mod = e.key.mod;
+#ifdef _WIN32
+            /* Ctrl, Alt and Shift as held now: Alt+Tab's Alt let go in another
+             * window still read as held (#276) */
+            in->mod &= ~(SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_SHIFT);
+            in->mod |= (GetAsyncKeyState(VK_CONTROL) & 0x8000) ? SDL_KMOD_LCTRL : 0;
+            in->mod |= (GetAsyncKeyState(VK_MENU) & 0x8000) ? SDL_KMOD_LALT : 0;
+            in->mod |= (GetAsyncKeyState(VK_SHIFT) & 0x8000) ? SDL_KMOD_LSHIFT : 0;
+            e.key.mod = (SDL_Keymod)in->mod;
+#endif
             in->repeat |= e.key.repeat;
             in->any = true;
             const SDL_Keycode k = e.key.key;
@@ -484,7 +498,7 @@ static void poll_input(void)
         SDL_GetMouseState(&mx, &my);
         dpi = SDL_GetWindowPixelDensity(g_win);
     }
-    in->mx = g_cursor_at > 0 ? mx * dpi / ui_scale() : -1;
+    in->mx = g_cursor_at > 0 ? (mx * dpi - ui_ox()) / ui_scale() : -1;
     in->my = g_cursor_at > 0 ? my * dpi / ui_scale() : -1;
     if (g_cursor_at <= 0) {
         in->moved = in->click = in->rclick = false;
@@ -607,6 +621,7 @@ static void auto_poll(void)
             float x = 0, y = 0;
             if (sscanf(line + 6, "%f %f", &x, &y) == 2) {
                 const float k = ui_scale() / SDL_GetWindowPixelDensity(g_win);
+                x += ui_ox() / ui_scale();      /* (the 4:3 area's left edge) */
                 SDL_WarpMouseInWindow(g_win, x * k, y * k);
                 SDL_Event e = {0};
                 e.type = SDL_EVENT_MOUSE_MOTION;
@@ -2404,7 +2419,7 @@ int dash_run(SDL_Window *win, const char *exe)
     g_cursor_at = 0;
     snprintf(D.exe, sizeof(D.exe), "%s", exe);
     char p[1200];
-    snprintf(p, sizeof(p), "%sxbased.ini", cfg_data_dir());
+    snprintf(p, sizeof(p), "%s", cfg_global_path());
     cfg_load(&D.global, p);
     const bool up = upscale_migrate(&D.global), sh = cfg_shaders_migrate(&D.global);
     if (up || sh) {
@@ -2499,6 +2514,7 @@ int dash_run(SDL_Window *win, const char *exe)
             /* into the game: the screen's picture breaks; the game's window
              * comes up on the black it leaves */
             const float k = (float)((ui_time() - g_go.t0) / GO_OUT);
+            ui_set_frame43(cfg_bool(&D.global, "ui.43", false));
             ui_begin();
             ui_fx_shatter(g_go.pic, k);
             auto_shot();
@@ -2516,6 +2532,7 @@ int dash_run(SDL_Window *win, const char *exe)
         }
         const int sp_before = D.sp;
         const enum Screen top_before = dash_top();
+        ui_set_frame43(cfg_bool(&D.global, "ui.43", false));
         ui_begin();
         if (go_pic || go_back) {
             g_go.pic = ui_layer_begin(g_go.pic);
@@ -2757,7 +2774,7 @@ int dash_ingame(SDL_Window *win, const char *key, const char *title, const char 
     SDL_HideCursor();   /* it shows when the mouse moves (poll_input) */
     g_cursor_at = 0;
     char p[1200];
-    snprintf(p, sizeof(p), "%sxbased.ini", cfg_data_dir());
+    snprintf(p, sizeof(p), "%s", cfg_global_path());
     cfg_load(&D.global, p);
     const bool up = upscale_migrate(&D.global), sh = cfg_shaders_migrate(&D.global);
     if (up || sh) {
@@ -2837,6 +2854,7 @@ int dash_ingame(SDL_Window *win, const char *key, const char *title, const char 
                 snd_play(SND_MOVE);
             }
         }
+        ui_set_frame43(cfg_bool(&D.global, "ui.43", false));
         ui_begin();
         /* the paused game under a green veil: blurred, over the overlay */
         if (ov) {

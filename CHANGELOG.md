@@ -1,5 +1,30 @@
 # xbased changelog
 
+## 1.1.1 (2026-11)
+
+### New
+- **Online mode**, per game (Mods & patches): the game runs as the console
+  does for playing online (Insignia, XLink Kai, System Link), at its
+  original frame rate and speed, without patches, mods or cheats, and fast
+  forward does nothing. Insignia bans players who use them.
+- **Interface in 4:3** (Settings › Interface): the menus in a centered 4:3
+  area, for bezels and frame shaders over a 4:3 picture.
+- **Import saves from a folder** (Memory, Tab): saves copied from an Xbox or
+  from xemu, re-signed with the keys of xemu's own files (and, for saves
+  locked to another console, that console's eeprom.bin in the folder). The
+  import from xemu also finds more games' signatures.
+- **Discs from an NBD server**: `nbd://host:port/export` as the disc, the way
+  GDOX serves a physical disc from a supported drive.
+- **Command line**: `-h` / `--help`, `-c` / `--config FILE` for another
+  settings file, `-i` / `--input FILE` for the disc.
+- The game window keeps its place and size for the next game (Windows).
+
+### Fixes
+- Original Xbox controllers on Linux: the black and white buttons work.
+- Alt+Tab out of a game no longer leaves Alt held (the F keys did nothing
+  and Enter alone switched to full screen).
+- The CRT TV and arcade filters' scanlines without moiré in bright areas.
+
 ## 1.1.0 (2026-11)
 
 ### New

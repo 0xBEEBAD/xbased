@@ -38,6 +38,7 @@
 #include "native/app/ui/xbox_data.h"
 #include "native/app/ui/xemu_import.h"
 #include "native/app/win_aslr.h"
+#include "native/core/nbd_image.h"
 #include "native/core/fold_image.h"
 #include "native/app/win_frame.h"
 #ifndef _WIN32
@@ -132,7 +133,7 @@ static void add_arg(const char *a)
 static void read_ini(void)
 {
     char path[MAX_PATH + 16], old[MAX_PATH + 16];
-    snprintf(path, sizeof(path), "%sxbased.ini", g_data_dir);
+    snprintf(path, sizeof(path), "%s", cfg_global_path());
     snprintf(old, sizeof(old), "%shakux.ini", g_data_dir);
     if (GetFileAttributesA(path) == INVALID_FILE_ATTRIBUTES) {
         MoveFileA(old, path);
@@ -238,7 +239,7 @@ static void game_options(const char *disc)
     snprintf(g_key, sizeof(g_key), "%s", g.key);
     g_title_id = g.title_id;
     Config global;
-    snprintf(path, sizeof(path), "%sxbased.ini", g_data_dir);
+    snprintf(path, sizeof(path), "%s", cfg_global_path());
     cfg_load(&global, path);
     im_resolve(&g_map, &global, &c);
     /* flags written as values */
@@ -750,6 +751,11 @@ static void load_state(int slot)
 }
 
 static bool g_uncap;    /* the run's frame rate setting (fast forward goes back to it) */
+/* online mode (a game's "online", #278): the game as the console runs it for
+ * playing with others (Insignia bans players whose emulators run faster or
+ * patched): its original frame rate and the drive's timing, no patches,
+ * mods or cheats, and no fast forward */
+static bool g_online;
 static int g_crop[2];   /* croph=, cropv= of the run's options */
 static int g_maxfps = -1;   /* maxfps=: an uncapped game's limit (-1 the display's refresh, 0 none) */
 static bool g_fs60;         /* fsrate=60: full screen in the panel's highest mode a multiple of 60 Hz */
@@ -1183,7 +1189,7 @@ static void ingame_menu(SDL_Window *win, bool *paused, bool minimized)
         nc_kernel_set_paused(&g_core.kernel, *paused || minimized);
         nc_audio_set_paused(*paused || minimized);
         char path[MAX_PATH + 64];
-        snprintf(path, sizeof(path), "%sxbased.ini", g_data_dir);
+        snprintf(path, sizeof(path), "%s", cfg_global_path());
         Config global, game;
         cfg_load(&global, path);
         snprintf(path, sizeof(path), "%sgames/%s.ini", g_data_dir, g_key);
@@ -1220,7 +1226,7 @@ static void ingame_menu(SDL_Window *win, bool *paused, bool minimized)
     nc_kernel_set_paused(&g_core.kernel, *paused || minimized);
     nc_audio_set_paused(*paused || minimized);
     char path[MAX_PATH + 64];
-    snprintf(path, sizeof(path), "%sxbased.ini", g_data_dir);
+    snprintf(path, sizeof(path), "%s", cfg_global_path());
     Config global, game;
     cfg_load(&global, path);
     snprintf(path, sizeof(path), "%sgames/%s.ini", g_data_dir, g_key);
@@ -1397,6 +1403,30 @@ static void shader_cache_by_version(const char *base)
 static int g_pad_held_hk = -1, g_pad_held_code;
 static bool g_guide_alone;      /* Guide pressed, nothing with it yet: a tap opens the menu */
 
+/* Ctrl, Alt, Shift and the Windows key let go, as the window gains or loses
+ * the keyboard: Alt+Tab away leaves Alt's release with the other window, and
+ * SDL went on taking Alt as held (#276), the F keys' shortcuts never matching
+ * and Enter alone switching to full screen. A key held as the window comes
+ * back sets them again as it repeats. */
+static void mods_released(void)
+{
+    SDL_SetModState(SDL_GetModState() & ~(SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_SHIFT | SDL_KMOD_GUI));
+}
+
+/* A key's Ctrl, Alt and Shift as the keyboard holds them now (Windows: the
+ * run's window sits inside the frame's, and its focus events may not come
+ * when Alt+Tab takes the frame away), else as SDL tracked them. */
+static SDL_Keymod mods_held(SDL_Keymod m)
+{
+#ifdef _WIN32
+    m &= ~(SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_SHIFT);
+    m |= (GetAsyncKeyState(VK_CONTROL) & 0x8000) ? SDL_KMOD_LCTRL : 0;
+    m |= (GetAsyncKeyState(VK_MENU) & 0x8000) ? SDL_KMOD_LALT : 0;
+    m |= (GetAsyncKeyState(VK_SHIFT) & 0x8000) ? SDL_KMOD_LSHIFT : 0;
+#endif
+    return m;
+}
+
 static void hotkey_do(SDL_Window *win, int h, bool down, int slot, bool *paused, bool minimized)
 {
     if (!down) {
@@ -1430,6 +1460,9 @@ static void hotkey_do(SDL_Window *win, int h, bool down, int slot, bool *paused,
         load_state(slot);
         break;
     case IM_HK_TURBO:
+        if (g_online) {
+            break;      /* the console's pace only (online mode) */
+        }
         nc_win_prop_set("debug.hakux.uncap", "1");  /* frames as fast as they come, while held */
         nc_win_prop_set("debug.hakux.fpscap", "0");
         break;
@@ -1450,6 +1483,109 @@ static void frame_fullscreen(void)
     nc_frame_toggle_fullscreen(g_frame);
 }
 
+/* -h, --help: what the command line takes (#226). Windows: into the console
+ * it was started from, if any, else a message box. */
+static const char k_usage[] =
+    "xbased " XBASED_VERSION ", an original Xbox emulator\n"
+    "\n"
+    "Usage: xbased [options] [disc image]\n"
+    "\n"
+    "  -i, --input FILE     the disc image to play (.iso, .xiso, .chd), or nbd://host:port/export\n"
+    "  -c, --config FILE    the settings file to use instead of xbased.ini\n"
+    "  -h, --help           this help\n"
+    "\n"
+    "With no disc image the dashboard opens. Options of the form name=value\n"
+    "(or a lone name for a switch), the same as xbased.ini's lines:\n"
+    "  fullscreen=0|1       start in a window or full screen\n"
+    "  scale=N              internal resolution (1 to 8)\n"
+    "  aspect=auto|4:3|16:9|stretch\n"
+    "  upscale=bilinear|fsr, fxaa=0|1, crt=N\n"
+    "  shaders=hybrid|async|sync\n"
+    "  uncap, fpscap=N      the frame rate lifted, up to N a second\n"
+    "  online               online mode: the console's frame rate and speed, no mods or cheats\n"
+    "  lang=N               the console's language (1 English ... 9 Portuguese)\n"
+    "  loadstate=FILE       start from a save state\n"
+    "  hdd=DIR              the hard disk folder\n"
+    "  mod=ID, cheat=NAME   a mod or cheat of the game's on\n"
+    "  net=off|nat|lan|kai  the network\n"
+    "  dash                 the Xbox dashboard from the hard disk (no disc)\n"
+    "  pick                 choose a disc image in a file dialog\n"
+    "  console              a console window with the log (it always goes to xbased.log)\n";
+
+static void show_usage(void)
+{
+#ifdef _WIN32
+    HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (out && out != INVALID_HANDLE_VALUE && GetFileType(out) != FILE_TYPE_UNKNOWN &&
+        GetFileType(out) != FILE_TYPE_CHAR) {
+        DWORD put = 0;
+        WriteFile(out, k_usage, (DWORD)strlen(k_usage), &put, NULL);    /* a pipe or a file the shell redirected to */
+        return;
+    }
+    if (AttachConsole(ATTACH_PARENT_PROCESS)) {
+        FILE *f = freopen("CONOUT$", "w", stdout);
+        if (f) {
+            fputs("\n", stdout);
+            fputs(k_usage, stdout);
+            fflush(stdout);
+            return;
+        }
+    }
+    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, "xbased", k_usage, NULL);
+#else
+    fputs(k_usage, stdout);
+#endif
+}
+
+/* The command line's -h, -c and -i forms (#226) taken out of argv: -c sets
+ * the settings file (XBASED_CONFIG, inherited by the runs it starts), -i's
+ * image stays as the disc argument. False: only the help was asked for. */
+static bool short_options(int *argc, char **argv)
+{
+    int n = 1;
+    for (int i = 1; i < *argc; i++) {
+        const char *a = argv[i];
+        if (!strcmp(a, "-h") || !strcmp(a, "--help") || !strcmp(a, "/?") || !strcmp(a, "-?")) {
+            show_usage();
+            return false;
+        }
+        const char *cfg = NULL;
+        if ((!strcmp(a, "-c") || !strcmp(a, "--config")) && i + 1 < *argc) {
+            cfg = argv[++i];
+        } else if (!strncmp(a, "--config=", 9)) {
+            cfg = a + 9;
+        }
+        if (cfg) {
+            char full[4096];
+#ifdef _WIN32
+            if (!_fullpath(full, cfg, sizeof(full))) {
+                snprintf(full, sizeof(full), "%s", cfg);
+            }
+            char env[4200];
+            snprintf(env, sizeof(env), "XBASED_CONFIG=%s", full);
+            _putenv(env);
+#else
+            if (!realpath(cfg, full)) {
+                snprintf(full, sizeof(full), "%s", cfg);   /* a file not made yet */
+            }
+            setenv("XBASED_CONFIG", full, 1);
+#endif
+            continue;
+        }
+        if ((!strcmp(a, "-i") || !strcmp(a, "--input")) && i + 1 < *argc) {
+            argv[n++] = argv[++i];
+            continue;
+        }
+        if (!strncmp(a, "--input=", 8)) {
+            argv[n++] = (char *)a + 8;
+            continue;
+        }
+        argv[n++] = argv[i];
+    }
+    *argc = n;
+    return true;
+}
+
 int main(int argc, char *argv[])
 {
 #ifdef _WIN32
@@ -1458,6 +1594,9 @@ int main(int argc, char *argv[])
     }
     xb_aslr_check();    /* Windows' first memory where the guest's goes: run again without (win_aslr.h) */
 #endif
+    if (!short_options(&argc, argv)) {
+        return 0;
+    }
     /* The gamepads with the window in the background (the dashboard behind a
      * launcher, a game after a click elsewhere): as the environment's, which
      * SDL takes where the hint set at run time didn't (a virtual gamepad's
@@ -1553,6 +1692,19 @@ int main(int argc, char *argv[])
             return r;
         }
     }
+    static char nbd_marker[MAX_PATH + 32];
+    if (!xbox_dash && nc_nbd_is_uri(disc)) {
+        /* an NBD server's image (nbd://host:port/export: GDOX's drive, #236):
+         * the disc is a marker file naming it, which every opening of the
+         * disc reads to share the one connection (core/nbd_image.h) */
+        snprintf(nbd_marker, sizeof(nbd_marker), "%snbd_disc.txt", g_data_dir);
+        if (!nc_nbd_marker_write(nbd_marker, disc)) {
+            fatal_box("xbased", "Can't write the NBD disc's marker file in the data folder.");
+            return 1;
+        }
+        nc_log("hakuX-app", "disc from %s", disc);
+        disc = nbd_marker;
+    }
     if (!xbox_dash) {
         snprintf(g_disc, sizeof(g_disc), "%s", disc);
         game_options(g_disc);
@@ -1567,7 +1719,7 @@ int main(int argc, char *argv[])
          * unresolved, the Xbox dashboard got no controller until the in-game
          * menu resolved them on Resume (#124) */
         char path[MAX_PATH + 16];
-        snprintf(path, sizeof(path), "%sxbased.ini", g_data_dir);
+        snprintf(path, sizeof(path), "%s", cfg_global_path());
         Config global, none;
         cfg_load(&global, path);
         memset(&none, 0, sizeof(none));
@@ -1600,6 +1752,27 @@ int main(int argc, char *argv[])
 
     NcOptions opt;
     nc_options_init(&opt);
+    for (int i = 0; i < g_nargs; i++) {
+        const char *a = g_args[i];
+        if (!strcmp(a, "online") || (!strncmp(a, "online=", 7) && strcmp(a + 7, "0"))) {
+            g_online = true;
+        }
+    }
+    if (g_online) {
+        int dropped = 0;
+        for (int i = 0; i < g_nargs; i++) {
+            char *a = g_args[i];
+            if (!strcmp(a, "uncap") || !strncmp(a, "uncap=", 6) || !strncmp(a, "fpscap=", 7) ||
+                !strncmp(a, "xcheat=", 7) || !strncmp(a, "mod=", 4) || !strncmp(a, "cheat=", 6) ||
+                !strncmp(a, "devtime=", 8)) {
+                a[0] = 0;
+                dropped++;
+            }
+        }
+        add_arg("devtime=2");     /* the drive's own timing */
+        nc_log("hakuX-app", "online mode: original frame rate and speed, no patches, mods or cheats (%d settings "
+               "left out)", dropped);
+    }
     for (int i = 0; i < g_nargs; i++) {
         const char *a = g_args[i];
         char resolved[2400];
@@ -1659,7 +1832,11 @@ int main(int argc, char *argv[])
             g_mute_bg = atoi(a + 7) != 0;
         }
     }
-    nc_win_mods_prepare(g_exe_dir, g_disc_fd, g_args, g_nargs);
+    if (g_online) {
+        nc_win_mods_cleanup(g_exe_dir);     /* none of the mods, the widescreen database's included */
+    } else {
+        nc_win_mods_prepare(g_exe_dir, g_disc_fd, g_args, g_nargs);
+    }
     if (opt.uncap && opt.fps_cap <= 0 && g_maxfps != 0) {
         /* uncapped with no limit of the game's own: the global one, never
          * under 60 (games without a frame cap of their own ran at hundreds) */
@@ -1747,7 +1924,7 @@ int main(int argc, char *argv[])
             nc_log("hakuX-app", "no overlay: the in-game menu on a renderer of its own");
         }
         char path[MAX_PATH + 16];
-        snprintf(path, sizeof(path), "%sxbased.ini", g_data_dir);
+        snprintf(path, sizeof(path), "%s", cfg_global_path());
         Config global;
         cfg_load(&global, path);
         g_fx = cfg_bool(&global, "ui.fx", true);
@@ -1805,8 +1982,9 @@ int main(int argc, char *argv[])
                 /* the shortcuts (Settings > Shortcuts): the key with the
                  * Ctrl and Alt it was set with (exactly), Shift too if it
                  * was; Shift with quick save/load otherwise: slot 2 */
-                const uint8_t held = ((ev.key.mod & SDL_KMOD_CTRL) ? 1 : 0) | ((ev.key.mod & SDL_KMOD_ALT) ? 2 : 0) |
-                                     ((ev.key.mod & SDL_KMOD_SHIFT) ? 4 : 0);
+                const SDL_Keymod mod = mods_held(ev.key.mod);
+                const uint8_t held = ((mod & SDL_KMOD_CTRL) ? 1 : 0) | ((mod & SDL_KMOD_ALT) ? 2 : 0) |
+                                     ((mod & SDL_KMOD_SHIFT) ? 4 : 0);
                 if (ev.key.key == SDLK_RETURN && (held & 2) && !(held & 1)) {
                     hotkey_do(win, IM_HK_FULL, true, 1, &paused, minimized);
                     break;
@@ -1912,9 +2090,11 @@ int main(int argc, char *argv[])
             case SDL_EVENT_WINDOW_FOCUS_GAINED:
                 focused = true;
                 nc_audio_set_volume(g_volume);
+                mods_released();
                 break;
             case SDL_EVENT_WINDOW_FOCUS_LOST:
                 focused = false;
+                mods_released();
                 if (g_mute_bg) {
                     nc_audio_set_volume(0);
                 }

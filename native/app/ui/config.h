@@ -45,6 +45,10 @@ void cfg_remove_value(Config *c, const char *key, const char *val);
  * covers/): beside the executable (Windows, or a portable.txt there), else
  * the user's data folder (Linux: ~/.local/share/hakuX). Ends in a separator. */
 const char *cfg_data_dir(void);
+/* The global settings' file: xbased.ini in the data folder, or the one the
+ * command line named (-c, --config: XBASED_CONFIG, which the game's process
+ * and the runs after it inherit). */
+const char *cfg_global_path(void);
 /* Beside the executable (fonts, mods). */
 const char *cfg_exe_dir(void);
 /* Runs a helper program (curl, tar) to its end, with no window of its own

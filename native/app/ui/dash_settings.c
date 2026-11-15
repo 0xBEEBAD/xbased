@@ -294,6 +294,7 @@ void scr_settings(void)
         opt_bool(&l, S_COVERS_ONLINE, "covers", true, false);
         opt_bool(&l, S_ANIMATED_BG, "ui.anim", true, false);
         opt_bool(&l, S_TRANSITIONS, "ui.fx", true, false);
+        opt_bool(&l, S_UI_43, "ui.43", false, false);   /* menus in a centered 4:3 area (ui_set_frame43) */
         opt_bool(&l, S_UI_SOUNDS, "ui.sounds", true, false);
         opt_bool(&l, S_CHECK_UPDATES, "update.check", true, false);
         opt_bool(&l, S_SHOW_HIDDEN, "ui.showhidden", false, false);
@@ -853,7 +854,28 @@ void scr_mods(void)
      * without a limit; a game that breaks lifted (native/dev/nv2a.c's list)
      * shows it locked at Original, and why */
     const char *help = NULL;
-    if (nc_dev_nv2a_title_pace_mode(D.cur->g.title_id, D.cur->g.title)) {
+    /* online mode (#278): the game as the console runs it, the frame rate,
+     * patches, mods and cheats left as they are but not used */
+    const bool online = cfg_bool(&D.game, "online", false);
+    {
+        int delta = 0;
+        if (list_row(&l, T(S_ONLINE_MODE), online ? T(S_ON) : T(S_OFF), &delta) || delta) {
+            if (online) {
+                cfg_unset(&D.game, "online");
+            } else {
+                cfg_set(&D.game, "online", "1");
+            }
+        }
+        if (list_selected(&l)) {
+            help = T(S_ONLINE_HELP);
+        }
+    }
+    if (online) {
+        list_row(&l, T(S_FRAMERATE), T(S_FR_ONLINE), NULL);
+        if (list_selected(&l)) {
+            help = T(S_ONLINE_HELP);
+        }
+    } else if (nc_dev_nv2a_title_pace_mode(D.cur->g.title_id, D.cur->g.title)) {
         list_row(&l, T(S_FRAMERATE), T(S_FR_LOCKED), NULL);
         if (list_selected(&l)) {
             help = T(S_FR_LOCKED_HELP);
@@ -903,7 +925,7 @@ void scr_mods(void)
     /* the mods and patches, then the cheats in a section of their own,
      * their names written properly in the interface's language */
     bool any_cheat = g_nxopts > 0;
-    for (int pass = 0; pass < 2; pass++) {
+    for (int pass = 0; pass < 2 && !online; pass++) {
         for (int i = 0; i < g_nmods; i++) {
             ModItem *m = &g_mods[i];
             if (m->cheat != (pass == 1)) {
@@ -934,7 +956,7 @@ void scr_mods(void)
         }
     }
     static char xhelp[512];
-    for (int i = 0; i < g_nxopts; i++) {
+    for (int i = 0; i < g_nxopts && !online; i++) {
         XOpt *e = &g_xopts[i];
         if (e->shown_lang != (int)i18n_lang()) {
             cheat_text(e->label, i18n_lang(), e->shown, sizeof(e->shown));

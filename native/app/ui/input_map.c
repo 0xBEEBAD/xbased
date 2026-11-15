@@ -402,6 +402,30 @@ static float pad_value(SDL_Gamepad *g, int pad)
     return (pad & 1) ? (v < 0 ? -v : 0) : (v > 0 ? v : 0);
 }
 
+/* An original Xbox pad (the Duke, the Controller S) on Linux's xpad driver
+ * reports black and white as BTN_C and BTN_Z, which SDL's gamepad mapping
+ * leaves out; SDL numbers the joystick's buttons in evdev code order (A 0,
+ * B 1, C 2, X 3, Y 4, Z 5), so they are its raw buttons 2 and 5. Read as
+ * well as the mapped ones, on those pads only (#286). */
+static bool duke_bw(SDL_Gamepad *g, bool black)
+{
+#if defined(__linux__) && !defined(__ANDROID__)
+    if (!g || SDL_GetGamepadVendor(g) != 0x045e) {
+        return false;
+    }
+    const Uint16 pr = SDL_GetGamepadProduct(g);
+    if (pr != 0x0202 && pr != 0x0285 && pr != 0x0287 && pr != 0x0289) {
+        return false;
+    }
+    SDL_Joystick *j = SDL_GetGamepadJoystick(g);
+    return j && SDL_GetNumJoystickButtons(j) >= 6 && SDL_GetJoystickButton(j, black ? 2 : 5);
+#else
+    (void)g;
+    (void)black;
+    return false;
+#endif
+}
+
 /* A stick as the Duke gave it. Today's sticks move in a circle: pushed fully
  * diagonal they read about 0.7 on each axis, where the Duke's read nearly
  * full on both, and its games were tuned to that (Tony Hawk's Pro Skater
@@ -465,7 +489,10 @@ void im_read(const ImMap *m, int p, const bool *keys, SDL_Gamepad *pad, ImPad *o
             const SDL_Scancode sc = SDL_GetScancodeFromKey(k, NULL);
             kv = keys[sc] ? 1.0f : 0.0f;
         }
-        const float pv = pad_value(pad, m->pad[p][i]);
+        float pv = pad_value(pad, m->pad[p][i]);
+        if ((i == IM_BLACK || i == IM_WHITE) && pv < 1 && duke_bw(pad, i == IM_BLACK)) {
+            pv = 1;
+        }
         v[i] = kv > pv ? kv : pv;
     }
     memset(out, 0, sizeof(*out));
