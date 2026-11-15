@@ -27,6 +27,12 @@
 #define PAGE_NOACCESS  0x01u
 #define PAGE_READWRITE 0x04u
 
+/* PAGE_READONLY or PAGE_EXECUTE_READ, the cache bits aside: a store faults. */
+static bool prot_read_only(uint32_t protect)
+{
+    return (protect & 0xFFu) == 0x02u || (protect & 0xFFu) == 0x20u;
+}
+
 #define USER_LO   0x00010000u
 #define USER_HI   0x7FFE0000u
 #define VA_GRAIN  0x10000u
@@ -364,6 +370,13 @@ static uint64_t NtAllocateVirtualMemory(NcKernel *k, NcFrame *f, const uint32_t 
         }
         return NC_STATUS_NO_MEMORY;
     }
+    if (type & MEM_COMMIT) {
+        /* the pages get the protection asked for, those committed already as
+         * well: Rainbow Six: Lockdown commits a page of its swapped memory
+         * read-only, and again read-write as the title's store faults (the
+         * page written) */
+        nc_vm_guest_ro(k->vm, base, size, prot_read_only(a[4]));
+    }
     nc_vm_wr32(k->vm, a[0], base);
     nc_vm_wr32(k->vm, a[2], size);
     /* Only the big ones: a title's heap commits and decommits pages by the
@@ -425,10 +438,12 @@ static uint64_t NtFreeVirtualMemory(NcKernel *k, NcFrame *f, const uint32_t *a)
     return NC_STATUS_SUCCESS;
 }
 
-/* NtProtectVirtualMemory(BaseAddress, RegionSize, NewProtect, OldProtect). Guest
- * memory is flat here (no access checks), so the protection is recorded for
- * NtQueryVirtualMemory and the old one returned; the range rounds out to pages
- * as the kernel's does (JSRF protects its own pages). The code translated from
+/* NtProtectVirtualMemory(BaseAddress, RegionSize, NewProtect, OldProtect). The
+ * protection is recorded for NtQueryVirtualMemory and the old one returned;
+ * outside the title's image a read-only one holds on the pages (a store
+ * faults to the title, nc_vm_guest_ro), the image's are left writable (the
+ * HLE's patches and cheats write there); the range rounds out to pages as
+ * the kernel's does (JSRF protects its own pages). The code translated from
  * the range goes: a title patching its code makes it writable, writes, and
  * sets the protection back, and the translations of the old bytes would run
  * on. Rainbow Six 3 points the C runtime's malloc, calloc and free at its own
@@ -453,6 +468,9 @@ static uint64_t NtProtectVirtualMemory(NcKernel *k, NcFrame *f, const uint32_t *
     const uint32_t old = r ? r->protect : PAGE_READWRITE;
     if (r && base == r->base && size == r->size) {
         r->protect = a[2];
+    }
+    if (r && !r->image) {
+        nc_vm_guest_ro(k->vm, base, size, prot_read_only(a[2]));
     }
     nc_vm_wr32(k->vm, a[0], base);
     nc_vm_wr32(k->vm, a[1], size);
@@ -723,6 +741,46 @@ static void stale_restore(NcKernel *k)
     unlink(path);
 }
 
+/* The highest window for a block in the pages an aligned block's alignment
+ * left above it (its slack, below the block above): pages the console's
+ * allocator leaves free there, and the next contiguous block it finds room
+ * for takes them (contig_alloc claims them so that virtual memory doesn't).
+ * Maximum Chase's D3D frame buffers (64 KiB aligned) leave 8 KiB under its
+ * push buffer, where XAPI's USB pool (8 KiB) goes; placed below them
+ * instead, the 1 MiB the title reads into its 700 KiB sound buffer as a
+ * stage begins (its cache's copy of a 611 KiB file, padded to its 512 KiB
+ * chunks) ran over the pool's endpoints, the gamepad's control endpoint a
+ * packet size of 0, and its first rumble divided by zero. The window's
+ * start in pa (UINT32_MAX: none), the pages above it in that slack (the new
+ * block's own) in rest. */
+static uint32_t slack_window(uint32_t size, uint32_t lo, uint32_t hi, uint32_t align, uint32_t *rest)
+{
+    const uint32_t a = align > NC_PAGE ? align : NC_PAGE;
+    int best = -1;
+    uint32_t best_pa = 0;
+    for (unsigned i = 0; i < g_ncontig; i++) {
+        const Contig *c = &g_contig[i];
+        const uint32_t w0 = (c->va & ~NC_CONTIG_WINDOW) + c->size, w1 = w0 + c->slack;
+        const uint32_t top = hi && hi < w1 ? hi : w1;
+        if (c->slack < size || top < w0 + size) {
+            continue;
+        }
+        const uint32_t pa = (top - size) & ~(a - 1);
+        if (pa >= w0 && pa >= lo && (best < 0 || pa > best_pa)) {
+            best = (int)i;
+            best_pa = pa;
+        }
+    }
+    if (best < 0) {
+        return UINT32_MAX;
+    }
+    Contig *c = &g_contig[best];
+    const uint32_t w0 = (c->va & ~NC_CONTIG_WINDOW) + c->size, w1 = w0 + c->slack;
+    c->slack = best_pa - w0;
+    *rest = w1 - (best_pa + size);
+    return best_pa;
+}
+
 static uint32_t contig_alloc(NcKernel *k, uint32_t size, uint32_t lo, uint32_t hi, uint32_t align,
                              uint32_t protect, uint32_t ra)
 {
@@ -732,9 +790,13 @@ static uint32_t contig_alloc(NcKernel *k, uint32_t size, uint32_t lo, uint32_t h
     /* The top of RAM, virtual pages moved out of the way (vm.c), then the
      * window needing the fewest moves; neither when there are fewer free
      * pages than asked for. */
-    uint32_t pa = UINT32_MAX, moved = 0;
+    uint32_t pa = UINT32_MAX, moved = 0, rest = 0;
     static unsigned s_failed;           /* failures since the last success (reports below) */
-    if (nc_vm_free_bytes(k->vm) >= size) {
+    if (g_ncontig < MAX_CONTIG && size <= k->vm->ram_size) {
+        pa = slack_window(size, lo, hi, align, &rest);
+    }
+    const bool in_slack = pa != UINT32_MAX;
+    if (!in_slack && nc_vm_free_bytes(k->vm) >= size) {
         pa = nc_vm_alloc_phys_top(k->vm, size, lo, hi, align, &moved);
     }
     if (pa == UINT32_MAX && g_ncontig < MAX_CONTIG && nc_vm_free_bytes(k->vm) >= size) {
@@ -778,9 +840,9 @@ static uint32_t contig_alloc(NcKernel *k, uint32_t size, uint32_t lo, uint32_t h
      * 80 KiB past the end; in push-buffer mode D3D's frame buffers (16 KiB
      * aligned) sat 8 KiB below its push buffer, the title's heap took those
      * pages, and the front end died on a null buffer at car select. */
-    uint32_t slack = 0;
+    uint32_t slack = in_slack ? rest : 0;     /* (another block's slack: claimed already) */
     const uint32_t top = pa + size;
-    while (align > NC_PAGE && slack + NC_PAGE < align && top + slack < k->vm->ram_size &&
+    while (!in_slack && align > NC_PAGE && slack + NC_PAGE < align && top + slack < k->vm->ram_size &&
            nc_vm_claim_phys(k->vm, top + slack, NC_PAGE)) {
         slack += NC_PAGE;
     }
@@ -815,7 +877,19 @@ static void contig_free(NcKernel *k, uint32_t va, uint32_t ra)
     Contig *c = contig_at(va);
     if (c) {
         code_gone(k, va, c->size + c->slack);
-        nc_vm_free_phys(k->vm, va & ~NC_CONTIG_WINDOW, c->size + c->slack);
+        /* a block in the slack of the one below it: its pages back in that
+         * slack (still claimed, slack_window), else free */
+        Contig *below = NULL;
+        for (unsigned i = 0; i < g_ncontig; i++) {
+            if (&g_contig[i] != c && g_contig[i].slack && g_contig[i].va + g_contig[i].size + g_contig[i].slack == va) {
+                below = &g_contig[i];
+            }
+        }
+        if (below) {
+            below->slack += c->size + c->slack;
+        } else {
+            nc_vm_free_phys(k->vm, va & ~NC_CONTIG_WINDOW, c->size + c->slack);
+        }
         *c = g_contig[--g_ncontig];
     } else if (va) {
         static unsigned s_logged; /* a free that matches no block keeps its memory */
@@ -1235,20 +1309,60 @@ void nc_mm_register(NcKernel *k)
 
 typedef struct NcMmState {
     uint32_t nregions, ncontig, nkept, gpu_instance_end;
+    uint32_t nro; /* runs of pages the title made read-only (v3) */
 } NcMmState;
+
+/* A run of pages the title made read-only (nc_vm_guest_ro). */
+typedef struct RoRun {
+    uint32_t va, len;
+} RoRun;
 
 #define NC_DEF_SECTION MM
 #define NC_DEF_FILE "native/state/mm.def"
 #include "native/state/def.h"
 #include "native/state/sections.h"
 
+/* The read-only runs of the regions outside the image, into ro (NULL: only counted). */
+static uint32_t ro_runs(const NcVm *vm, RoRun *ro)
+{
+    uint32_t n = 0, end = 0;
+    for (unsigned i = 0; i < g_nregions; i++) {
+        const Region *r = &g_regions[i];
+        for (uint32_t p = r->base; !r->image && p - r->base < r->size; p += NC_PAGE) {
+            if (!nc_vm_guest_ro_has(vm, p)) {
+                continue;
+            }
+            if (n && end == p) {
+                if (ro) {
+                    ro[n - 1].len += NC_PAGE;
+                }
+            } else {
+                if (ro) {
+                    ro[n] = (RoRun){p, NC_PAGE};
+                }
+                n++;
+            }
+            end = p + NC_PAGE;
+        }
+    }
+    return n;
+}
+
 bool nc_mm_state_save(NcBuf *b)
 {
-    const NcMmState st = {g_nregions, g_ncontig, g_nkept, g_gpu_instance_end};
+    const NcVm *vm = nc_state_kernel()->vm;
+    NcMmState st = {g_nregions, g_ncontig, g_nkept, g_gpu_instance_end, ro_runs(vm, NULL)};
+    RoRun *ro = st.nro ? calloc(st.nro, sizeof(*ro)) : NULL;
+    if (st.nro && !ro) {
+        return false;
+    }
+    st.nro = ro ? ro_runs(vm, ro) : 0;
     nc_rec_put(b, &nc_rec_NcMmState, &st);
     nc_recs_put(b, &nc_rec_Region, g_regions, sizeof(g_regions[0]), g_nregions);
     nc_recs_put(b, &nc_rec_Contig, g_contig, sizeof(g_contig[0]), g_ncontig);
     nc_recs_put(b, &nc_rec_KeptRange, g_kept, sizeof(g_kept[0]), g_nkept);
+    nc_recs_put(b, &nc_rec_RoRun, ro, sizeof(RoRun), st.nro);
+    free(ro);
     return true;
 }
 
@@ -1269,5 +1383,21 @@ bool nc_mm_state_load(NcRd *r, unsigned v)
     g_ncontig = st.ncontig;
     g_nkept = st.nkept;
     g_gpu_instance_end = st.gpu_instance_end;
+    /* the pages the title made read-only, over the VM section's pages (loaded
+     * before); the session's own go first */
+    NcVm *vm = nc_state_kernel()->vm;
+    nc_vm_guest_ro(vm, 0, NC_CONTIG_WINDOW, false);
+    uint32_t pages = 0;
+    for (uint32_t i = 0; i < st.nro && !r->fail; i++) {
+        RoRun run = {0};
+        nc_rec_get(r, &nc_rec_RoRun, &run, v);
+        if (run.va < NC_CONTIG_WINDOW && run.len <= NC_CONTIG_WINDOW - run.va) {
+            nc_vm_guest_ro(vm, run.va, run.len, true);
+            pages += run.len / NC_PAGE;
+        }
+    }
+    if (st.nro) {
+        nc_log("hakuX-native-state", "mm: %u read-only pages of the title's (%u runs)", pages, st.nro);
+    }
     return !r->fail;
 }

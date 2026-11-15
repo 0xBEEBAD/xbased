@@ -1134,11 +1134,6 @@ static uint32_t pf_handler(NcKernel *k)
     return (nc_rd32(gate + 4) & 0xFFFF0000u) | (nc_rd32(gate) & 0xFFFFu);
 }
 
-static bool nc_kernel_title_pages(NcKernel *k)
-{
-    return pf_handler(k) != k->trap_va;
-}
-
 static void nc_kernel_fault_scope(nc_jmp_buf *env)
 {
     g_scope_thread = pthread_self();
@@ -1153,7 +1148,7 @@ static void nc_kernel_fault_scope_end(void)
 void nc_kernel_call_fault(NcKernel *k, uint32_t va, bool write)
 {
     nc_jmp_buf *env = t_call_env;
-    if (!env || !pthread_equal(g_scope_thread, pthread_self()) || !nc_kernel_title_pages(k)) {
+    if (!env || !pthread_equal(g_scope_thread, pthread_self())) {
         return;
     }
     t_call_env = NULL;
@@ -1307,25 +1302,30 @@ static void kcall(NcKernel *k, NcFrame *f, unsigned ordinal)
     NcThread *caller = k->current;
     const unsigned slot = recent_add(caller, ordinal, ret, args);
     nc_jmp_buf env;
-    const bool scoped = nc_kernel_title_pages(k);
-    if (scoped && nc_setjmp(env)) {
-        /* It touched a page the title pages in (nc_kernel_call_fault): it
-         * runs again from the trampoline once the title's handler has it. */
+    if (nc_setjmp(env)) {
+        /* It touched a page the guest doesn't have (nc_kernel_call_fault),
+         * as the code it stands for would have: the title's page-fault
+         * handler, or else (no such handler) an access violation to the
+         * thread's exception handlers, as the Xbox kernel's own access
+         * raises it. Rainbow Six: Lockdown commits its heap's pages from a
+         * handler around its allocations, and RtlInitializeCriticalSection
+         * of a lock in a page not yet in took the emulator down as it
+         * loaded after the intro (#275). The faulting instruction is the
+         * trampoline: the call runs again once the handler has the page. */
         k->in_call = false;
         g_recent[slot].running = false;
         static unsigned s_logged;
         if (s_logged++ < 64) {
-            nc_log("hakuX-native", "kernel: %s from %08x touched %08x, paged out: it runs again", e->name, ret,
+            nc_log("hakuX-native", "kernel: %s from %08x touched %08x, a page not in: it runs again", e->name, ret,
                    t_fault_va);
         }
-        if (!nc_kernel_page_fault(k, f, t_fault_va, t_fault_write)) {
+        if (!nc_kernel_page_fault(k, f, t_fault_va, t_fault_write) &&
+            !nc_seh_fault(k, f, NC_STATUS_ACCESS_VIOLATION, nc_frame_eip(f), 2, t_fault_write, t_fault_va)) {
             nc_kernel_request_stop(k, f, "%s touched %08x, a page the guest doesn't have", e->name, t_fault_va);
         }
         return;
     }
-    if (scoped) {
-        nc_kernel_fault_scope(&env);
-    }
+    nc_kernel_fault_scope(&env);
     k->in_call = true;
     const uint64_t t0 = nc_ke_now_ns();
     uint64_t r = k->impl[ordinal](k, f, args);
@@ -1500,12 +1500,12 @@ bool nc_kernel_page_fault(NcKernel *k, NcFrame *f, uint32_t va, bool write)
         return false;
     }
     /* As a ring-0 interrupt gate: EFLAGS, CS, EIP (the faulting instruction,
-     * which runs again after IRET) and the error code (not present,
-     * supervisor, W for a write); IF clears. */
+     * which runs again after IRET) and the error code (P for a page there, a
+     * read-only one's store; supervisor; W for a write); IF clears. */
     nc_vm_wr32(k->vm, esp + 12, nc_frame_eflags(f));
     nc_vm_wr32(k->vm, esp + 8, nc_frame_cs(f));
     nc_vm_wr32(k->vm, esp + 4, nc_frame_eip(f));
-    nc_vm_wr32(k->vm, esp, write ? 2u : 0u);
+    nc_vm_wr32(k->vm, esp, (write ? 2u : 0u) | (nc_vm_phys(k->vm, va) != UINT32_MAX ? 1u : 0u));
     nc_frame_set_gpr(f, NC_ESP, esp);
     nc_frame_set_if(f, false);
     nc_frame_set_eip(f, handler);
@@ -1525,7 +1525,9 @@ bool nc_kernel_resident(NcKernel *k, uint32_t va, uint32_t len, bool write)
         if (nc_vm_phys(k->vm, p) != UINT32_MAX || nc_paging_fault(k, p)) {
             continue;
         }
-        if (k->in_call && k->frame && nc_kernel_page_fault(k, k->frame, p, write)) {
+        if (k->in_call && k->frame &&
+            (nc_kernel_page_fault(k, k->frame, p, write) ||
+             nc_seh_fault(k, k->frame, NC_STATUS_ACCESS_VIOLATION, nc_frame_eip(k->frame), 2, write, p))) {
             k->redirected = true;
             return false;
         }

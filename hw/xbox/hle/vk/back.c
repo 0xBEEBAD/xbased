@@ -91,11 +91,13 @@ static struct {
     struct {
         uint32_t index, div, nparts, parts[VIS_MAX_PARTS];
         uint32_t report;                        /* guest PA of the device's report, 0 none */
+        uint32_t flags;                         /* HleCmdVis.flags */
         uint64_t after;                         /* HLE_SURF_PARKED until submitted */
         uint64_t expect;                        /* the value its poller waits for */
     } pend[VIS_PENDING];
     uint32_t npend;
     uint64_t lost;
+    uint64_t run;                               /* the chip's running z-pass sum (HLE_VIS_ACCUM) */
 } g_vis = { .in_pass = -1 };
 static struct {
     int all;                                    /* -1: environment not read yet */
@@ -216,8 +218,9 @@ static void vis_report(uint32_t pa, uint32_t count)
 {
     uint8_t *p = pa ? hle_pa_ptr(pa, 16) : NULL;
     if (p) {
-        hle_stl_le(p, (uint32_t)HLE_VIS_TIMESTAMP);
-        hle_stl_le(p + 4, (uint32_t)(HLE_VIS_TIMESTAMP >> 32));
+        const uint64_t ts = hle_host_ptimer();
+        hle_stl_le(p, (uint32_t)ts);
+        hle_stl_le(p + 4, (uint32_t)(ts >> 32));
         hle_stl_le(p + 8, count);
         hle_smp_wmb();
         hle_atomic_set((uint32_t *)(p + 12), 0);
@@ -233,7 +236,7 @@ static void cmd_vis_end(const HleCmdVis *c)
         vis_pass_end(g_back.fr[g_back.cur].cb);
     }
     g_vis.active = false;
-    if (c->index >= VIS_INDICES && !c->report) {
+    if (c->index >= VIS_INDICES && !c->report && !(c->flags & HLE_VIS_ACCUM)) {
         return;                                 /* HLE_VIS_NO_INDEX has a report */
     }
     if (g_vis.npend >= VIS_PENDING) {
@@ -245,7 +248,9 @@ static void cmd_vis_end(const HleCmdVis *c)
                     g_vis.npend, c->index);
         }
         g_vis.nparts = 0;
-        vis_report(c->report, 0);
+        if (!(c->flags & HLE_VIS_NOWRITE)) {
+            vis_report(c->report, c->flags & HLE_VIS_ACCUM ? (uint32_t)g_vis.run : 0);
+        }
         return;
     }
     typeof(g_vis.pend[0]) *p = &g_vis.pend[g_vis.npend++];
@@ -254,6 +259,7 @@ static void cmd_vis_end(const HleCmdVis *c)
     uint32_t vsc = vrt ? vrt->scale : g_hle_rscale;
     p->div = MAX(c->div, 1u) * vsc * vsc;               /* guest pixels */
     p->report = c->report;
+    p->flags = c->flags;
     p->expect = c->expect;
     p->nparts = g_vis.nparts;
     memcpy(p->parts, g_vis.parts, sizeof(p->parts));
@@ -315,7 +321,20 @@ static void vis_reap(uint64_t completed)
                 count = 640 * 480;
             }
         }
-        vis_report(p->report, count);
+        if (p->flags & HLE_VIS_ACCUM) {
+            /* (the chip's one running sum: nxdk_pgraph_tests' ZPass_pixel_count, a second
+             * GET_REPORT after more draws and the counting turned off holds both reports'
+             * pixels, 0xC000 after 0xA000) */
+            if (p->flags & HLE_VIS_RESET) {
+                g_vis.run = 0;
+            }
+            g_vis.run += count;
+            if (!(p->flags & HLE_VIS_NOWRITE)) {
+                vis_report(p->report, (uint32_t)g_vis.run);
+            }
+        } else {
+            vis_report(p->report, count);
+        }
     }
     g_vis.npend = j;
     g_vis.reaped = MAX(g_vis.reaped, completed);
@@ -2356,8 +2375,8 @@ static void cmd_copy(const HleCmdCopy *c)
         }
         return;
     }
-    VkImageCopy2 cr[HLE_CMD_MAX_RECTS];
-    VkImageBlit2 br[HLE_CMD_MAX_RECTS];
+    VkImageCopy2 cr[HLE_CMD_COPY_RECTS];
+    VkImageBlit2 br[HLE_CMD_COPY_RECTS];
     VkImageSubresourceLayers ss = { s->aspect, s->d.parent ? s->d.level : 0,
                                     s->d.parent ? s->d.face : 0, 1 };
     VkImageSubresourceLayers ds = { d->aspect, d->d.parent ? d->d.level : 0,
@@ -2386,7 +2405,7 @@ static void cmd_copy(const HleCmdCopy *c)
     }
     int32_t k = (int32_t)s->scale, kd = (int32_t)d->scale;
     uint32_t n = 0;
-    for (uint32_t i = 0; i < c->nrects && i < HLE_CMD_MAX_RECTS; i++) {
+    for (uint32_t i = 0; i < c->nrects && i < HLE_CMD_COPY_RECTS; i++) {
         const HleRect *r = &c->rect[i];
         int32_t w = MIN(MIN(r->x2, (int32_t)s->w / k) - r->x1, (int32_t)d->w / kd - c->x[i]);
         int32_t h = MIN(MIN(r->y2, (int32_t)s->h / k) - r->y1, (int32_t)d->h / kd - c->y[i]);
@@ -2827,6 +2846,71 @@ static void reap(void)
         hle_draw_tex_reap(done);
         vis_reap(done);
     }
+}
+
+/* (render thread, inside a draw) the records after the current one: the
+ * state, the targets and the viewport each draw will have, its key taken in a
+ * dry run (draw.c hle_draw_dry), the programs they load known. From where the
+ * last look stopped while that is still ahead (the front end publishes more
+ * as the render thread builds), else from the current record; at most 4096
+ * draws and 4 ms a look. */
+static struct {
+    bool valid;
+    uint32_t at;                        /* the ring position the last look stopped at */
+    uint32_t rt, ds;
+    HleCmdViewport vp;
+} g_ahd;
+
+void hle_back_ahead(void)
+{
+    HleRing *r = hle_fe_ring();
+    uint32_t head, start = hle_ring_ahead_start(r, &head);
+    /* (positions grow without bound and wrap: the distances decide) */
+    const bool resume = g_ahd.valid && (int32_t)(g_ahd.at - start) >= 0 && (int32_t)(head - g_ahd.at) >= 0;
+    uint32_t at = resume ? g_ahd.at : start;
+    uint32_t rt = resume ? g_ahd.rt : g_back.rt, ds = resume ? g_ahd.ds : g_back.ds;
+    HleCmdViewport vp = resume ? g_ahd.vp : g_back.vp;
+    if (at == head) {
+        return;
+    }
+    const int64_t t0 = hle_now_ns();
+    unsigned draws = 0;
+    hle_draw_ahead_begin(resume);
+    const HleCmdHdr *h;
+    uint32_t here = at;
+    bool device = false;                /* (a device record: the next look starts over) */
+    while (draws < 4096 && (h = hle_ring_ahead_next(r, &at, head)) != NULL) {
+        const void *p = hle_cmd_payload(h);
+        bool end = false;
+        if (h->op == HLE_OP_DEVICE_CREATE || h->op == HLE_OP_DEVICE_RESET) {
+            device = true;
+            break;
+        }
+        switch (h->op) {
+        case HLE_OP_STATE:      hle_draw_cmd_state(p); break;
+        case HLE_OP_STATE_PART: hle_draw_cmd_state_part(p); break;
+        case HLE_OP_SET_RT:     rt = ((const HleCmdSetRt *)p)->rt; ds = ((const HleCmdSetRt *)p)->ds; break;
+        case HLE_OP_VIEWPORT:   vp = *(const HleCmdViewport *)p; break;
+        case HLE_OP_VSH:        hle_draw_cmd_vsh(p); break;
+        case HLE_OP_TEX:        hle_draw_ahead_tex(p); break;
+        case HLE_OP_DRAW:
+            hle_draw_dry(p, rt, ds, &vp);
+            end = !(++draws & 63) && hle_now_ns() - t0 > 4000000;
+            break;
+        default:
+            break;
+        }
+        here = at;
+        if (end) {
+            break;
+        }
+    }
+    hle_draw_ahead_end();
+    g_ahd.valid = !device;
+    g_ahd.at = here;
+    g_ahd.rt = rt;
+    g_ahd.ds = ds;
+    g_ahd.vp = vp;
 }
 
 static void *render_thread(void *opaque)

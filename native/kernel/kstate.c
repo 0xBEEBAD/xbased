@@ -12,6 +12,7 @@
  */
 #include "native/kernel/kernel.h"
 #include "native/core/irq.h"
+#include "native/dev/dev.h"
 
 #include <stdlib.h>
 
@@ -244,6 +245,16 @@ const NcCpuContext *nc_kstate_start_context(NcKernel *k)
 {
     nc_dpc_sync(k);                     /* a state from before the flag had none */
     nc_ps_old_stacks(k);                /* every section loaded: the memory map is the state's */
+    if (!nc_dev_nv2a_av_title()) {
+        nc_kernel_av_title_scan(k, NULL);   /* (a state without the title's shape: its parameters are
+                                               in its memory) */
+    }
+    if (!nc_dev_nv2a_av_title() && nc_dev_nv2a_av_title_remembered()) {
+        /* not there either: the shape the title had when last seen */
+        const uint32_t s = nc_dev_nv2a_av_title_remembered();
+        nc_dev_nv2a_av_title_set(s);
+        nc_log("hakuX-native", "av: the title's shape as last seen: %s", s == 2 ? "16:9" : "4:3");
+    }
     NcThread *t = k->current;
     if (g_point == NC_STATE_AT_IDLE || !t || t->state != NC_T_RUNNING) {
         /* Every thread was switched out: the guest CPU starts in the

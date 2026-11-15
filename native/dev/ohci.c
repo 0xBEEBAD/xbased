@@ -897,6 +897,7 @@ bool nc_usb_state_load(NcRd *r, unsigned v)
         nc_log("hakuX-native-state", "usb: %u port(s) changed since the state (controllers plugged in or out)",
                changes);
     }
+    nc_xid_resend();                    /* the pads' next polls report (xid.c sends only changes) */
     o->irq = !((o->intr & INT_MIE) && (o->intr_status & o->intr & ~INT_MIE));
     update_irq(o);                          /* the line as the registers say, set either way */
     o->frame_t0_ns = now_ns();

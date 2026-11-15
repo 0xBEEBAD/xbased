@@ -26,7 +26,20 @@
 typedef struct Xid {
     NcUsbDev dev;
     unsigned player;
+    /* the report last sent, and the reload count then (nc_xid_resend) */
+    uint8_t last[20];
+    bool sent;
+    unsigned epoch;
 } Xid;
+
+/* Bumped by a savestate's load: each pad's next poll reports, whatever it last
+ * sent (the title's copy is the state's) */
+static unsigned g_xid_epoch;
+
+void nc_xid_resend(void)
+{
+    __atomic_add_fetch(&g_xid_epoch, 1, __ATOMIC_RELAXED);
+}
 
 static const uint8_t k_dev_desc[18] = {
     18, 1, 0x10, 0x01, /* USB 1.1 */
@@ -262,6 +275,12 @@ static int xid_control(NcUsbDev *d, const uint8_t *s, uint8_t *data, int len)
     }
 }
 
+/* a bus reset: the next poll reports */
+static void xid_reset(NcUsbDev *d)
+{
+    ((Xid *)d)->sent = false;
+}
+
 static int xid_data(NcUsbDev *d, bool in, int ep, uint8_t *buf, int len)
 {
     Xid *x = (Xid *)d;
@@ -276,6 +295,19 @@ static int xid_data(NcUsbDev *d, bool in, int ep, uint8_t *buf, int len)
         }
         uint8_t r[20];
         make_report(x->player, r);
+        /* A pad answers its interrupt IN only when its state changed, else NAKs
+         * and the request stays (the XDK's XINPUT_STATE: dwPacketNumber moves
+         * only when the state does). Reported on every poll, the packet number
+         * climbed 125 times a second with nothing touched, and a title waiting
+         * for it to stand still (an attract mode, an idle timer) never saw it
+         * do so. A bus reset or a savestate's load sends the next one. */
+        const unsigned ep = __atomic_load_n(&g_xid_epoch, __ATOMIC_RELAXED);
+        if (x->sent && x->epoch == ep && !memcmp(r, x->last, sizeof(r))) {
+            return NC_USB_NAK;
+        }
+        memcpy(x->last, r, sizeof(r));
+        x->sent = true;
+        x->epoch = ep;
         {   /* button changes as the title reads them (a few a second at most) */
             static uint16_t s_last[XID_PLAYERS];
             static unsigned s_logged;
@@ -308,6 +340,7 @@ NcUsbDev *nc_xid_gamepad_new(unsigned player)
     x->dev.nstrings = 3;
     x->dev.control = xid_control;
     x->dev.data = xid_data;
+    x->dev.reset = xid_reset;
     x->dev.pending_addr = -1;
     script_load();
     return &x->dev;

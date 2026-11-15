@@ -39,6 +39,12 @@ else()
 endif()
 # xbased (.exe), with its icon and version on Windows (app/win/xbased.rc)
 set_target_properties(hakux PROPERTIES OUTPUT_NAME xbased)
+# xbased's version, set here alone: the app's (xbased_version.h, from
+# app/version.h.in) and the executable's version information (xbased.rc)
+set(XBASED_VERSION 1.1.0)
+string(REPLACE "." "," XBASED_VERSION_RC "${XBASED_VERSION}")
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/app/version.h.in" "${CMAKE_CURRENT_BINARY_DIR}/gen/xbased_version.h" @ONLY)
+target_include_directories(hakux PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/gen")
 target_link_libraries(hakux PRIVATE hakux_native hakux_hle SDL3::SDL3)
 target_include_directories(hakux PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../third_party/stb")  # public domain, vendored
 target_compile_options(hakux PRIVATE -Wall -Wno-unused-parameter -Wno-unused-function)

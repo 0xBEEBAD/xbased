@@ -72,10 +72,16 @@ static bool owner_kind(const HleSurfDesc *d)
  * positions (texel corners, half-texel offsets). */
 #define SURF_UNSCALED_MAX 128
 
-static uint32_t surf_scale(const HleSurfDesc *d, VkImageAspectFlags aspect)
+/* Both rules take depth buffers as well: a pass draws its target and its
+ * depth buffer at one scale, and the NV2A pairs them by size and kind (one
+ * surface type, linear or swizzled, for both). Hitman: Blood Money draws
+ * Hitman's depth for his shadow with a 256 x 256 linear target over the same
+ * memory, colour writes off: its depth buffer at 4x took the depth in its
+ * first quarter, the shadow-map pass read Hitman a quarter of his size in a
+ * corner of it, and the shadow on the floor was the map's square. */
+static uint32_t surf_scale(const HleSurfDesc *d)
 {
     bool small = !d->role && !d->pitch && !d->parent && d->levels <= 1 && d->faces <= 1 &&
-                 (aspect & VK_IMAGE_ASPECT_COLOR_BIT) &&
                  MAX(d->w, d->h) <= SURF_UNSCALED_MAX;
     if (small) {
         return 1;
@@ -93,8 +99,7 @@ static uint32_t surf_scale(const HleSurfDesc *d, VkImageAspectFlags aspect)
         const char *e = getenv("HAKUX_HLE_HALFSCALE");
         half = !e || strcmp(e, "0");
     }
-    if (half && d->pitch && !d->role && !d->parent && (aspect & VK_IMAGE_ASPECT_COLOR_BIT) && d->w <= 360 &&
-        d->h <= 288) {
+    if (half && d->pitch && !d->role && !d->parent && d->w <= 360 && d->h <= 288) {
         return 1;
     }
     /* The largest whole scale the device's images take: at 7x and 8x a
@@ -287,7 +292,7 @@ HleVkSurf *hle_surf_define(const HleSurfDesc *d)
             hle_idhint_made(&g_surf_hint);      /* remembered misses may now hit */
             s->d = *d;
             s->fmt = surf_format(d->xfmt, &s->aspect, &s->texel_bytes);
-            s->scale = surf_scale(d, s->aspect);
+            s->scale = surf_scale(d);
             s->w = d->w * s->scale;
             s->h = d->h * s->scale;
             s->layout = VK_IMAGE_LAYOUT_UNDEFINED;

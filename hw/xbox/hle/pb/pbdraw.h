@@ -112,6 +112,17 @@ bool hle_pbd_vis_report(uint32_t pa);
 /* Decode thread: the push buffer is consumed up to PUT (or stalled): reports
  * still unsubmitted go to the GPU now, kept memory goes back (hle_pbd_keep). */
 void hle_pbd_idle(void);
+/* The decoder stalled (on a flip, a trap or a closed FIFO): the memory a title
+ * keeps for the next one written back now, as hle_pbd_idle would once idle
+ * (the title rebooting waits on it; stalled, the decoder is not getting there) */
+void hle_pbd_keep_stalled(void);
+/* Any thread: the guest saw the GPU idle (NV_PGRAPH_STATUS read, the FIFO
+ * consumed to PUT): the next program vertex takes the first
+ * of the places its fog is left in (pbdraw.c g_fogc). */
+void hle_pbd_idle_seen(void);
+/* PGRAPH RDI's vertex constants (select 0x17 / 0xCC): word (4 a constant,
+ * w first) of the constants as the decoder last left them (any thread) */
+uint32_t hle_pbd_rdi_constant(uint32_t word);
 /* Decode thread, each pass: the frame on screen into its memory when the
  * guest's first write there asked (front_stale). */
 void hle_pbd_front_serve(void);
@@ -124,8 +135,8 @@ bool hle_pbd_scan_due(void);
  * buffer shows); first, a swap its flip came before, if no flip followed. */
 void hle_pbd_scanout(void);
 /* Decode thread: the frame buffer AvSetDisplayMode gave, when the title has
- * no GPU device (it draws its frames with the CPU: nxdk homebrew such as
- * Insignia's Setup Assistant), shown as the memory holds it; the scanout
+ * no GPU device (it draws its frames with the CPU, as Insignia's
+ * Setup Assistant does), shown as the memory holds it; the scanout
  * shows it again as the CPU writes it. A title with a device keeps its own
  * flips. */
 void hle_pbd_cpu_display(uint32_t pa);

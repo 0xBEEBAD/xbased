@@ -208,9 +208,13 @@ static NcSeh *push_level(NcKernel *k, NcFrame *f, NcThread *t, uint32_t esp)
 
 static void unhandled(NcKernel *k, NcFrame *f, NcSeh *l, const char *why)
 {
-    char type[96];
-    nc_kernel_request_stop(k, f, "seh: unhandled exception %08x at %08x (%s)%s%s", rd(k, l->rec + ER_CODE),
-                           rd(k, l->rec + ER_ADDRESS), why, rd(k, l->rec + ER_CODE) == CXX_EXCEPTION ? ", C++ " : "",
+    char type[96], info[48] = "";
+    if (rd(k, l->rec + ER_CODE) == NC_STATUS_ACCESS_VIOLATION && rd(k, l->rec + ER_NPARAMS) >= 2) {
+        snprintf(info, sizeof(info), ", %s of %08x", rd(k, l->rec + ER_INFO) ? "write" : "read",
+                 rd(k, l->rec + ER_INFO + 4));
+    }
+    nc_kernel_request_stop(k, f, "seh: unhandled exception %08x at %08x%s (%s)%s%s", rd(k, l->rec + ER_CODE),
+                           rd(k, l->rec + ER_ADDRESS), info, why, rd(k, l->rec + ER_CODE) == CXX_EXCEPTION ? ", C++ " : "",
                            rd(k, l->rec + ER_CODE) == CXX_EXCEPTION ? cxx_type(k, l->rec, type, sizeof(type)) : "");
 }
 
@@ -334,8 +338,10 @@ bool nc_seh_fault(NcKernel *k, NcFrame *f, uint32_t code, uint32_t next_eip, uns
     if (s_logged++ < 32) {
         char calls[96];
         nc_kernel_frame_chain(k, f, calls, sizeof(calls));
-        nc_log("hakuX-native", "seh: t%u takes exception %08x at %08x (%08x %08x): to its handlers | frames%s", t->id,
-               code, eip, p0, p1, calls);
+        nc_log("hakuX-native", "seh: t%u takes exception %08x at %08x (%08x %08x): to its handlers | frames%s"
+               " | eax %08x ebx %08x ecx %08x edx %08x esi %08x edi %08x ebp %08x esp %08x", t->id,
+               code, eip, p0, p1, calls, nc_frame_gpr(f, NC_EAX), nc_frame_gpr(f, NC_EBX), nc_frame_gpr(f, NC_ECX),
+               nc_frame_gpr(f, NC_EDX), nc_frame_gpr(f, NC_ESI), nc_frame_gpr(f, NC_EDI), nc_frame_gpr(f, NC_EBP), esp);
     }
     step(k, f, t);
     return true;

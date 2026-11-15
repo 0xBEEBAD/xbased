@@ -478,6 +478,9 @@ bool nc_hle_dirty_fault(const siginfo_t *info, void *ucontext)
         hle_mem_stale_access_rw(pa, !known || store);
         return true;
     }
+    if (nc_vm_guest_ro_has(g_vm, (uint32_t)guest)) {
+        return false; /* a store to a page the title made read-only: its own fault (core.c) */
+    }
     const uint8_t wp = __atomic_load_n(&g_vm->wp[pa / NC_PAGE], __ATOMIC_ACQUIRE);
     if (!wp) {
         /* Nobody holds the page protected now. Between the store's fault and

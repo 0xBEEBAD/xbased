@@ -146,6 +146,17 @@ void hle_draw_cmd_state_part(const HleCmdStatePart *p);
 void hle_draw_cmd_tex(const HleCmdTex *c, VkCommandBuffer cb);
 void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id,
                        uint32_t ds_id, const HleCmdViewport *vp);
+/* The look-ahead (draw.c): a draw of the records to come, its key taken alone
+ * (nothing recorded: its pipeline built ahead when new); the render thread's
+ * state kept across the records' own (begin / end; resume: from the state the
+ * last look-ahead ended with). back.c hle_back_ahead: the records published
+ * since the last look (or after the current one), through those. */
+void hle_draw_dry(const HleCmdDraw *c, uint32_t rt_id, uint32_t ds_id, const HleCmdViewport *vp);
+void hle_draw_ahead_begin(bool resume);
+void hle_draw_ahead_end(void);
+/* a texture the records ahead define, as the dry runs will find it */
+void hle_draw_ahead_tex(const HleCmdTex *c);
+void hle_back_ahead(void);
 /* A recording starts (back.c cb_get, outside any pass). */
 void hle_draw_rec_begin(VkCommandBuffer cb);
 /* It is frame slot's (its last submission has completed): the per-slot push

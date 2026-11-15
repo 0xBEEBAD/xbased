@@ -247,6 +247,7 @@ bool nc_core_boot(NcCore *c, int disc_fd)
             }
         }
         nc_io_title_device_time(c->xbe.info.title_id, name);
+        nc_dev_nv2a_title_pace(c->xbe.info.title_id, name);
     }
 
     NcCpuConfig cfg = {
@@ -501,27 +502,34 @@ bool nc_core_fault(NcCore *c, int sig, siginfo_t *info, void *ucontext)
     if (sig != SIGSEGV || va == UINT64_MAX) {
         return fault_report(c, pc, (uint64_t)(uintptr_t)info->si_addr, "outside the guest");
     }
-    if (nc_vm_phys(&c->vm, (uint32_t)va) != UINT32_MAX) {
+    /* A store to a page the title made read-only (PAGE_READONLY): its fault,
+     * as a missing page's below. Rainbow Six: Lockdown commits the pages of
+     * its own swapped memory read-only and takes a store's fault as the page
+     * written, which it then writes to its swap file before it lets the page
+     * go (#275). */
+    const bool ro_store = nc_vm_phys(&c->vm, (uint32_t)va) != UINT32_MAX && wrapped == UINT64_MAX &&
+                          nc_vm_guest_ro_has(&c->vm, (uint32_t)va);
+    if (nc_vm_phys(&c->vm, (uint32_t)va) != UINT32_MAX && !ro_store) {
         return fault_report(c, pc, va, wrapped != UINT64_MAX ? "wrapped, to a mapped page" : "mapped page");
     }
-    if (nc_paging_fault(&c->kernel, (uint32_t)va)) {
+    if (!ro_store && nc_paging_fault(&c->kernel, (uint32_t)va)) {
         /* mapped now; the wrapped access would only fault again */
         return wrapped == UINT64_MAX || fault_report(c, pc, va, "wrapped, to a page the tables map");
     }
     NcFrame *f = nc_cpu_fault_frame(c->cpu, ucontext);
     if (!f) {
-        nc_kernel_call_fault(&c->kernel, (uint32_t)va, nc_cpu_fault_is_write(ucontext));
+        nc_kernel_call_fault(&c->kernel, (uint32_t)va, ro_store || nc_cpu_fault_is_write(ucontext));
         return false;
     }
     if (wrapped != UINT64_MAX) {
         nc_log("hakuX-native-frontier", "guest fault at %08x (wrapped address), eip %08x", (uint32_t)va,
                nc_frame_eip(f));
     }
-    if (!nc_kernel_page_fault(&c->kernel, f, (uint32_t)va, nc_cpu_fault_is_write(ucontext))) {
+    if (!nc_kernel_page_fault(&c->kernel, f, (uint32_t)va, ro_store || nc_cpu_fault_is_write(ucontext))) {
         /* no page-fault handler of the title's: an access violation, to the
          * thread's exception handlers (a __try around a probe, a title's own
          * crash handler), as the Xbox kernel raises it */
-        const bool write = nc_cpu_fault_is_write(ucontext);
+        const bool write = ro_store || nc_cpu_fault_is_write(ucontext);
         const uint32_t at = nc_frame_eip(f);
         if (!nc_seh_fault(&c->kernel, f, NC_STATUS_ACCESS_VIOLATION, at, 2, write, (uint32_t)va)) {
             return fault_report(c, pc, va, "the title doesn't handle it");

@@ -211,6 +211,7 @@ typedef struct FpSrc {
     int64_t lead_ns;                    /* pacing (fp_pace): the lead kept, */
     int64_t slow[FP_SLOW], slow_at;     /* ... the slowest picture of each of the last spans (the newest's number) */
     int64_t paced_due;                  /* ... the picture before's time */
+    int64_t step_ns;                    /* ... the time between pictures, smoothed (fp_lead_max) */
 } FpSrc;
 
 static struct {
@@ -504,6 +505,21 @@ static int64_t fp_now_ns(void)
 #define FP_LEAD_UP_PER_MS   1500    /* ns of lead a millisecond between pictures: up, down */
 #define FP_LEAD_DOWN_PER_MS 1000
 
+/* The most lead a picture can have: a 60 fps game's FP_LEAD_MAX; a slower
+ * one's its frame's time less FP_LEAD_SPARE (up to FP_LEAD_TOP). At 12 ms a
+ * 30 fps game's slow pictures (Fable turning its camera at 4x: one in ten
+ * ready 14 to 24 ms after its vblank, its scenes' drawing) were shown as they
+ * came, late, 2 to 10 ms off their time on a variable refresh rate display:
+ * an uneven picture at 30 fps. */
+#define FP_LEAD_SPARE   5000000
+#define FP_LEAD_TOP    40000000
+
+static int64_t fp_lead_max(const FpSrc *s)
+{
+    const int64_t m = s->step_ns - FP_LEAD_SPARE;
+    return m < FP_LEAD_MAX ? FP_LEAD_MAX : m > FP_LEAD_TOP ? FP_LEAD_TOP : m;
+}
+
 static void fp_pace(int k, int64_t due)
 {
     FpSrc *s = &P.s[k];
@@ -524,7 +540,8 @@ static void fp_pace(int k, int64_t due)
         s->slow[(span - gone + j) % FP_SLOW] = 0;
     }
     s->slow_at = span;
-    const int64_t t = took < 0 ? 0 : took > FP_LEAD_MAX ? FP_LEAD_MAX : took;
+    const int64_t lead_max = fp_lead_max(s);
+    const int64_t t = took < 0 ? 0 : took > lead_max ? lead_max : took;
     if (t > s->slow[span % FP_SLOW]) {
         s->slow[span % FP_SLOW] = t;
     }
@@ -534,11 +551,15 @@ static void fp_pace(int k, int64_t due)
     }
     /* (by the time between pictures, 4 to 100 ms: a 30 fps game's lead
      * settles as fast as a 60 fps one's) */
-    int64_t dt_ms = (due - s->paced_due) / 1000000;
+    const int64_t step = due - s->paced_due;
+    if (step > 8000000 && step < 60000000) {
+        s->step_ns = s->step_ns ? s->step_ns + (step - s->step_ns) / 16 : step;
+    }
+    int64_t dt_ms = step / 1000000;
     dt_ms = dt_ms < 4 ? 4 : dt_ms > 100 ? 100 : dt_ms;
     s->paced_due = due;
     int64_t want = peak + FP_LEAD_MARGIN;
-    want = want < FP_LEAD_MIN ? FP_LEAD_MIN : want > FP_LEAD_MAX ? FP_LEAD_MAX : want;
+    want = want < FP_LEAD_MIN ? FP_LEAD_MIN : want > lead_max ? lead_max : want;
     const int64_t at = due + s->lead_ns;
     const int64_t up = FP_LEAD_UP_PER_MS * dt_ms, down = FP_LEAD_DOWN_PER_MS * dt_ms;
     if (want > s->lead_ns) {
@@ -866,6 +887,31 @@ static void hand_back(void)
     }
 }
 
+/* The pointer over the window: hidden once the run's pictures show, unless
+ * the run wants it (its menu). Windows asks for it (WM_SETCURSOR) only as the
+ * mouse moves or clicks: a pointer resting over the window as it came up was
+ * asked for before the first picture and kept the arrow until a click, the
+ * game running under it. Set again whenever the answer changes, while the
+ * pointer is over the window (g_cursor_set: the last one set, -1 none). */
+static int g_cursor_set = -1;
+
+static int cursor_want(void)
+{
+    return !g_presenting || (g_sh && g_sh->cursor);
+}
+
+static void cursor_sync(void)
+{
+    const int want = cursor_want();
+    POINT pt;
+    if (want == g_cursor_set || !GetCursorPos(&pt) || WindowFromPoint(pt) != g_fw ||
+        SendMessageW(g_fw, WM_NCHITTEST, 0, MAKELPARAM(pt.x, pt.y)) != HTCLIENT) {
+        return;
+    }
+    SetCursor(want ? LoadCursorW(NULL, (LPCWSTR)IDC_ARROW) : NULL);
+    g_cursor_set = want;
+}
+
 static LRESULT CALLBACK frame_proc(HWND h, UINT m, WPARAM w, LPARAM l)
 {
     switch (m) {
@@ -886,10 +932,12 @@ static LRESULT CALLBACK frame_proc(HWND h, UINT m, WPARAM w, LPARAM l)
         }
         return 0;
     case WM_SETCURSOR:
-        if (LOWORD(l) == HTCLIENT && g_presenting) {
-            SetCursor(g_sh && g_sh->cursor ? LoadCursorW(NULL, (LPCWSTR)IDC_ARROW) : NULL);
+        if (LOWORD(l) == HTCLIENT) {
+            g_cursor_set = cursor_want();
+            SetCursor(g_cursor_set ? LoadCursorW(NULL, (LPCWSTR)IDC_ARROW) : NULL);
             return TRUE;
         }
+        g_cursor_set = -1;      /* over the frame's edges */
         break;
     case WM_MOUSEMOVE:
         frame_mouse(1, l, 0, 0);
@@ -957,6 +1005,7 @@ static LRESULT CALLBACK frame_proc(HWND h, UINT m, WPARAM w, LPARAM l)
          * never (the next one is in before this one goes), so none for a
          * while is the session's end */
         const ULONGLONG now = GetTickCount64();
+        cursor_sync();
         if (top_child()) {
             g_had_child = true;
             g_gone_at = 0;

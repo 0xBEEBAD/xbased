@@ -25,7 +25,7 @@ void nc_options_init(NcOptions *o)
      * building skipped the draws waiting for theirs (5 to 88 in a minute:
      * objects missing or flickering for a frame); asynchronous shaders stay a
      * setting, off unless turned on (its warning says what they can break) */
-    *o = (NcOptions){ .async_pipe = false, .prebuild = false, .video = -1, .av_pack = NC_AV_PACK_HDTV };
+    *o = (NcOptions){ .shaders = NC_SHADERS_HYBRID, .prebuild = false, .video = -1, .av_pack = NC_AV_PACK_HDTV };
 }
 
 static const char *value(const char *arg, const char *name)
@@ -76,8 +76,12 @@ bool nc_option(NcOptions *o, const char *arg)
     } else if ((v = value(arg, "scale="))) {
         nc_hle_set_render_scale(atoi(v));
         nc_log("hakuX-app", "render scale %sx", v);
+    } else if ((v = value(arg, "shaders="))) {
+        o->shaders = !strcmp(v, "async") ? NC_SHADERS_ASYNC : !strcmp(v, "sync") ? NC_SHADERS_SYNC : NC_SHADERS_HYBRID;
     } else if ((v = value(arg, "asyncpipe="))) {
-        o->async_pipe = atoi(v) != 0;
+        if (atoi(v) != 0) {
+            o->shaders = NC_SHADERS_ASYNC;  /* (0: the mode as it is) */
+        }
     } else if ((v = value(arg, "prebuild="))) {
         o->prebuild = atoi(v) != 0;
     } else if ((v = value(arg, "devtime="))) {
@@ -138,7 +142,9 @@ void nc_options_apply(const NcOptions *o)
     } else {
         unsetenv("HAKUX_HLE_FPSCAP");
     }
-    nc_hle_set_pipeline_options(o->async_pipe, o->prebuild);
-    nc_log("hakuX-app", "shaders: asynchronous compilation %s, cached ones built before the game %s",
-           o->async_pipe ? "on" : "off", o->prebuild ? "on" : "off");
+    nc_hle_set_pipeline_options(o->shaders == NC_SHADERS_ASYNC, o->prebuild, o->shaders == NC_SHADERS_HYBRID);
+    nc_log("hakuX-app", "shaders: new ones %s, cached ones built before the game %s",
+           o->shaders == NC_SHADERS_ASYNC ? "built asynchronously (their draws skipped meanwhile)" :
+           o->shaders == NC_SHADERS_SYNC ? "waited for" : "drawn by the interpreters while they build",
+           o->prebuild ? "on" : "off");
 }

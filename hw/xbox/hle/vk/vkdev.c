@@ -193,6 +193,7 @@ static void caps_override(HleCaps *c)
         { "fbfetch", offsetof(HleCaps, fbfetch) },   { "vk13", offsetof(HleCaps, vk13) },
         { "dynrender", offsetof(HleCaps, dyn_render) }, { "sync2", offsetof(HleCaps, sync2) },
         { "eds1", offsetof(HleCaps, eds1) },         { "eds2", offsetof(HleCaps, eds2) },
+        { "i64", offsetof(HleCaps, i64) },           { "f64", offsetof(HleCaps, f64) },
     };
     for (char *save = NULL, *t = strtok_r(v, ", ", &save); t; t = strtok_r(NULL, ", ", &save)) {
         const char *name = *t == '-' ? t + 1 : t;
@@ -526,7 +527,11 @@ int hle_vk_init(void)
     c->floor_ok = true;
     need(c, v->qfam != UINT32_MAX, "graphics queue");
     c->wide_lines = q.features.wideLines;
+    c->logic_op = q.features.logicOp;
     c->fill_lines = q.features.fillModeNonSolid;
+    c->gs = q.features.geometryShader;
+    c->f64 = q.features.shaderFloat64;
+    c->i64 = q.features.shaderInt64;
     need(c, q.features.largePoints, "largePoints");
     c->depth_clamp = q.features.depthClamp;
     need(c, ok_tl, "timelineSemaphore");
@@ -611,6 +616,15 @@ int hle_vk_init(void)
         vkGetPhysicalDeviceProperties2(v->phys, &p2);
         c->discard = dp.maxDiscardRectangles >= 8;
     }
+    if (has_ext(ext, ne, VK_EXT_CONSERVATIVE_RASTERIZATION_EXTENSION_NAME)) {
+        VkPhysicalDeviceConservativeRasterizationPropertiesEXT cp = {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CONSERVATIVE_RASTERIZATION_PROPERTIES_EXT };
+        VkPhysicalDeviceProperties2 p2 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+                                           .pNext = &cp };
+        vkGetPhysicalDeviceProperties2(v->phys, &p2);
+        c->conserv = true;
+        c->conserv_extra = cp.maxExtraPrimitiveOverestimationSize;
+    }
     c->exec_props = has_ext(ext, ne, VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME);
     c->aniso = q.features.samplerAnisotropy;
     c->host_query_reset = v13 ? q12.hostQueryReset : e_hqr && q_hqr.hostQueryReset;
@@ -653,6 +667,14 @@ int hle_vk_init(void)
     const bool u_vids = e_vids && q_vids.vertexInputDynamicState;
     const bool u_eds2 = v13 ? e_eds2 && q_eds2.extendedDynamicState2 : c->eds2;
     const bool u_pv = e_pv && q_pv.provokingVertexLast;
+    if (u_pv && !caps_off("pv")) {
+        VkPhysicalDeviceProvokingVertexPropertiesEXT pp = {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROVOKING_VERTEX_PROPERTIES_EXT };
+        VkPhysicalDeviceProperties2 p2 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+                                           .pNext = &pp };
+        vkGetPhysicalDeviceProperties2(v->phys, &p2);
+        c->pv_last = pp.provokingVertexModePerPipeline;
+    }
     const bool u_dce = e_dce && q_dce.depthClipEnable;
     const bool u_iu8 = (e_iu8x || e_iu8k) && q_iu8.indexTypeUint8;
     const bool u_4444 = c->x4444 && e_4444 && q_4444.formatA4R4G4B4;
@@ -720,6 +742,9 @@ int hle_vk_init(void)
         .sType = q_pcc.sType, .pipelineCreationCacheControl = VK_TRUE };
     f.features.wideLines = c->wide_lines;
     f.features.fillModeNonSolid = c->fill_lines;
+    f.features.geometryShader = c->gs;
+    f.features.shaderFloat64 = c->f64;
+    f.features.shaderInt64 = c->i64;
     f.features.largePoints = VK_TRUE;
     f.features.depthClamp = c->depth_clamp;
     f.features.shaderSampledImageArrayDynamicIndexing = !c->bindless;
@@ -804,6 +829,9 @@ int hle_vk_init(void)
     }
     if (c->discard) {
         exts[nx++] = VK_EXT_DISCARD_RECTANGLES_EXTENSION_NAME;
+    }
+    if (c->conserv) {
+        exts[nx++] = VK_EXT_CONSERVATIVE_RASTERIZATION_EXTENSION_NAME;
     }
     if (c->swapchain) {
         exts[nx++] = VK_KHR_SWAPCHAIN_EXTENSION_NAME;

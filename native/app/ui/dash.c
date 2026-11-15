@@ -21,9 +21,7 @@
 #include "native/app/win_aslr.h"
 #endif
 
-#ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.104"
-#endif
+#include "xbased_version.h"         /* XBASED_VERSION (cmake/app_win.cmake) */
 
 Dash D;
 static SDL_Window *g_win;
@@ -1095,6 +1093,8 @@ void opt_choice(List *l, enum UiStr label, const char *key, const char *const *v
             dash_toast(T(S_RAM_WARN));      /* retail titles meet a debug kit's memory map */
         } else if (!strcmp(key, "fsrate") && !strcmp(now_v, "60")) {
             dash_toast(T(S_FSRATE_TIP));    /* what it does, and the switch's black moment */
+        } else if (!strcmp(key, "shaders") && !strcmp(now_v, "async")) {
+            dash_toast(T(S_ASYNC_WARN));    /* draws wait for no shader: they are skipped */
         }
     }
 }
@@ -1137,9 +1137,6 @@ void opt_bool(List *l, enum UiStr label, const char *key, bool def, bool flag_st
         cfg_set(c, key, on ? "0" : "1");
     } else {
         cfg_set(c, key, on ? "0" : "1");
-    }
-    if (!on && !strcmp(key, "asyncpipe")) {
-        dash_toast(T(S_ASYNC_WARN));    /* draws wait for no shader: they are skipped */
     }
 }
 
@@ -2632,6 +2629,7 @@ int dash_run(SDL_Window *win, const char *exe)
 /* ------------------------------------------------------------ the in-game menu */
 
 UiTex *load_bmp(const char *path);
+UiTex *load_thumb(const char *dir, int slot);
 void states_forget(void);
 
 static int g_ig_result, g_ig_slot;
@@ -2709,9 +2707,7 @@ static void scr_ingame_slots(void)
                 ui_texture_free(g_ig_thumb[i]);
                 g_ig_thumb[i] = NULL;
             }
-            char p[1200];
-            snprintf(p, sizeof(p), "%s/slot%d.bmp", dir, i);
-            g_ig_thumb[i] = load_bmp(p);
+            g_ig_thumb[i] = load_thumb(dir, i);
         }
     }
     List l;

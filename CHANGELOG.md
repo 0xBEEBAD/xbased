@@ -1,5 +1,48 @@
 # xbased changelog
 
+## 1.1.0 (2026-11)
+
+### New
+- **Hybrid shader compilation**, the new default: a shader a game hasn't
+  used before is drawn at once by interpreter shaders while its own is
+  built in the background, so games no longer stutter while shaders
+  compile, even on a first run with an empty cache. Settings › System ›
+  New shaders also offers the asynchronous and synchronous modes. Updating
+  switches every install to hybrid once; your choice after that stays.
+- **Aspect ratio Auto**: 16:9 for games that render in widescreen, 4:3 for
+  the rest, and save states remember each game's shape.
+- **Screenshots and save state thumbnails as JPEG**, much smaller files.
+- xbased.exe's file properties show the real version.
+
+### Graphics
+- Graphics chip accuracy, from the chip test program (nxdk_pgraph_tests):
+  2959 of its 3556 pictures now match the console's exactly (1103 in
+  1.0.104). One accurate base for every game, Direct3D titles included:
+  lighting, vertex programs, fog and depth computed with the chip's own
+  arithmetic; lines, points, outlines and smoothed edges; W-buffering;
+  texture filtering, DXT, YUV, bump and shadow map sampling; multisampling,
+  anisotropic filtering, logic ops and polygon stipple.
+- Halo's water shows its reflections, Blade II's shadows are dark again,
+  Hitman: Blood Money's shadows and the outline around the character's
+  head are fixed, and the Insignia setup assistant no longer stays on a
+  black screen.
+- Performance on par with the fastest versions while more accurate.
+
+### Frame pacing
+- Smoother 30 fps games and driving in GTA: Vice City; Halo's PAL release
+  paced at its own 50 Hz.
+- Prince of Persia: Warrior Within keeps its own frame rate and no longer
+  crashes unlocked; its frame rate setting shows Original (locked), and a
+  60 fps patch still works.
+- The mouse pointer hides over the game, and the picture crop cuts instead
+  of stretching.
+
+### Games
+- Maximum Chase no longer crashes when the first chase begins.
+- Rainbow Six: Lockdown no longer crashes while loading after the intro.
+- Save states keep the screen shape they were made with (load a state
+  made with an older version after starting the game once).
+
 ## 1.0.104 (2026-11)
 
 ### Fixes

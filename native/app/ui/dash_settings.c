@@ -10,6 +10,11 @@
 #include "native/app/mod_fit.h"
 #include "native/app/win_mods.h"
 #include "native/core/xcheat.h"
+/* (a state's JPEG thumbnail, load_thumb) */
+#define STB_IMAGE_IMPLEMENTATION
+#define STB_IMAGE_STATIC
+#define STBI_ONLY_JPEG
+#include "stb_image.h"
 
 #include <ctype.h>
 #include <fcntl.h>
@@ -23,6 +28,7 @@
 #endif
 
 int nc_io_title_device_mode(uint32_t title_id, const char *name); /* native/kernel/io.c: a title's disc speed */
+int nc_dev_nv2a_title_pace_mode(uint32_t title_id, const char *name); /* native/dev/nv2a.c: its own frame rate */
 
 /* a game folder (or file) to take out of the library, once the user says so */
 static char g_unlist[1024], g_unlist_q[1200];
@@ -257,7 +263,13 @@ void scr_settings(void)
             const char *dn[] = {T(S_DISC_CONSOLE), T(S_DISC_FAST)};
             opt_choice(&l, S_DISC_SPEED, "devtime", dv, dn, 2, "2");
         }
-        opt_bool(&l, S_ASYNC_SHADERS, "asyncpipe", false, false);
+        {
+            /* new shaders (shaders=, native/core/options.h): the interpreters'
+             * meanwhile, their draws skipped meanwhile, or waited for */
+            static const char *const sv[] = {"hybrid", "async", "sync"};
+            const char *sn[] = {T(S_SHADERS_HYBRID), T(S_SHADERS_ASYNC), T(S_SHADERS_SYNC)};
+            opt_choice(&l, S_SHADERS_MODE, "shaders", sv, sn, 3, "hybrid");
+        }
         opt_bool(&l, S_PREBUILD, "prebuild", false, false);
         break;
     }
@@ -460,7 +472,11 @@ void scr_game_settings(void)
         const char *dn[] = {T(S_DISC_CONSOLE), T(S_DISC_FAST)};
         opt_choice(&l, S_DISC_SPEED, "devtime", dv, dn, 2, "2");
     }
-    opt_bool(&l, S_ASYNC_SHADERS, "asyncpipe", false, false);
+    {
+        static const char *const sv[] = {"hybrid", "async", "sync"};
+        const char *sn[] = {T(S_SHADERS_HYBRID), T(S_SHADERS_ASYNC), T(S_SHADERS_SYNC)};
+        opt_choice(&l, S_SHADERS_MODE, "shaders", sv, sn, 3, "hybrid");
+    }
     if (list_row(&l, T(S_RESET_GAME), NULL, NULL)) {
         dash_ask(T(S_RESET_GAME), reset_game);
     }
@@ -834,9 +850,15 @@ void scr_mods(void)
     const ModItem *shown = NULL;
     /* the frame rate, this game's choice: the console's pace (Original), or
      * lifted ("uncap") up to 60 or 120 frames a second ("fpscap") or
-     * without a limit */
+     * without a limit; a game that breaks lifted (native/dev/nv2a.c's list)
+     * shows it locked at Original, and why */
     const char *help = NULL;
-    {
+    if (nc_dev_nv2a_title_pace_mode(D.cur->g.title_id, D.cur->g.title)) {
+        list_row(&l, T(S_FRAMERATE), T(S_FR_LOCKED), NULL);
+        if (list_selected(&l)) {
+            help = T(S_FR_LOCKED_HELP);
+        }
+    } else {
         static const enum UiStr k_names[4] = { S_FR_CAPPED, S_FR_60, S_FR_120, S_FR_UNCAPPED };
         static const char *const k_caps[4] = { NULL, "60", "120", NULL };
         const char *cap = cfg_get(&D.game, "fpscap");
@@ -966,10 +988,12 @@ static void del_state(Dash *d)
     remove(p);
     snprintf(p, sizeof(p), "%s/slot%d.bmp", dir, g_del_slot);
     remove(p);
+    snprintf(p, sizeof(p), "%s/slot%d.jpg", dir, g_del_slot);
+    remove(p);
     g_thumb_key[0] = 0;
 }
 
-/* a state's picture (the game writes a BMP of its frame) */
+/* a picture the game wrote of its frame (a BMP: the in-game menu's frame) */
 UiTex *load_bmp(const char *path)
 {
     SDL_Surface *s = SDL_LoadBMP(path);
@@ -979,6 +1003,26 @@ UiTex *load_bmp(const char *path)
     UiTex *t = ui_texture_surface(s);
     SDL_DestroySurface(s);
     return t;
+}
+
+/* a state's picture: slot<N>.jpg, else the .bmp a state saved before 1.0.105 has */
+UiTex *load_thumb(const char *dir, int slot)
+{
+    char p[1200];
+    snprintf(p, sizeof(p), "%s/slot%d.jpg", dir, slot);
+    int w, h, c;
+    unsigned char *px = stbi_load(p, &w, &h, &c, 4);
+    if (px) {
+        SDL_Surface *s = SDL_CreateSurfaceFrom(w, h, SDL_PIXELFORMAT_RGBA32, px, w * 4);
+        UiTex *t = s ? ui_texture_surface(s) : NULL;
+        if (s) {
+            SDL_DestroySurface(s);
+        }
+        stbi_image_free(px);
+        return t;
+    }
+    snprintf(p, sizeof(p), "%s/slot%d.bmp", dir, slot);
+    return load_bmp(p);
 }
 
 /* the thumbnails go when the list does (another game, a slot saved) */
@@ -999,9 +1043,7 @@ void scr_states(void)
                 ui_texture_free(g_thumb[i]);
                 g_thumb[i] = NULL;
             }
-            char p[1200];
-            snprintf(p, sizeof(p), "%s/slot%d.bmp", dir, i);
-            g_thumb[i] = load_bmp(p);
+            g_thumb[i] = load_thumb(dir, i);
         }
         snprintf(g_thumb_key, sizeof(g_thumb_key), "%s", D.cur->g.key);
     }

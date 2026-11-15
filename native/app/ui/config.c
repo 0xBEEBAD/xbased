@@ -177,13 +177,28 @@ void cfg_set_bool(Config *c, const char *key, bool v)
 
 bool cfg_shaders_migrate(Config *c)
 {
-    if (cfg_get(c, "shaders.reset")) {
-        return false;
+    bool had = false;
+    /* 2 (1.1): every install starts in the hybrid mode once, whatever it had
+     * chosen (shaders, the old asyncpipe and prebuild); the choice made after
+     * that stays */
+    const char *reset = cfg_get(c, "shaders.reset");
+    if (!reset || atoi(reset) < 2) {
+        had = cfg_get(c, "asyncpipe") || cfg_get(c, "prebuild") || cfg_get(c, "shaders");
+        cfg_unset(c, "asyncpipe");
+        cfg_unset(c, "prebuild");
+        cfg_unset(c, "shaders");
+        cfg_set(c, "shaders.reset", "2");
     }
-    const bool had = cfg_get(c, "asyncpipe") || cfg_get(c, "prebuild");
-    cfg_unset(c, "asyncpipe");
-    cfg_unset(c, "prebuild");
-    cfg_set(c, "shaders.reset", "1");
+    /* the asynchronous shaders' switch (asyncpipe) as the mode it was: on, "async";
+     * off, the default one */
+    const char *a = cfg_get(c, "asyncpipe");
+    if (a) {
+        if (strcmp(a, "0")) {
+            cfg_set(c, "shaders", "async");
+        }
+        cfg_unset(c, "asyncpipe");
+        had = true;
+    }
     return had;
 }
 

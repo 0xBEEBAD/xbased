@@ -107,6 +107,14 @@ extern NcVmDma nc_vm_dma;
 /* Back guest VA [va, va+len) with nothing again (accesses fault). */
 bool nc_vm_unmap(NcVm *vm, uint32_t va, uint32_t len);
 
+/* The title's own protection of its pages (below the contiguous window):
+ * ro, a store to one of [va, va+len)'s mapped pages faults to the title, as
+ * a PAGE_READONLY page's does on the Xbox; off again, they are what write
+ * tracking wants. The other views of the pages keep their access, the
+ * host's (vm->phys) as well. Unmapping a page ends it. */
+void nc_vm_guest_ro(NcVm *vm, uint32_t va, uint32_t len, bool ro);
+bool nc_vm_guest_ro_has(const NcVm *vm, uint32_t va);
+
 /* Physical address behind a guest VA, or UINT32_MAX if unmapped. */
 static inline uint32_t nc_vm_phys(const NcVm *vm, uint32_t va)
 {

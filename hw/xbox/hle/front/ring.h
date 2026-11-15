@@ -31,6 +31,11 @@ void hle_ring_consume(HleRing *r);
 /* Consumer side: a record of op among the next max ones after the one at the
  * tail (published, not consumed). */
 bool hle_ring_ahead(HleRing *r, uint16_t op, unsigned max);
+/* The records published after the current one (hle_ring_peek's), in order, PADs
+ * skipped: hle_ring_ahead_start's position, then hle_ring_ahead_next until NULL.
+ * The consumer's thread; they stay as they are till it consumes them. */
+uint32_t hle_ring_ahead_start(HleRing *r, uint32_t *head);
+const HleCmdHdr *hle_ring_ahead_next(HleRing *r, uint32_t *at, uint32_t head);
 uint32_t hle_ring_used(HleRing *r);
 
 #endif

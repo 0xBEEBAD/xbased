@@ -122,6 +122,15 @@ bool hle_host_vblank_timed(void);
  * GPU makes one (the value only). Any thread. */
 uint32_t hle_host_gpu_reg(uint32_t off);
 void hle_host_gpu_reg_set(uint32_t off, uint32_t v);
+/* PTIMER's time now, both words as the guest reads them: a finished
+ * visibility test's time stamp (the XDK's GetVisibilityTestResult: the GPU's
+ * nanosecond count at completion, for timing the work between two tests;
+ * xemu's constant 0x0011223344556677 read as no time passing). Any thread. */
+uint64_t hle_host_ptimer(void);
+/* The word of a plain register (not PTIMER's time), to be read atomically
+ * where a call per read costs (the decoder's per-method test); NULL with no
+ * registers. */
+const uint32_t *hle_host_gpu_reg_ptr(uint32_t off);
 /* The bits of mask set to bits', atomically (fields the guest's writes
  * change too: PGRAPH_SURFACE's flip counters). */
 void hle_host_gpu_reg_mask(uint32_t off, uint32_t mask, uint32_t bits);

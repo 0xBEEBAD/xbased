@@ -10,10 +10,9 @@ census (`tools/native/census.sh`).
 
 | Export | Here | Why |
 |---|---|---|
-| `KeStallExecutionProcessor` | returns at once | The emulated devices answer at once; a busy wait would only slow the guest. |
 | `HalRegisterShutdownNotification`, `HalIsResetOrShutdownPending` | nothing, 0 | No shutdown in the guest: the app ends the process. |
 | `HalWriteSMBusValue` | ignored | The SMBus devices' settings (the SMC's LED and fan, the video encoder) have no effect here. |
-| `FscSetCacheSize` | nothing | No file-system cache of its own: the host's page cache serves the disc and the drives. |
+| `FscSetCacheSize` | keeps the size for `FscGetCacheSize`, allocates nothing | No file-system cache of its own: the host's page cache serves the disc and the drives. |
 | `NtProtectVirtualMemory`, `MmSetAddressProtect` | recorded, not enforced | Guest memory has no per-page protection; `NtQueryVirtualMemory` reports what was set. |
 | `MmUnmapIoSpace` | nothing | I/O space is never mapped. |
 | `KeBoostPriorityThread`, `KeSetDisableBoostThread` | 0 | The scheduler has no priority boosts. |

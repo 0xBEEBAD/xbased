@@ -13,7 +13,10 @@
  *   mods=FILE        the run's mods and cheats (native/core/mods.h)
  *   version=NAME     the core's version, recorded in savestates
  *   scale=N          the render scale
- *   asyncpipe=0|1    asynchronous shader compilation (on when absent)
+ *   shaders=hybrid|async|sync   new shaders (NcShaderMode): drawn by the
+ *                    interpreters while they build (the default), their draws
+ *                    skipped meanwhile, or waited for
+ *   asyncpipe=0|1    the older switch: 1 is shaders=async
  *   prebuild=0|1     the cached shaders built before the game (on)
  *   pads=MASK        the players with a controller plugged in (hex, bit n
  *                    player n + 1; default player 1)
@@ -36,8 +39,15 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/* How a draw whose shaders are new is drawn (shaders=): by the interpreter
+ * shaders while its own are built (hle/vk/draw.c, where the device links
+ * pipeline libraries; else as NC_SHADERS_SYNC), skipped until they are, or
+ * after waiting for them */
+typedef enum { NC_SHADERS_HYBRID, NC_SHADERS_ASYNC, NC_SHADERS_SYNC } NcShaderMode;
+
 typedef struct NcOptions {
-    bool uncap, async_pipe, prebuild;
+    bool uncap, prebuild;
+    int shaders;                        /* NcShaderMode */
     int fps_cap;                /* uncapped: frames a second at most (0: none) */
     int64_t video;              /* -1: the core's default */
     int av_pack;                /* NC_AV_PACK_* */

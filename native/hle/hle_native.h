@@ -42,7 +42,7 @@ void nc_hle_set_render_scale(int scale);
 void nc_hle_set_anisotropy(int level);
 /* Before boot: the app's "Asynchronous shader compilation" and "Build cached
  * shaders before starting" settings (hw/xbox/hle/vk/pipeasync.h). */
-void nc_hle_set_pipeline_options(bool async, bool prebuild);
+void nc_hle_set_pipeline_options(bool async, bool prebuild, bool hybrid);
 /* The pipeline prebuild's progress, any thread: built and to build (0 / 0
  * when none runs). */
 void nc_hle_pipeline_progress(uint32_t *done, uint32_t *total);

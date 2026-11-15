@@ -674,7 +674,8 @@ static void update_pads(bool focused)
 
 /* ------------------------------------------------------------ states */
 
-/* states\<TITLE ID>.<version>\slot<N>.hxs, its picture slot<N>.bmp beside */
+/* states\<TITLE ID>.<version>\slot<N>.hxs, its picture slot<N>.jpg beside (.bmp from
+ * before 1.0.105) */
 static void state_path(int slot, char *out, size_t n)
 {
     char dir[MAX_PATH + 64];
@@ -703,6 +704,8 @@ static void *save_thread(void *arg)
         /* its picture: the frame shown, the dashboard's thumbnail */
         char pic[MAX_PATH * 2];
         snprintf(pic, sizeof(pic), "%.*s.bmp", (int)(strlen(path) - 4), path);
+        remove(pic);                        /* (an older one's picture) */
+        snprintf(pic, sizeof(pic), "%.*s.jpg", (int)(strlen(path) - 4), path);
         remove(pic);
         hle_present_shot(pic);
         /* the notice after the picture: not in it */
@@ -816,7 +819,7 @@ static int g_fps_cap;   /* ... its limit, uncapped (0: none) */
 static float g_volume = 1.0f;
 static bool g_mute_bg = true;   /* silent while the window isn't the active one */
 
-/* screenshots\<title>-<date>.bmp beside the executable */
+/* screenshots\<title>-<date>.jpg beside the executable */
 static void screenshot(void)
 {
     char dir[MAX_PATH + 32], p[MAX_PATH + 128];
@@ -824,7 +827,7 @@ static void screenshot(void)
     mkdir(dir, 0775);
     SYSTEMTIME t;
     GetLocalTime(&t);
-    snprintf(p, sizeof(p), "%s/%s-%04d%02d%02d-%02d%02d%02d.bmp", dir, g_key, t.wYear, t.wMonth, t.wDay, t.wHour,
+    snprintf(p, sizeof(p), "%s/%s-%04d%02d%02d-%02d%02d%02d.jpg", dir, g_key, t.wYear, t.wMonth, t.wDay, t.wHour,
              t.wMinute, t.wSecond);
     hle_present_shot(p);
     notice(T(S_SHOT_SAVED), p);
@@ -1314,9 +1317,7 @@ static const char *pick_disc(void)
     return g_dialog_path[0] ? g_dialog_path : NULL;
 }
 
-#ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.104"
-#endif
+#include "xbased_version.h"         /* XBASED_VERSION (cmake/app_win.cmake) */
 
 static void rm_tree(const char *path)
 {

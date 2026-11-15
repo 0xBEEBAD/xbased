@@ -2,9 +2,14 @@
  * hakuX HLE GPU — asynchronous pipeline builds, the per-title pipeline
  * record and its prebuild (pipeasync.h).
  *
- * Workers: WORKERS threads below normal priority, so the guest's CPU and the
- * render thread keep the big cores; jobs carry copies of their key and
- * vertex program, results go back to the render thread (hle_pipe_take).
+ * Workers: threads below normal priority, so the guest's CPU and the render
+ * thread keep the big cores; jobs carry copies of their key and vertex
+ * program, results go back to the render thread (hle_pipe_take). As many as
+ * the host has threads beyond the emulation's own six (the guest's CPU, the
+ * render thread, the decoder, the audio's), two at least and WORKERS_MAX at
+ * most: they build every exact vertex program (vk/draw.c xf_exact, up to 2 s
+ * of the driver's each), and the frames draw the stand-ins till the last is
+ * in (Prince of Persia - Warrior Within cold: 33 s of building, 16 s on 2).
  *
  * The record: a header (magic, version, key size), then records appended as
  * the session makes pipelines: a vertex program (once per file), a pipeline
@@ -27,7 +32,8 @@
 #include <sys/syscall.h>
 #endif
 
-#define WORKERS 2
+#define WORKERS_MAX 6
+#define EMU_THREADS 6
 #define QUEUE_MAX 1024
 #define PREBUILD_THREADS 6
 #define REC_MAGIC 0x43525048u       /* "HPRC" */
@@ -75,6 +81,7 @@ typedef struct Touch {
 
 static struct {
     bool opt_async, opt_prebuild;   /* the app's settings */
+    bool opt_hybrid;
     bool async, prebuild, nocache;  /* in effect */
     size_t key_size;
     const char *variant;            /* the record's name suffix (hle_pipe_init) */
@@ -82,7 +89,7 @@ static struct {
 
     HleMutex mu;
     HleCond cv;
-    HleThread th[WORKERS];
+    HleThread th[WORKERS_MAX];
     bool started;
     Job *queue[QUEUE_MAX];
     unsigned qhead, qn;
@@ -116,10 +123,16 @@ static int debug_switch(const char *env, const char *prop)
     return -1;
 }
 
-void hle_pipe_set_options(bool async, bool prebuild)
+void hle_pipe_set_options(bool async, bool prebuild, bool hybrid)
 {
     g_pa.opt_async = async;
     g_pa.opt_prebuild = prebuild;
+    g_pa.opt_hybrid = hybrid;
+}
+
+bool hle_pipe_hybrid(void)
+{
+    return g_pa.opt_hybrid;
 }
 
 void hle_pipe_init(size_t key_size, HlePipeBuildFn build, const char *variant)
@@ -150,6 +163,25 @@ bool hle_pipe_nocache(void)
     return g_pa.nocache;
 }
 
+static _Thread_local bool t_worker;
+
+bool hle_pipe_on_worker(void)
+{
+    return t_worker;
+}
+
+void hle_pipe_mark_worker(void)
+{
+    t_worker = true;
+}
+
+static bool (*g_yield)(void);
+
+void hle_pipe_set_yield(bool (*fn)(void))
+{
+    g_yield = fn;
+}
+
 /* ---- workers ----------------------------------------------------------------- */
 
 static void lower_priority(void)
@@ -164,11 +196,16 @@ static void lower_priority(void)
 /* For the process's life (the back end has no end) */
 static void *worker(void *opaque)
 {
+    t_worker = true;
     lower_priority();
     hle_mutex_lock(&g_pa.mu);
     for (;;) {
-        while (!g_pa.qn) {
-            hle_cond_wait(&g_pa.cv, &g_pa.mu);
+        while (!g_pa.qn || (g_yield && g_yield())) {
+            if (g_pa.qn) {
+                hle_cond_timedwait(&g_pa.cv, &g_pa.mu, 2);  /* (yielding: looked at again soon) */
+            } else {
+                hle_cond_wait(&g_pa.cv, &g_pa.mu);
+            }
         }
         Job *j = g_pa.queue[g_pa.qhead];
         g_pa.qhead = (g_pa.qhead + 1) % QUEUE_MAX;
@@ -190,7 +227,10 @@ bool hle_pipe_queue(uint64_t hash, const void *key, uint64_t vsh, const uint32_t
                     uint32_t nslots)
 {
     if (!g_pa.started) {
-        for (unsigned i = 0; i < WORKERS; i++) {
+        const long ncpu = sysconf(_SC_NPROCESSORS_ONLN);
+        const unsigned nw = ncpu > EMU_THREADS + 2 ? MIN((unsigned)(ncpu - EMU_THREADS), WORKERS_MAX) : 2;
+        hle_log("hakuX-hle-pipe", "pipeline workers: %u (%ld host threads)", nw, ncpu);
+        for (unsigned i = 0; i < nw; i++) {
             hle_thread_create(&g_pa.th[i], "hle.pipe", worker, NULL, HLE_THREAD_DETACHED);
         }
         g_pa.started = true;
@@ -456,7 +496,7 @@ void hle_pipe_title(uint32_t title_id, uint32_t timedate)
 void hle_pipe_record(uint64_t hash, const void *key, uint64_t vsh, const uint32_t *tok,
                      uint32_t nslots)
 {
-    if (!g_pa.path) {
+    if (!g_pa.path || ((const uint8_t *)key)[g_hle_key_stipple_at]) {
         return;
     }
     if (vsh && tok && !prog_find(vsh)) {
@@ -501,6 +541,7 @@ void hle_pipe_flush(bool now)
 
 static void *prebuild_worker(void *opaque)
 {
+    t_worker = true;
     uint32_t n = hle_atomic_read(&g_pa.pb_total);
     for (;;) {
         uint32_t i = __atomic_fetch_add(&g_pa.pb_next, 1, __ATOMIC_SEQ_CST);

@@ -38,6 +38,12 @@
 #include "hw/xbox/hle/vk/quirks.h"
 #include "hw/xbox/hle/vk/swapchain.h"
 
+/* the pictures a player keeps (screenshots, savestates' thumbnails) as JPEG:
+ * a 32-bit BMP of a scaled frame is 14 MB */
+#define STB_IMAGE_WRITE_STATIC
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "native/third_party/stb/stb_image_write.h"
+
 #include "hw/xbox/hle/vk/native_window.h"
 #ifdef _WIN32
 #include <windows.h>
@@ -990,11 +996,29 @@ static bool shot_buf(VkDeviceSize size)
     return true;
 }
 
-/* The picture copied out (the pass done) as a 32-bit top-down BMP. */
+/* The picture copied out (the pass done) as a 32-bit top-down BMP, or a
+ * JPEG (quality 90) for a path ending in .jpg. */
 static void shot_write(uint32_t w, uint32_t h)
 {
     void *map = NULL;
     if (T.vkMapMemory(g_hvk.dev, g_ps.shot_mem, 0, VK_WHOLE_SIZE, 0, &map) != VK_SUCCESS) {
+        return;
+    }
+    const size_t pl = strlen(g_ps.shot_path);
+    if (pl > 4 && !strcasecmp(g_ps.shot_path + pl - 4, ".jpg")) {
+        const bool rgba = g_ps.fmt == VK_FORMAT_R8G8B8A8_UNORM || g_ps.fmt == VK_FORMAT_R8G8B8A8_SRGB;
+        const uint8_t *src = map;
+        uint8_t *rgb = g_malloc((size_t)w * h * 3);
+        for (size_t i = 0; i < (size_t)w * h; i++) {
+            rgb[i * 3] = src[i * 4 + (rgba ? 0 : 2)];
+            rgb[i * 3 + 1] = src[i * 4 + 1];
+            rgb[i * 3 + 2] = src[i * 4 + (rgba ? 2 : 0)];
+        }
+        if (stbi_write_jpg(g_ps.shot_path, (int)w, (int)h, 3, rgb, 90)) {
+            hle_log("hakuX-hle-back", "present: picture %ux%u in %s", w, h, g_ps.shot_path);
+        }
+        g_free(rgb);
+        T.vkUnmapMemory(g_hvk.dev, g_ps.shot_mem);
         return;
     }
     FILE *f = fopen(g_ps.shot_path, "wb");

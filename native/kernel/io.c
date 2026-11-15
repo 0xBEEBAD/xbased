@@ -9,7 +9,8 @@
  * Xbox names are ANSI: OBJECT_ATTRIBUTES { RootDirectory, ObjectName
  * (ANSI_STRING*), Attributes }; FILE_DIRECTORY_INFORMATION carries ANSI
  * names. I/O completes synchronously: IoStatusBlock and the event are set
- * before the call returns; APC completion routines are not delivered yet.
+ * before the call returns; an APC completion routine is queued to the
+ * caller's thread, a completion port's packet to its port.
  */
 #include "native/kernel/kernel.h"
 #include "native/core/irq.h"
@@ -221,9 +222,12 @@ static const uint64_t k_partitions[6][2] = {
 };
 static bool g_trace_io; /* NC_TRACE_IO: every read */
 
+static void part_prescan(void);
+
 void nc_io_set_hdd_root(const char *path)
 {
     snprintf(g_hdd_root, sizeof(g_hdd_root), "%s", path);
+    part_prescan();
 }
 
 const char *nc_io_hdd_root(void)
@@ -747,6 +751,11 @@ static void flush_later(const NcFile *nf)
     closer_queue(&j);
 }
 
+/* The hard disk's files changed since (a write, a create, a delete, a size or
+ * a name set): a partition's use is scanned again at its next query
+ * (part_used), else the last scan's stands */
+static uint32_t g_hdd_gen = 1;
+
 static void io_drain_file(NcKernel *k, unsigned i);
 
 void nc_io_close(NcKernel *k, uint32_t object)
@@ -771,6 +780,7 @@ void nc_io_close(NcKernel *k, uint32_t object)
                 o->del = true;                      /* the last handle deletes it */
             } else {
                 unlink(nf->host);
+                g_hdd_gen++;
             }
         }
         free(nf->listing);
@@ -1730,6 +1740,9 @@ static uint64_t NtCreateFile(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
     uint32_t h = 0, info = 0;
     uint32_t st = do_open(k, a[1], a[6], a[2], a[7], a[8], &h, &info);
+    if (st == NC_STATUS_SUCCESS && info != 1) {     /* created, overwritten, superseded: not FILE_OPENED */
+        g_hdd_gen++;
+    }
     io_status(k, a[3], st, info);
     if (st == NC_STATUS_SUCCESS) {
         nc_vm_wr32(k->vm, a[0], h);
@@ -2157,6 +2170,7 @@ static void empty_later(const char *host)
     snprintf(dir, sizeof(dir), "%s/.overwrite", g_hdd_root);
     mkdir(dir, 0775);
     snprintf(aside, sizeof(aside), "%s/format-%u-%u", dir, (unsigned)getpid(), serial++);
+    g_hdd_gen++;
     if (rename(host, aside) != 0 || mkdir(host, 0775) != 0) {
         remove_tree(host, false);
         return;
@@ -2218,6 +2232,7 @@ static bool handle_can_write(const NcFile *nf, const char *what)
 static uint64_t write_data(NcKernel *k, const uint32_t *a, const uint8_t *src, uint32_t len, uint32_t va,
                            bool later)
 {
+    g_hdd_gen++;
     NcFile *nf = file_of(k, a[0]);
     if (!nf) {
         return NC_STATUS_INVALID_HANDLE;
@@ -2496,6 +2511,7 @@ static uint64_t NtSetInformationFile(NcKernel *k, NcFrame *f, const uint32_t *a)
     if (!nf) {
         return NC_STATUS_INVALID_HANDLE;
     }
+    g_hdd_gen++;
     const uint8_t *in = nc_vm_host(k->vm, a[2]);
     uint64_t v;
     uint32_t st = NC_STATUS_SUCCESS;
@@ -2645,19 +2661,84 @@ static uint64_t partition_used(int part, uint32_t cluster_bytes)
     return g_usage_bytes;
 }
 
-/* A partition's use, from a scan of its folder at most every 2 s. */
-static uint64_t g_part_used[6], g_part_scanned_ns[6];
+/* The partitions' use, scanned by a thread of its own: every partition's as
+ * the hard disk is set (nc_io_set_hdd_root), each again once its files have
+ * changed (g_hdd_gen), at most every 2 s; a query answers at once with the
+ * last scan's, and waits only for a partition's first. A scan walks every
+ * file there (a title's saves and caches, everyone's): 230 ms over 4000 files
+ * on the title's CPU when the query made it, Test Drive's three at its start. */
+static struct {
+    pthread_mutex_t mu;
+    pthread_cond_t cv, done;
+    bool started;
+    uint32_t want;                      /* partitions to scan (bit p) */
+    uint64_t used[6], scanned_ns[6];
+    uint32_t gen[6];                    /* g_hdd_gen as the scan started */
+    bool valid[6];
+} g_pu = {PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, PTHREAD_COND_INITIALIZER};
 
 static uint32_t cluster_sectors(int part);
 
+static void *part_scan_thread(void *arg)
+{
+    (void)arg;
+    pthread_mutex_lock(&g_pu.mu);
+    for (;;) {
+        while (!g_pu.want) {
+            pthread_cond_wait(&g_pu.cv, &g_pu.mu);
+        }
+        const int part = __builtin_ctz(g_pu.want);
+        g_pu.want &= ~(1u << part);
+        const uint32_t gen = __atomic_load_n(&g_hdd_gen, __ATOMIC_RELAXED);
+        pthread_mutex_unlock(&g_pu.mu);
+        const uint64_t used = partition_used(part, cluster_sectors(part) * 512u);
+        pthread_mutex_lock(&g_pu.mu);
+        g_pu.used[part] = used;
+        g_pu.scanned_ns[part] = mono_ns();
+        g_pu.gen[part] = gen;
+        g_pu.valid[part] = true;
+        pthread_cond_broadcast(&g_pu.done);
+    }
+    return NULL;
+}
+
+/* (g_pu.mu held) those partitions to the scan */
+static void part_scan(uint32_t mask)
+{
+    if (!g_pu.started) {
+        pthread_t t;
+        g_pu.started = pthread_create(&t, NULL, part_scan_thread, NULL) == 0;
+        if (g_pu.started) {
+            pthread_detach(t);
+        }
+    }
+    g_pu.want |= mask;
+    pthread_cond_signal(&g_pu.cv);
+}
+
+static void part_prescan(void)
+{
+    pthread_mutex_lock(&g_pu.mu);
+    part_scan(0x3Eu);                   /* partitions 1 - 5 */
+    pthread_mutex_unlock(&g_pu.mu);
+}
+
 static uint64_t part_used(int part)
 {
-    const uint64_t now = nc_ke_now_ns();
-    if (!g_part_scanned_ns[part] || now - g_part_scanned_ns[part] > 2000000000ull) {
-        g_part_used[part] = partition_used(part, cluster_sectors(part) * 512u);
-        g_part_scanned_ns[part] = now;
+    pthread_mutex_lock(&g_pu.mu);
+    const uint32_t bit = 1u << part;
+    if (!g_pu.valid[part]) {
+        part_scan(bit);
+        while (g_pu.started && !g_pu.valid[part]) {
+            pthread_cond_wait(&g_pu.done, &g_pu.mu);
+        }
+    } else if (g_pu.gen[part] != __atomic_load_n(&g_hdd_gen, __ATOMIC_RELAXED) && !(g_pu.want & bit) &&
+               mono_ns() - g_pu.scanned_ns[part] > 2000000000ull) {
+        part_scan(bit);                 /* (the answer the last scan's meanwhile) */
     }
-    return g_part_used[part];
+    const uint64_t used = g_pu.used[part];
+    pthread_mutex_unlock(&g_pu.mu);
+    return used;
 }
 
 /* Volume information of the volume a file is on; *len receives the bytes written. */
@@ -2991,6 +3072,7 @@ static uint64_t NtQueryFullAttributesFile(NcKernel *k, NcFrame *f, const uint32_
 /* NtDeleteFile(ObjectAttributes) */
 static uint64_t NtDeleteFile(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
+    g_hdd_gen++;
     char name[512], path[512], host[512];
     ansi(k, nc_vm_rd32(k->vm, a[0] + 4), name, sizeof(name));
     if (!resolve_name(k, nc_vm_rd32(k->vm, a[0]), name, sizeof(name))) {

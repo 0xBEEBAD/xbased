@@ -2320,18 +2320,30 @@ static void voice_process(MCPXAPUState *d, uint8_t *c,
     }
 
     if (mon_vp) {
-        /* For VP mon, simply mix all voices together here, selecting the
-         * maximal gain of any of the voice's routes, sample by sample, as the
-         * overall gain for this voice; a 3D voice with an HRTF entry plays its
-         * two ears.
+        /* For VP mon, all voices mixed together here. Stereo: a voice's
+         * speaker mixbins (DirectSound's 0-5: FL FR C LFE BL BR) folded into
+         * the front pair as the console's own downmix does (the XDK's
+         * multichannel white paper: the LFE dropped, the centre and the
+         * surrounds into the front speakers at reduced volume), so a mono
+         * voice panned by its mixbin volumes stays where the title put it
+         * (one gain on both sides centred every panned DirectSound, XACT and
+         * DLS voice). The louder side is held at the voice's loudest route,
+         * as it was, so routes adding up never play louder than before.
+         * A 3D voice with an HRTF entry plays its two ears, and a voice in
+         * none of the speaker bins (a submix, an effect's send: the DSP's,
+         * not run here) its channels at its loudest route's gain.
          *
          * Routes into a bin a multipass voice reads are left out: they are
          * mixed into the bin instead, and that sub-mix is mixed in here when
          * the multipass voice is processed. MON_VP is not how the hardware
          * works anyway (the DSP mixes the bins), so DirectSound compatibility
          * is enough. */
+        static const float k_fold[6][2] = { { 1.0f, 0.0f }, { 0.0f, 1.0f }, { 0.70710678f, 0.70710678f },
+                                            { 0.0f, 0.0f }, { 0.70710678f, 0.0f }, { 0.0f, 0.70710678f } };
         float g[NUM_SAMPLES_PER_FRAME] = { 0 };
         float gb[NUM_SAMPLES_PER_FRAME];
+        float fg[NUM_SAMPLES_PER_FRAME][2] = { { 0 } }, fs[NUM_SAMPLES_PER_FRAME][2] = { { 0 } };
+        bool folded = false;
         for (int b = 0; b < 8; b++) {
             if (!live[b] || (mp_bins & (1u << bin[b]))) {
                 continue;
@@ -2340,12 +2352,32 @@ static void voice_process(MCPXAPUState *d, uint8_t *c,
             for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
                 g[i] = fmaxf(g[i], gb[i]);
             }
+            if (!spatial && bin[b] <= 5) {
+                const float wl = k_fold[bin[b]][0], wr = k_fold[bin[b]][1];
+                folded = true;
+                for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
+                    const float a = gb[i] * src[b][i];
+                    fg[i][0] += wl * gb[i];
+                    fg[i][1] += wr * gb[i];
+                    fs[i][0] += wl * a;
+                    fs[i][1] += wr * a;
+                }
+            }
         }
         const float *left = spatial ? ear_buf[0] : channel_buf[0];
         const float *right = spatial ? ear_buf[1] : channel_buf[channels - 1];
-        for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
-            sample_buf[i][0] += g[i] * left[i];
-            sample_buf[i][1] += g[i] * right[i];
+        if (folded) {
+            for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
+                const float m = fmaxf(fg[i][0], fg[i][1]);
+                const float k = m > g[i] ? g[i] / m : 1.0f;
+                sample_buf[i][0] += k * fs[i][0];
+                sample_buf[i][1] += k * fs[i][1];
+            }
+        } else {
+            for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
+                sample_buf[i][0] += g[i] * left[i];
+                sample_buf[i][1] += g[i] * right[i];
+            }
         }
         if (g_apu_out_channels == 6) {
             /* 5.1: each of the voice's speaker mixbins (DirectSound's 0-5:

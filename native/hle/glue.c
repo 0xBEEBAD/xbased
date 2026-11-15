@@ -33,9 +33,9 @@ static NcCpu *g_cpu;
 static uint32_t g_fs_base;
 static bool g_active;
 
-void nc_hle_set_pipeline_options(bool async, bool prebuild)
+void nc_hle_set_pipeline_options(bool async, bool prebuild, bool hybrid)
 {
-    hle_pipe_set_options(async, prebuild);
+    hle_pipe_set_options(async, prebuild, hybrid);
 }
 
 void nc_hle_pipeline_progress(uint32_t *done, uint32_t *total)
