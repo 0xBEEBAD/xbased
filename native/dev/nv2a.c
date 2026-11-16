@@ -1,5 +1,5 @@
 /*
- * hakuX native core — NV2A register space (0xFD000000, 16 MiB), first cut.
+ * xbased native core — NV2A register space (0xFD000000, 16 MiB), first cut.
  *
  * A register file (reads return what was last written) plus the behavior the
  * XDK's D3D needs, added as the frontier shows it:
@@ -141,9 +141,9 @@ static int64_t g_pick_off_ns = -1;    /* pickups after a vsync (smoothed, 0..per
 /* Push-buffer mode (hle_host_pb_mode): the HLE consumes channel 0's FIFO. */
 static bool g_pbmode;
 
-/* debug: NC_NV2A_CENSUS=1 / debug.hakux.nvcensus=1 at boot: the registers the
+/* debug: NC_NV2A_CENSUS=1 / debug.xbased.nvcensus=1 at boot: the registers the
  * guest reads and writes, by offset: each new one logged as it first comes
- * (the first 512), the busiest once a second (hakuX-native-nv2a). */
+ * (the first 512), the busiest once a second (xbased-native-nv2a). */
 #define CENSUS_SLOTS 4096u
 static struct {
     bool on;
@@ -174,7 +174,7 @@ static uint32_t ld(uint32_t off)
 
 static void census(uint32_t off, bool write, uint32_t v)
 {
-#if !HAKUX_DIAG
+#if !XBASED_DIAG
     (void)off;                          /* (a build's made to investigate) */
     (void)write;
     (void)v;
@@ -188,7 +188,7 @@ static void census(uint32_t off, bool write, uint32_t v)
         if (!g_census.r[i].off) {
             g_census.r[i].off = key + 1;
             if (g_census.nnew++ < 512) {
-                nc_log("hakuX-native-nv2a", "new register %06x: first %s %08x", key,
+                nc_log("xbased-native-nv2a", "new register %06x: first %s %08x", key,
                        write ? "write" : "read", v);
             }
             break;
@@ -232,7 +232,7 @@ static void census_log(void)
     }
     buf[o < (int)sizeof(buf) ? o : (int)sizeof(buf) - 1] = 0;
     if (o) {
-        nc_log("hakuX-native-nv2a", "registers/s:%s", buf);
+        nc_log("xbased-native-nv2a", "registers/s:%s", buf);
     }
 }
 
@@ -243,7 +243,7 @@ static bool fifo_empty(void)
 }
 
 uint64_t nc_ke_now_ns(void);           /* native/kernel/ke.c */
-#if HAKUX_DIAG
+#if XBASED_DIAG
 /* ---- debug: the GPU event trace (host.h hle_host_gpu_trace) ---- */
 #define GTR_N 32768u
 static struct {
@@ -285,7 +285,7 @@ void hle_host_gpu_trace_dump(const char *why, uint32_t mark)
         return;
     }
     const uint64_t t0 = g_gtr[(end - n) % GTR_N].ns;
-    nc_log("hakuX-native-trace", "%s: %u GPU events, from 150 before the mark", why, n);
+    nc_log("xbased-native-trace", "%s: %u GPU events, from 150 before the mark", why, n);
     char line[400];
     int o = 0;
     for (uint32_t j = end - n; j != end; j++) {
@@ -294,7 +294,7 @@ void hle_host_gpu_trace_dump(const char *why, uint32_t mark)
         o += snprintf(line + o, sizeof(line) - (size_t)o, " +%.2f %s %x",
                       (g_gtr[i].ns - t0) / 1e6, k_names[k], g_gtr[i].value);
         if (o > 300 || j + 1 == end) {
-            nc_log("hakuX-native-trace", "%s", line);
+            nc_log("xbased-native-trace", "%s", line);
             o = 0;
         }
     }
@@ -487,7 +487,7 @@ static void ptimer_start(void)
     pthread_t t;
     pthread_create(&t, NULL, ptimer_thread, NULL);
     pthread_detach(t);
-    nc_log("hakuX-native", "nv2a: PTIMER alarm in use (alarm %08x, interrupt %s)", ld(NV_PTIMER_ALARM_0),
+    nc_log("xbased-native", "nv2a: PTIMER alarm in use (alarm %08x, interrupt %s)", ld(NV_PTIMER_ALARM_0),
            ld(NV_PTIMER_INTR_EN_0) & PTIMER_ALARM ? "on" : "off");
 }
 
@@ -692,7 +692,7 @@ static void nv2a_write(void *opaque, uint32_t off, uint64_t value, unsigned size
     if (g_pbmode && size == 4 && (off == NV_PFIFO_CACHE1_DMA_PUT || off == NV_PFIFO_CACHE1_DMA_GET)) {
         static unsigned s_logged_c;             /* debug: the first direct CACHE1 writes */
         if (s_logged_c++ < 16) {
-            nc_log("hakuX-native", "nv2a: CACHE1 %s <- %08x (GET %08x PUT %08x)",
+            nc_log("xbased-native", "nv2a: CACHE1 %s <- %08x (GET %08x PUT %08x)",
                    off == NV_PFIFO_CACHE1_DMA_PUT ? "PUT" : "GET", (uint32_t)value,
                    ld(NV_PFIFO_CACHE1_DMA_GET), ld(NV_PFIFO_CACHE1_DMA_PUT));
         }
@@ -705,7 +705,7 @@ static void nv2a_write(void *opaque, uint32_t off, uint64_t value, unsigned size
         static unsigned s_logged;               /* debug: the first channel writes */
         if (s_logged < 24 && off != NV_USER_REF) {
             s_logged++;
-            nc_log("hakuX-native", "nv2a: channel %s <- %08x (GET %08x PUT %08x)",
+            nc_log("xbased-native", "nv2a: channel %s <- %08x (GET %08x PUT %08x)",
                    off == NV_USER_DMA_PUT ? "PUT" : "GET", (uint32_t)value,
                    ld(NV_PFIFO_CACHE1_DMA_GET), ld(NV_PFIFO_CACHE1_DMA_PUT));
         }
@@ -752,7 +752,7 @@ static void nv2a_write(void *opaque, uint32_t off, uint64_t value, unsigned size
                                                   __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE));
             static unsigned s_logged;
             if (s_logged++ < 32) {
-                nc_log("hakuX-native", "nv2a: flip read -> %u (write %u, display %08x)",
+                nc_log("xbased-native", "nv2a: flip read -> %u (write %u, display %08x)",
                        (n >> 24) & 7, (n >> 20) & 7, ld(NV_PCRTC_START));
             }
             hle_host_gpu_trace(HLE_GTR_INCREMENT, (n >> 24) & 7);
@@ -924,7 +924,7 @@ void nc_dev_nv2a_display_pickup(uint64_t ns)
     __atomic_store_n(&g_pick_off_ns, est, __ATOMIC_RELAXED);
     if (logged < 0 || llabs(wrap_half(est - logged, pd)) > 2000000) {
         logged = est;
-        nc_log("hakuX-native", "nv2a: the presenter picks frames up %.1f ms after the panel's "
+        nc_log("xbased-native", "nv2a: the presenter picks frames up %.1f ms after the panel's "
                "vsync (period %.2f ms): vblanks %.1f ms after the vsync", est / 1e6, pd / 1e6,
                (double)((est + pd / 2) % pd) / 1e6);
     }
@@ -991,7 +991,7 @@ static uint64_t next_vblank(uint64_t prev)
     return next;
 }
 
-/* Uncapped (the app's setting: HAKUX_HLE_UNCAP; debug.hakux.uncap 1 / 0
+/* Uncapped (the app's setting: XBASED_HLE_UNCAP; debug.xbased.uncap 1 / 0
  * on demand), read by the vblank thread now and then. */
 static uint64_t g_cap_ns;           /* uncapped: a frame at most this often (0: no limit) */
 static volatile int g_own_pace;     /* the title runs at its own rate whatever the options say */
@@ -1040,7 +1040,7 @@ void nc_dev_nv2a_title_pace(uint32_t title_id, const char *name)
     g_title_id = title_id;
     g_own_pace = nc_dev_nv2a_title_pace_mode(title_id, name);
     if (g_own_pace) {
-        nc_log("hakuX-native", "nv2a: the frame rate stays %08x's own (%s): uncapped, its threads race",
+        nc_log("xbased-native", "nv2a: the frame rate stays %08x's own (%s): uncapped, its threads race",
                title_id, name ? name : "");
     }
 }
@@ -1050,17 +1050,17 @@ static bool uncapped(void)
     static int on = -1, cap = -1;
     static unsigned polls;
     if (on < 0) {
-        on = getenv("HAKUX_HLE_UNCAP") != NULL;
-        const char *e = getenv("HAKUX_HLE_FPSCAP");
+        on = getenv("XBASED_HLE_UNCAP") != NULL;
+        const char *e = getenv("XBASED_HLE_FPSCAP");
         cap = e ? atoi(e) : 0;
     }
     if (polls++ % 32 == 0) {
         char v[PROP_VALUE_MAX] = "";
-        if (hle_prop_get("debug.hakux.uncap", v) > 0) {
+        if (hle_prop_get("debug.xbased.uncap", v) > 0) {
             on = atoi(v) != 0;
         }
         /* fast forward lifts the limit while held (0), then sets it back */
-        if (hle_prop_get("debug.hakux.fpscap", v) > 0) {
+        if (hle_prop_get("debug.xbased.fpscap", v) > 0) {
             cap = atoi(v);
         }
     }
@@ -1210,7 +1210,7 @@ static void *vblank_thread(void *arg)
         }
         if (g_census.on && next - g_census.t_log >= 1000000000ull) {
             g_census.t_log = next;
-            if (HAKUX_DIAG) {
+            if (XBASED_DIAG) {
                 census_log();
             }
         }
@@ -1241,7 +1241,7 @@ void nc_dev_nv2a_init(void)
     nc_wr32(g_regs + NV_PTIMER_NUMERATOR, PTIMER_NUM0);
     nc_wr32(g_regs + NV_PTIMER_DENOMINATOR, PTIMER_DEN0);
     char v[PROP_VALUE_MAX] = "";
-    hle_prop_get("debug.hakux.nvcensus", v);
+    hle_prop_get("debug.xbased.nvcensus", v);
     const char *e = getenv("NC_NV2A_CENSUS");
     g_census.on = !strcmp(v, "1") || (e && !strcmp(e, "1"));
     const NcMmioDev dev = {"nv2a", NV2A_BASE, NV2A_SIZE, nv2a_read, nv2a_write, NULL};
@@ -1263,7 +1263,7 @@ void nc_dev_nv2a_refresh(unsigned hz)
     g_mode_hz = hz == 50 ? 50 : 60;
     const uint64_t f = (hz == 50 ? 20000000ull : FRAME_NS) / g_vblank_mul;
     if (__atomic_exchange_n(&g_frame_ns, f, __ATOMIC_RELAXED) != f) {
-        nc_log("hakuX-native", "nv2a: vblank at %u Hz (the video mode%s)", g_mode_hz * g_vblank_mul,
+        nc_log("xbased-native", "nv2a: vblank at %u Hz (the video mode%s)", g_mode_hz * g_vblank_mul,
                g_vblank_mul > 1 ? ", a mod's rate" : "");
     }
 }
@@ -1455,7 +1455,7 @@ void hle_host_pb_mode(bool on)
     hle_pb_on_flip_wait(flip_waits);
 #endif
     __atomic_store_n(&g_pbmode, on, __ATOMIC_RELEASE);
-    nc_log("hakuX-native", "nv2a: push-buffer mode %s", on ? "on" : "off");
+    nc_log("xbased-native", "nv2a: push-buffer mode %s", on ? "on" : "off");
 }
 
 uint64_t nc_dev_nv2a_vblanks(void)

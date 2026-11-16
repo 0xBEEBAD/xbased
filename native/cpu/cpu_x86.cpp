@@ -1,5 +1,5 @@
 /*
- * hakuX native core â€” the guest CPU on x86-64 hosts (Windows): a dynamic
+ * xbased native core â€” the guest CPU on x86-64 hosts (Windows): a dynamic
  * translator from the title's x86-32 code to x86-64, behind the same
  * interface as the FEX embedding (cpu.h).
  *
@@ -186,7 +186,7 @@ struct NcCpu {
 
 static NcCpu *g_cpu;
 /* Diagnostics, in builds made with NC_CPU_DIAG only (the tests' cputest; the
- * app with -DHAKUX_CPU_DIAG=ON): a release has none of it.
+ * app with -DXBASED_CPU_DIAG=ON): a release has none of it.
  * NC_SMC_CHECK=1: no chaining and no dispatcher table, so every block is
  * entered through the lookup, which compares the guest bytes it was made
  * from with what is there now, logs a block whose code changed without an
@@ -493,7 +493,7 @@ static bool build_stubs(NcCpu *cpu)
     a.jmp(cpu->s_dispatch);
 
     if (a.failed) {
-        nc_log("hakuX-native", "cpu: the stubs don't assemble");
+        nc_log("xbased-native", "cpu: the stubs don't assemble");
         return false;
     }
     return true;
@@ -1562,7 +1562,7 @@ static void flush_all(NcCpu *cpu)
         cpu->frame->shadow_reset = 1; /* the return predictions point into what went (s_restore) */
     }
     cpu->flushes++;
-    nc_log("hakuX-native", "cpu: translation buffer flushed (%llu so far)", (unsigned long long)cpu->flushes);
+    nc_log("xbased-native", "cpu: translation buffer flushed (%llu so far)", (unsigned long long)cpu->flushes);
 }
 
 static void link_block(NcCpu *cpu, Block *b)
@@ -1712,7 +1712,7 @@ static Block *translate(NcCpu *cpu, uint32_t eip, bool bypass)
                 ZydisFormatter fmt;
                 ZydisFormatterInit(&fmt, ZYDIS_FORMATTER_STYLE_INTEL);
                 ZydisFormatterFormatInstruction(&fmt, &in, ops, in.operand_count_visible, txt, sizeof(txt), at, nullptr);
-                nc_log("hakuX-native", "cpu: no translation for %08x: %s (a system op)", at, txt);
+                nc_log("xbased-native", "cpu: no translation for %08x: %s (a system op)", at, txt);
             }
             dep_end = std::max(dep_end, (uint64_t)at + in.length);
             t.sysop(at, NC_SYSOP_OTHER, in.length);
@@ -1789,7 +1789,7 @@ static uint8_t *code_for(NcCpu *cpu, uint32_t eip)
                     while (((const uint8_t *)(uintptr_t)eip)[at] == b->src[at]) {
                         at++;
                     }
-                    nc_log("hakuX-native", "cpu: smc: the code at %08x changed with no invalidation (first at %08x, %u bytes)",
+                    nc_log("xbased-native", "cpu: smc: the code at %08x changed with no invalidation (first at %08x, %u bytes)",
                            eip, eip + at, n);
                 }
                 kill_block(cpu, b);
@@ -2047,7 +2047,7 @@ extern "C" uint8_t *nc_x86_sysop_entry(NcFrame *f)
         return next_for(cpu, f);
     }
     if (!cpu->cfg.sysop(cpu->cfg.opaque, f, op, size)) {
-        nc_log("hakuX-native", "cpu: unhandled system op %d at %08x", (int)op, (uint32_t)f->rip);
+        nc_log("xbased-native", "cpu: unhandled system op %d at %08x", (int)op, (uint32_t)f->rip);
         abort();
     }
     return next_for(cpu, f);
@@ -2292,7 +2292,7 @@ extern "C" void nc_context_import(NcCpuContext *c, const NcCpuState *st)
 extern "C" NcCpu *nc_cpu_create(const NcCpuConfig *cfg, uint32_t fs_base)
 {
     if (cfg->membase != nullptr) {
-        nc_log("hakuX-native", "cpu: guest memory must be at host address 0 (it is at %p)", (void *)cfg->membase);
+        nc_log("xbased-native", "cpu: guest memory must be at host address 0 (it is at %p)", (void *)cfg->membase);
         return nullptr;
     }
     auto *cpu = new NcCpu();
@@ -2303,13 +2303,13 @@ extern "C" NcCpu *nc_cpu_create(const NcCpuConfig *cfg, uint32_t fs_base)
     if (!rsqrt_probed) {
         rsqrt_probed = true;
         g_rsqrt_model = !rsqrt_host_is_model();
-        nc_log("hakuX-native", "cpu: RSQRTSS/RSQRTPS %s", g_rsqrt_model ? "by the Pentium III's table (the host's differ)"
+        nc_log("xbased-native", "cpu: RSQRTSS/RSQRTPS %s", g_rsqrt_model ? "by the Pentium III's table (the host's differ)"
                                                                          : "native (the host's are the Pentium III's)");
     }
 
     cpu->region = (uint8_t *)VirtualAlloc(nullptr, REGION_SIZE, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
     if (!cpu->region) {
-        nc_log("hakuX-native", "cpu: no translation buffer (%lu)", GetLastError());
+        nc_log("xbased-native", "cpu: no translation buffer (%lu)", GetLastError());
         delete cpu;
         return nullptr;
     }
@@ -2340,19 +2340,19 @@ extern "C" NcCpu *nc_cpu_create(const NcCpuConfig *cfg, uint32_t fs_base)
     if (const char *e = getenv("NC_SMC_CHECK")) {
         g_smc_check = atoi(e) != 0;
         if (g_smc_check) {
-            nc_log("hakuX-native", "cpu: NC_SMC_CHECK: every block checked against its code as it is entered (slow)");
+            nc_log("xbased-native", "cpu: NC_SMC_CHECK: every block checked against its code as it is entered (slow)");
         }
     }
 #endif
     cpu->veh = AddVectoredExceptionHandler(1, poll_handler);
-    nc_log("hakuX-native", "cpu: x86-64 translator, TSC %.1f MHz, KPCR at %08x", tsc_hz() / 1e6, fs_base);
+    nc_log("xbased-native", "cpu: x86-64 translator, TSC %.1f MHz, KPCR at %08x", tsc_hz() / 1e6, fs_base);
     return cpu;
 }
 
 /* ------------------------------------------------------------ profile */
 
 #ifdef _WIN32
-/* HAKUX_PROF=<start s>,<seconds> (debug): the vCPU thread sampled at about
+/* XBASED_PROF=<start s>,<seconds> (debug): the vCPU thread sampled at about
  * 2 kHz over that window (suspended, its RIP read), and where its time
  * went logged at the end: translated code (and its hottest guest blocks),
  * the stubs, this executable's functions (offsets for llvm-symbolizer:
@@ -2371,7 +2371,7 @@ static DWORD WINAPI prof_thread(void *arg)
     delete (ProfArgs *)arg;
     Sleep(pa.start_s * 1000);
     DWORD tid = pa.cpu->thread_id;
-    if (const char *want = getenv("HAKUX_PROF_THREAD")) {
+    if (const char *want = getenv("XBASED_PROF_THREAD")) {
         /* another thread by its name (SetThreadDescription's), the same report */
         typedef HRESULT(WINAPI * GetDesc)(HANDLE, PWSTR *);
         auto get = (GetDesc)(void *)GetProcAddress(GetModuleHandleA("kernelbase.dll"), "GetThreadDescription");
@@ -2396,7 +2396,7 @@ static DWORD WINAPI prof_thread(void *arg)
             }
         }
         CloseHandle(snap);
-        nc_log("hakuX-prof", "sampling thread \"%s\" (%lu)", want, tid);
+        nc_log("xbased-prof", "sampling thread \"%s\" (%lu)", want, tid);
     }
     HANDLE th = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_LIMITED_INFORMATION, FALSE, tid);
     if (!th) {
@@ -2506,11 +2506,11 @@ static DWORD WINAPI prof_thread(void *arg)
     if (!n) {
         return 0;
     }
-    nc_log("hakuX-prof", "the vCPU thread ran %.1f%% of the time (%.0f M cycles a second)",
+    nc_log("xbased-prof", "the vCPU thread ran %.1f%% of the time (%.0f M cycles a second)",
            100.0 * (double)(cyc1 - cyc0) / (double)(tsc1 - tsc0), (double)(cyc1 - cyc0) / pa.secs / 1e6);
     auto pct = [n](unsigned v) { return 100.0 * v / n; };
-    nc_log("hakuX-prof", "%u samples: idle (waiting for an interrupt) %.1f%%; busy: translated code %.1f%%, stubs %.1f%%, "
-           "hakux.exe %.1f%%, other modules %.1f%% (in system ops %.1f%%)", n, pct(idle), pct(jit), pct(stubs),
+    nc_log("xbased-prof", "%u samples: idle (waiting for an interrupt) %.1f%%; busy: translated code %.1f%%, stubs %.1f%%, "
+           "xbased.exe %.1f%%, other modules %.1f%% (in system ops %.1f%%)", n, pct(idle), pct(jit), pct(stubs),
            pct(in_exe), pct(other), pct(sysop));
     auto top = [&](auto &map, const char *what, unsigned max) {
         std::vector<std::pair<unsigned, typename std::decay_t<decltype(map)>::key_type>> v;
@@ -2520,9 +2520,9 @@ static DWORD WINAPI prof_thread(void *arg)
         std::sort(v.begin(), v.end(), [](const auto &x, const auto &y) { return x.first > y.first; });
         for (unsigned i = 0; i < v.size() && i < max; i++) {
             if constexpr (std::is_same_v<std::decay_t<decltype(v[i].second)>, std::string>) {
-                nc_log("hakuX-prof", "  %s %s %.1f%%", what, v[i].second.c_str(), pct(v[i].first));
+                nc_log("xbased-prof", "  %s %s %.1f%%", what, v[i].second.c_str(), pct(v[i].first));
             } else {
-                nc_log("hakuX-prof", "  %s %x %.1f%%", what, (unsigned)v[i].second, pct(v[i].first));
+                nc_log("xbased-prof", "  %s %x %.1f%%", what, (unsigned)v[i].second, pct(v[i].first));
             }
         }
     };
@@ -2547,7 +2547,7 @@ static DWORD WINAPI prof_thread(void *arg)
             ZYAN_SUCCESS(ZydisDecoderDecodeFull(&pa.cpu->dec, (const void *)(uintptr_t)at, 16, &in, ops))) {
             ZydisFormatterFormatInstruction(&fmt, &in, ops, in.operand_count_visible, txt, sizeof(txt), at, nullptr);
         }
-        nc_log("hakuX-prof", "  insn %08x %.1f%%  %s", at, pct(hot[i].first), txt);
+        nc_log("xbased-prof", "  insn %08x %.1f%%  %s", at, pct(hot[i].first), txt);
     }
     return 0;
 }
@@ -2558,7 +2558,7 @@ extern "C" void nc_cpu_prof_start(unsigned secs)
 {
 #ifndef _WIN32
     (void)secs;
-    nc_log("hakuX-native", "cpu: the profile is Windows-only");
+    nc_log("xbased-native", "cpu: the profile is Windows-only");
     return;
 #endif
 #ifdef _WIN32
@@ -2572,11 +2572,11 @@ extern "C" void nc_cpu_run(NcCpu *cpu, const NcCpuContext *c)
 {
     NcFrame *f = cpu->frame;
     cpu->thread_id = GetCurrentThreadId();
-#if HAKUX_DIAG && defined(_WIN32)
-    /* HAKUX_PROF (a build made to investigate): the environment was read at
+#if XBASED_DIAG && defined(_WIN32)
+    /* XBASED_PROF (a build made to investigate): the environment was read at
      * every entry here, one for each kernel call's return */
     static bool prof_started;
-    const char *pe = prof_started ? nullptr : getenv("HAKUX_PROF");
+    const char *pe = prof_started ? nullptr : getenv("XBASED_PROF");
     unsigned ps = 0, pn = 0;
     if (pe && sscanf(pe, "%u,%u", &ps, &pn) == 2 && pn) {
         prof_started = true;

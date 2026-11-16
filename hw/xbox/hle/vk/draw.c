@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — back-end draws (P3, first slice): bindless descriptors,
+ * xbased HLE GPU — back-end draws (P3, first slice): bindless descriptors,
  * texture images uploaded from the arena, samplers from texture-stage
  * state, fixed-function pipelines (shader/ff_gen.c), vertex programs
  * (shader/vsh.c; constants in the arena, set 1 dynamic uniform buffer) and
@@ -198,7 +198,7 @@ typedef struct HleVkTex {
  * again), being built by the workers (its draws skipped), or made by the
  * prebuild and not used yet this session (its first use is recorded); a
  * stand-in the look-ahead's threads build while the interpreters draw it
- * (HlePipe.upipe), or one the interpreters always draw (HAKUX_HLE_UBER=2). */
+ * (HlePipe.upipe), or one the interpreters always draw (XBASED_HLE_UBER=2). */
 enum { PIPE_READY, PIPE_PENDING, PIPE_PREBUILT, PIPE_AHEAD, PIPE_UBER };
 
 typedef struct HlePipe {
@@ -309,12 +309,12 @@ static struct {
     uint64_t ff3d, ff_lit, ff_fog, ff_texgen, ff_texxform, ff_blend, ff_psprite, prog_fog;
 } g_dr;
 
-/* HAKUX_HLE_PSLOG=1: log combiner programs and sampled pixel-shader draws. */
+/* XBASED_HLE_PSLOG=1: log combiner programs and sampled pixel-shader draws. */
 static bool pslog_on(void)
 {
     static int on = -1;
     if (on < 0) {
-        on = getenv("HAKUX_HLE_PSLOG") != NULL;
+        on = getenv("XBASED_HLE_PSLOG") != NULL;
     }
     return on;
 }
@@ -596,7 +596,7 @@ static bool push_ring_init(void)
         .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC,
         .pBufferInfo = &bi };
     T.vkUpdateDescriptorSets(g_hvk.dev, 1, &w, 0, NULL);
-    hle_log("hakuX-hle-back", "push constants %u bytes < %u: the draws' block in a storage "
+    hle_log("xbased-hle-back", "push constants %u bytes < %u: the draws' block in a storage "
             "buffer (%u KiB a command buffer)", g_hvk.props.limits.maxPushConstantsSize,
             HLE_PUSH_BYTES, PUSH_PART_BYTES >> 10);
     return g_dr.pmap != NULL;
@@ -609,7 +609,7 @@ static void push_block(VkCommandBuffer cb, const HleFfPush *pc)
         static bool s_said;
         if (!s_said) {
             s_said = true;
-            hle_log("hakuX-hle-back", "push blocks: a command buffer's %u KiB are used up: "
+            hle_log("xbased-hle-back", "push blocks: a command buffer's %u KiB are used up: "
                     "its later draws keep the last block (logged once)", PUSH_PART_BYTES >> 10);
         }
         return;
@@ -657,7 +657,7 @@ static bool fixed_init(void)
     for (unsigned i = 0; i < HLE_FRAMES; i++) {
         g_dr.fx[i].sets = g_hash_table_new_full(fx_hash, fx_equal, g_free, NULL);
     }
-    hle_log("hakuX-hle-back", "no descriptor indexing: each draw's textures in a set of its "
+    hle_log("xbased-hle-back", "no descriptor indexing: each draw's textures in a set of its "
             "own (%u a pool, up to %u pools a command buffer)", FX_SETS, FX_POOLS);
     return true;
 }
@@ -684,7 +684,7 @@ static VkDescriptorSet fixed_set(const FixedKey *k)
                 static bool s_said;
                 if (!s_said) {
                     s_said = true;
-                    hle_log("hakuX-hle-back", "draw sets: a command buffer's %u are used up: its "
+                    hle_log("xbased-hle-back", "draw sets: a command buffer's %u are used up: its "
                             "later draws keep the last textures (logged once)", FX_POOLS * FX_SETS);
                 }
                 return VK_NULL_HANDLE;
@@ -843,9 +843,10 @@ int hle_draw_init(void)
      * or 64-bit integers, their float forms */
     g_hle_glsl_f64 = g_hvk.caps.f64 && !hle_precision_fast();
     g_hle_glsl_i64 = g_hvk.caps.i64 && !hle_precision_fast();
+    g_hle_psh_fast = hle_precision_fast();
     g_hle_glsl_fixed = !g_hvk.caps.bindless;
     if (g_hle_push_ssbo && !push_ring_init()) {
-        hle_log("hakuX-hle-back", "push blocks: no storage buffer ring");
+        hle_log("xbased-hle-back", "push blocks: no storage buffer ring");
         return -1;
     }
     VkPushConstantRange pr = { PUSH_STAGES, 0, sizeof(HleFfPush) };
@@ -874,7 +875,7 @@ int hle_draw_init(void)
             }
         }
         if (g_hvk.caps.fbfetch && g_dr.fb_pooled) {
-            hle_log("hakuX-hle-back", "fbfetch: input attachments from pooled sets (%s)",
+            hle_log("xbased-hle-back", "fbfetch: input attachments from pooled sets (%s)",
                     g_hvk.caps.push_desc ? "the driver's push descriptors are avoided" :
                     "no push descriptors");
         }
@@ -919,7 +920,7 @@ int hle_draw_init(void)
         VkResult r = vkGetPhysicalDeviceImageFormatProperties(
             g_hvk.phys, VK_FORMAT_BC3_UNORM_BLOCK, VK_IMAGE_TYPE_3D, VK_IMAGE_TILING_OPTIMAL,
             VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, 0, &fp);
-        hle_log("hakuX-hle-back", "BC3 3D images: %s (max %ux%ux%u)",
+        hle_log("xbased-hle-back", "BC3 3D images: %s (max %ux%ux%u)",
                 r == VK_SUCCESS ? "supported" : "not supported", fp.maxExtent.width,
                 fp.maxExtent.height, fp.maxExtent.depth);
     }
@@ -1092,7 +1093,7 @@ static void retire(VkImage img, VkImageView view, VkImageView cube_view, VkDevic
         static bool s_logged;                   /* (kept: not destroyed, its slot not reused) */
         if (!s_logged) {
             s_logged = true;
-            hle_log("hakuX-hle-back", "no memory for the retired textures' table: one kept");
+            hle_log("xbased-hle-back", "no memory for the retired textures' table: one kept");
         }
     }
 }
@@ -1131,7 +1132,7 @@ void hle_draw_cmd_tex(const HleCmdTex *c, VkCommandBuffer cb)
         static uint64_t s_logged[4];            /* each format once (codes < 256) */
         if (c->xfmt < 256 && !(s_logged[c->xfmt >> 6] & (1ull << (c->xfmt & 63)))) {
             s_logged[c->xfmt >> 6] |= 1ull << (c->xfmt & 63);
-            hle_log("hakuX-hle-back", "texture %u: format 0x%x has no Vulkan format: not "
+            hle_log("xbased-hle-back", "texture %u: format 0x%x has no Vulkan format: not "
                     "drawn (%ux%u)", c->id, c->xfmt, c->w, c->h);
         }
         return;
@@ -1155,7 +1156,7 @@ void hle_draw_cmd_tex(const HleCmdTex *c, VkCommandBuffer cb)
         if (!t || (!g_nfree_slot && g_dr.next_slot >= HLE_MAX_IMAGES)) {
             static unsigned s_full;
             if (s_full++ < 8) {
-                hle_log("hakuX-hle-back", "texture %u (%ux%u fmt 0x%x): not created, "
+                hle_log("xbased-hle-back", "texture %u (%ux%u fmt 0x%x): not created, "
                         "%s full (sampled white)", c->id, c->w, c->h, c->xfmt,
                         t ? "bindless slots" : "texture table");
             }
@@ -1168,7 +1169,7 @@ void hle_draw_cmd_tex(const HleCmdTex *c, VkCommandBuffer cb)
         if (!make_image(t, &tf, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT)) {
             static unsigned s_fail;
             if (s_fail++ < 8) {
-                hle_log("hakuX-hle-back", "texture %u (%ux%u fmt 0x%x): image not created "
+                hle_log("xbased-hle-back", "texture %u (%ux%u fmt 0x%x): image not created "
                         "(sampled white)", c->id, c->w, c->h, c->xfmt);
             }
             t->id = 0;
@@ -1502,9 +1503,9 @@ void hle_draw_rs_brief(uint32_t out[9])
  * shaders read the stored depth (an input attachment) and discard what is
  * more than a few steps in front of it. Programs and FF draws on D24 / D16
  * buffers without W-buffering or a polygon offset (gl_FragCoord.z is the
- * depth without them); debug.hakux.eqtol=1 leaves the one-sided test.
+ * depth without them); debug.xbased.eqtol=1 leaves the one-sided test.
  */
-/* debug.hakux.eqtol=0: EQUAL depth tests exact; 1: one-sided (LESSEQUAL a step
+/* debug.xbased.eqtol=0: EQUAL depth tests exact; 1: one-sided (LESSEQUAL a step
  * toward the eye, no shader test) */
 static bool g_eqtol_off, g_zeq_off;
 /* Vertex positions truncated to 1/16 pixel each, as the NV2A rasterizer
@@ -1516,7 +1517,7 @@ static bool g_eqtol_off, g_zeq_off;
  * other and fight on the host where they don't on the console (Burnout 3's
  * road stains, Dead or Alive 2's eaves shadows). D3D titles keep the shift by
  * the rounding bias until the depth is made as the console's.
- * debug.hakux.snap=trunc: the truncation for any title; =bias: the shift for any. */
+ * debug.xbased.snap=trunc: the truncation for any title; =bias: the shift for any. */
 static bool g_snap_trunc;
 /* New at each hle_draw_psframe_poll that reads the properties (every 3
  * swaps): the draw path reads its own (skipvsh, vtok, psdbg) at its next draw */
@@ -1565,7 +1566,7 @@ static void fb_bind_pooled(VkCommandBuffer cb, HleVkSurf *rt, VkImageView zv,
             static bool s_said;
             if (!s_said) {
                 s_said = true;
-                hle_log("hakuX-hle-back", "fbfetch: a command buffer's %u sets are used up: its "
+                hle_log("xbased-hle-back", "fbfetch: a command buffer's %u sets are used up: its "
                         "later draws keep the last (logged once)", FB_SETS);
             }
             return;
@@ -1661,7 +1662,7 @@ void hle_draw_tex_prep(const HleCmdDraw *c, uint32_t rt_id, VkCommandBuffer cb)
                 /* its texels are undefined: nothing rendered into it yet */
                 static unsigned s_logged;
                 if (s_logged++ < 16) {
-                    hle_log("hakuX-hle-back", "surface %u (fmt 0x%x %ux%u pa %08x) sampled before "
+                    hle_log("xbased-hle-back", "surface %u (fmt 0x%x %ux%u pa %08x) sampled before "
                             "anything rendered into it (stage %u, target %u; first 16 logged)",
                             s->id, s->d.xfmt, s->d.w, s->d.h, s->d.pa, st, rt_id);
                 }
@@ -1769,7 +1770,7 @@ static int snap_get(const HleVkSurf *rt)
     if (mt < 0 || T.vkAllocateMemory(g_hvk.dev, &mai, NULL, &s->mem) != VK_SUCCESS ||
         T.vkBindImageMemory(g_hvk.dev, s->img, s->mem, 0) != VK_SUCCESS ||
         T.vkCreateImageView(g_hvk.dev, &vci, NULL, &s->view) != VK_SUCCESS) {
-        hle_log("hakuX-hle-back", "target copy %ux%u fmt %d: no image", rt->w, rt->h,
+        hle_log("xbased-hle-back", "target copy %ux%u fmt %d: no image", rt->w, rt->h,
                 (int)rt->fmt);
         if (s->mem) {
             T.vkFreeMemory(g_hvk.dev, s->mem, NULL);
@@ -1781,7 +1782,7 @@ static int snap_get(const HleVkSurf *rt)
         return -1;
     }
     write_image(slot, s->view);
-    hle_log("hakuX-hle-back", "target copy %u: %ux%u fmt %d (slot %u)", g_nsnap, rt->w, rt->h,
+    hle_log("xbased-hle-back", "target copy %u: %ux%u fmt %d (slot %u)", g_nsnap, rt->w, rt->h,
             (int)rt->fmt, slot);
     return (int)g_nsnap++;
 }
@@ -1922,7 +1923,7 @@ static uint32_t sampler_index(const uint32_t *tss, uint32_t lod_down)
         made++;
         with += aniso >= 2.0f;
         if (made == 4 || made == 16 || made == 64) {
-            hle_log("hakuX-hle-back", "samplers: %u of %u anisotropic (forced %dx, device max %.0f)", with, made,
+            hle_log("xbased-hle-back", "samplers: %u of %u anisotropic (forced %dx, device max %.0f)", with, made,
                     hle_host_anisotropy(), g_hvk.caps.max_aniso);
         }
     }
@@ -2082,7 +2083,7 @@ static VkShaderModule module(HleShaderStage stage, const char *src, bool cache_o
         return VK_NULL_HANDLE;
     }
     if (!spv) {
-        hle_log("hakuX-hle-pipe", "compile failed:\n%s", src);
+        hle_log("xbased-hle-pipe", "compile failed:\n%s", src);
         return VK_NULL_HANDLE;
     }
     if (stage == HLE_SHADER_VERTEX && strstr(src, "uint xfm(uint a, uint b)") && !strstr(src, "/* light ")) {
@@ -2108,7 +2109,7 @@ void hle_draw_cmd_vsh(const HleCmdVsh *c)
         }
     }
     if (g_dr.nprog >= HLE_MAX_PROGS || c->nslots > HLE_VSH_MAX_SLOTS + HLE_FFHW_SLOTS) {
-        hle_log("hakuX-hle-pipe", "vertex program %016llx dropped (%u programs, %u slots)",
+        hle_log("xbased-hle-pipe", "vertex program %016llx dropped (%u programs, %u slots)",
                 (unsigned long long)c->hash, g_dr.nprog, c->nslots);
         return;
     }
@@ -2294,7 +2295,7 @@ static void pipe_flush(void)
     g_pipe_last_ok = false;
     static unsigned s_flushes;
     if (s_flushes++ < 8) {
-        hle_log("hakuX-hle-pipe", "pipeline table full (%u): %u pipelines let go, %u being built "
+        hle_log("xbased-hle-pipe", "pipeline table full (%u): %u pipelines let go, %u being built "
                 "kept (#%u; first 8 logged)", HLE_MAX_PIPES, let_go, keep, s_flushes);
     }
 }
@@ -2353,13 +2354,13 @@ static bool target_redrawn(const HleVkSurf *s)
  * the driver takes up to 2 s over one, so the workers build it, whatever the
  * asynchronous setting, while the frames draw every program's stand-in
  * (HLE_VSH_XF_FAST, made at once: as fast as a program before HLE_VSH_XF).
- * HAKUX_HLE_XFSYNC=1: the exact form built before its first draw (the
+ * XBASED_HLE_XFSYNC=1: the exact form built before its first draw (the
  * pgraph harness, whose pictures are each a frame's). */
 static bool xf_sync(void)
 {
     static int on = -1;
     if (on < 0) {
-        const char *e = getenv("HAKUX_HLE_XFSYNC");
+        const char *e = getenv("XBASED_HLE_XFSYNC");
         on = e && *e && atoi(e) != 0;
     }
     return on;
@@ -2712,14 +2713,14 @@ void hle_draw_dry(const HleCmdDraw *c, uint32_t rt_id, uint32_t ds_id, const Hle
 }
 
 /* (render thread) a draw is about to wait for a pipeline built in place: the
- * records the front end has published since the last look (HAKUX_HLE_AHEAD=0:
+ * records the front end has published since the last look (XBASED_HLE_AHEAD=0:
  * never). The front end goes on while the render thread builds: a burst's
  * later draws come in during its first builds. */
 static void ahead_maybe(void)
 {
     static int on = -1;
     if (on < 0) {
-        const char *e = getenv("HAKUX_HLE_AHEAD");
+        const char *e = getenv("XBASED_HLE_AHEAD");
         on = !(e && *e && atoi(e) == 0) && hle_gpl_on();    /* (parts to build: gpl.c) */
     }
     if (on && !g_dry) {
@@ -2730,12 +2731,12 @@ static void ahead_maybe(void)
 /* ---- the interpreters (shader/uber.h) ---------------------------------------------
  * A key the vertex program interpreter and the combiner interpreter cover draws
  * by their pipeline while its stand-in is built by the look-ahead's threads:
- * the frame does not wait for it (HAKUX_HLE_UBER=1), and the stand-in takes
+ * the frame does not wait for it (XBASED_HLE_UBER=1), and the stand-in takes
  * over once it is there (ahead_collect). Their pipeline is one per raster,
  * blend and format state (g_ub.pipes), the key's own vertex program and pixel
  * stage in a config the two stages read (a slot of g_ub.buf, set g_ub.set,
  * after the draws' layout's: a layout of their own, compatible with the
- * draws' for every set before it). HAKUX_HLE_UBER=2: every draw they cover
+ * draws' for every set before it). XBASED_HLE_UBER=2: every draw they cover
  * by them (their pictures and their cost, for the tests). */
 #define UB_SLOTS 4096
 #define UB_PIPES 512
@@ -2776,15 +2777,15 @@ static struct {
 static void uber_init(const VkDescriptorSetLayout *sets, uint32_t nsets, const VkPushConstantRange *pr,
                       uint32_t npr)
 {
-    /* (HAKUX_HLE_UBER: 0 off, 1 the hybrid, 2 every draw they cover, over the setting) */
-    const char *e = getenv("HAKUX_HLE_UBER");
+    /* (XBASED_HLE_UBER: 0 off, 1 the hybrid, 2 every draw they cover, over the setting) */
+    const char *e = getenv("XBASED_HLE_UBER");
     g_ub.mode = e && *e ? atoi(e) : hle_pipe_hybrid() && !hle_pipe_async() ? 1 : 0;
     if (!g_ub.mode) {
         return;
     }
     if (!hle_gpl_on() || !g_hvk.caps.bindless || !g_hvk.caps.vids ||
         nsets + 1 > g_hvk.props.limits.maxBoundDescriptorSets) {
-        hle_log("hakuX-hle-pipe", "interpreter pipelines: off (the device: libraries %d, bindless %d, sets %u): "
+        hle_log("xbased-hle-pipe", "interpreter pipelines: off (the device: libraries %d, bindless %d, sets %u): "
                 "new shaders built asynchronously", hle_gpl_on(), g_hvk.caps.bindless,
                 g_hvk.props.limits.maxBoundDescriptorSets);
         g_ub.mode = 0;
@@ -2863,7 +2864,7 @@ static void uber_init(const VkDescriptorSetLayout *sets, uint32_t nsets, const V
     if (!ok) {
         hle_pipe_no_interpreters();
     }
-    hle_log("hakuX-hle-pipe", "interpreter pipelines: %s (%s; set %u, %u slots of %u bytes)",
+    hle_log("xbased-hle-pipe", "interpreter pipelines: %s (%s; set %u, %u slots of %u bytes)",
             ok ? "on" : "off (texts)", g_ub.mode == 2 ? "every draw they cover" : "while stand-ins build",
             g_ub.set, UB_SLOTS, g_ub.stride);
 }
@@ -3036,7 +3037,7 @@ static int uber_slot_new(const PipeKey *kf, const uint32_t *tok, uint32_t ns, ui
     static bool s_said;
     if (!s_said) {
         s_said = true;
-        hle_log("hakuX-hle-pipe", "interpreter pipelines: their %u config slots are all held (logged once)", UB_SLOTS);
+        hle_log("xbased-hle-pipe", "interpreter pipelines: their %u config slots are all held (logged once)", UB_SLOTS);
     }
     return -1;
 }
@@ -3149,7 +3150,7 @@ static bool uber_join(int i, const PipeKey *kf, const uint32_t *tok, uint32_t ns
     return true;
 }
 
-/* (render thread, HAKUX_HLE_UBER=2) k by them if they cover it, else VK_NULL_HANDLE */
+/* (render thread, XBASED_HLE_UBER=2) k by them if they cover it, else VK_NULL_HANDLE */
 static VkPipeline uber_force(const PipeKey *k)
 {
     PipeKey kf;
@@ -3296,7 +3297,7 @@ static VkPipeline pipeline_new(const PipeKey *k, uint64_t h, const HleVkSurf *ta
         static bool s_full;
         if (!s_full) {
             s_full = true;
-            hle_log("hakuX-hle-pipe", "pipeline table full (%u) of pipelines being built: new "
+            hle_log("xbased-hle-pipe", "pipeline table full (%u) of pipelines being built: new "
                     "pipelines' draws are dropped", HLE_MAX_PIPES);
         }
         return VK_NULL_HANDLE;
@@ -3539,7 +3540,7 @@ static HlePbResult pipeline_build(const void *key, const uint32_t *tok, uint32_t
     } else if (k->vsh ? !tok || !(hle_ffhw_is(tok, nslots) ? hle_ffhw_glsl(tok, nslots, &vtx, vsrc, SRC_MAX)
                                                            : hle_vsh_glsl(tok, nslots, &vtx, vsrc, SRC_MAX))
                       : !hle_ff_vs_glsl(&k->vs, vsrc, SRC_MAX)) {
-        hle_log("hakuX-hle-pipe", "vertex shader %016llx: %s", (unsigned long long)k->vsh,
+        hle_log("xbased-hle-pipe", "vertex shader %016llx: %s", (unsigned long long)k->vsh,
                 tok || !k->vsh ? "translation failed" : "program unknown");
         return HLE_PB_FAILED;
     }
@@ -3547,7 +3548,7 @@ static HlePbResult pipeline_build(const void *key, const uint32_t *tok, uint32_t
     if (uber) {
     } else if (k->psh ? !hle_psh_glsl(&k->pk, fsrc, SRC_MAX, &unsup)
                       : !hle_ff_ps_glsl(&k->ps, fsrc, SRC_MAX)) {
-        hle_log("hakuX-hle-pipe", "pixel shader (%s, fvf=0x%x vsh=%016llx): translation failed",
+        hle_log("xbased-hle-pipe", "pixel shader (%s, fvf=0x%x vsh=%016llx): translation failed",
                 k->psh ? "combiners" : "stages", k->vs.fvf, (unsigned long long)k->vsh);
         return HLE_PB_FAILED;
     }
@@ -3566,20 +3567,20 @@ static HlePbResult pipeline_build(const void *key, const uint32_t *tok, uint32_t
         memcpy(nl + 1, def, (size_t)dn);
     }
     if (g_hle_glsl_fixed && !hle_glsl_fixed_slots(fsrc, SRC_MAX)) {
-        hle_log("hakuX-hle-pipe", "pixel shader: too long for the draw set's places");
+        hle_log("xbased-hle-pipe", "pixel shader: too long for the draw set's places");
         return HLE_PB_FAILED;
     }
     if (unsup && !cache_only) {
-        hle_log("hakuX-hle-pipe", "pixel shader: texture modes %x sampled as PROJECT2D "
+        hle_log("xbased-hle-pipe", "pixel shader: texture modes %x sampled as PROJECT2D "
                 "(modes 0x%05x)", unsup, k->pk.tex_modes);
     }
-    if (pslog_on() && k->psh && !cache_only && !uber) {  /* HAKUX_HLE_PSLOG=1: combiner programs */
+    if (pslog_on() && k->psh && !cache_only && !uber) {  /* XBASED_HLE_PSLOG=1: combiner programs */
         const HlePshKey *q = &k->pk;
-        hle_log("hakuX-hle-pipe", "psh count=%x tex=%05x in=%x dot=%x cmp=%x final=%08x/%08x "
+        hle_log("xbased-hle-pipe", "psh count=%x tex=%05x in=%x dot=%x cmp=%x final=%08x/%08x "
                 "fog=%u atest=%u/%u", q->count, q->tex_modes, q->input_tex, q->dot_map,
                 q->compare, q->final_abcd, q->final_efg, q->fog, q->alpha_test, q->alpha_func);
         for (unsigned s = 0; s < (q->count & 0xFF) && s < 8; s++) {
-            hle_log("hakuX-hle-pipe", "  stage %u rgb %08x -> %05x  alpha %08x -> %05x", s,
+            hle_log("xbased-hle-pipe", "  stage %u rgb %08x -> %05x  alpha %08x -> %05x", s,
                     q->rgb_in[s], q->rgb_out[s], q->alpha_in[s], q->alpha_out[s]);
         }
     }
@@ -3879,7 +3880,7 @@ static HlePbResult pipeline_build(const void *key, const uint32_t *tok, uint32_t
     if ((cache_only || have) && (compile || vr == VK_PIPELINE_COMPILE_REQUIRED)) {
         return HLE_PB_COMPILE;          /* not logged: built now or by the workers */
     }
-    hle_log("hakuX-hle-pipe", "pipeline %016llx fvf=0x%x vsh=%016llx in=%x %s=%u %s in %.1f ms "
+    hle_log("xbased-hle-pipe", "pipeline %016llx fvf=0x%x vsh=%016llx in=%x %s=%u %s in %.1f ms "
             "(spirv %.1f%s)%s%s",
             (unsigned long long)key_hash(k, g_key_bytes), k->vs.fvf, (unsigned long long)k->vsh,
             k->vk.in_mask, k->psh ? "combiners" : "stages",
@@ -3895,10 +3896,10 @@ static HlePbResult pipeline_build(const void *key, const uint32_t *tok, uint32_t
     if (!p) {
         if (tok && mc.vbad) {
             /* the program's tokens, for hle_vshgen (a broken translation) */
-            hle_log("hakuX-hle-pipe", "vtok %016llx slots=%u", (unsigned long long)k->vsh,
+            hle_log("xbased-hle-pipe", "vtok %016llx slots=%u", (unsigned long long)k->vsh,
                     nslots);
             for (uint32_t i = 0; i < nslots; i++) {
-                hle_log("hakuX-hle-pipe", "  vtok %u: %08x %08x %08x %08x", i, tok[4 * i],
+                hle_log("xbased-hle-pipe", "  vtok %u: %08x %08x %08x %08x", i, tok[4 * i],
                         tok[4 * i + 1], tok[4 * i + 2], tok[4 * i + 3]);
             }
         }
@@ -3911,7 +3912,7 @@ static HlePbResult pipeline_build(const void *key, const uint32_t *tok, uint32_t
 static void pipe_async_init(void)
 {
     /* the record's key size too, and its own record (a device's keys are
-     * one kind, unless debug.hakux.caps changes it) */
+     * one kind, unless debug.xbased.caps changes it) */
     HLE_BUILD_BUG_ON(_Alignof(ViKey) != 8);
     HLE_BUILD_BUG_ON(_Alignof(DsKey) != 8);
     /* up to vi: the key as it was before vi (8-aligned for its uint64_t) */
@@ -4129,7 +4130,7 @@ static uint32_t stage_slot(const HleCmdDraw *c, unsigned st, uint32_t rt_id, uin
         g_rt_seen[id >> 3] |= 1u << (id & 7);
         g_rt_told++;
         HleVkSurf *any = hle_surf_get(id);
-        hle_log("hakuX-hle-drawlog", "rt-tex id=%u surf=%d img=%d layout=%d slot=%u "
+        hle_log("xbased-hle-drawlog", "rt-tex id=%u surf=%d img=%d layout=%d slot=%u "
                 "fmt=%d %ux%u rt=%u", id, any != NULL,
                 any && any->img, any ? (int)any->layout : -1, slot,
                 any ? (int)any->fmt : -1, any ? any->d.w : 0, any ? any->d.h : 0,
@@ -4183,7 +4184,7 @@ static VkFormat vfmt(VkFormat f, VkFormat wide)
             *s = (fp.bufferFeatures & VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT) ? 1 : -1;
             if (!g_hvk.caps.vfmt3 && (c[i] == VK_FORMAT_R8G8B8_UNORM || c[i] == VK_FORMAT_R16G16B16_SNORM ||
                                       c[i] == VK_FORMAT_R16G16B16_SINT || c[i] == VK_FORMAT_R16G16B16_SSCALED)) {
-                *s = -1;                /* debug.hakux.caps=-v3: as AMD's drivers */
+                *s = -1;                /* debug.xbased.caps=-v3: as AMD's drivers */
             }
         }
         if (*s > 0) {
@@ -4421,30 +4422,30 @@ static void ff_vs_key(HleFfVsKey *v, const HleCmdState *s, const HleCmdDraw *c)
 }
 
 /* Material dump: every distinct material (combiner program, stage textures,
- * constants) of one frame, with textures and samplers. HAKUX_HLE_PSFRAME=
+ * constants) of one frame, with textures and samplers. XBASED_HLE_PSFRAME=
  * <swap> picks the frame; on demand, a new value of the Android property
- * debug.hakux.psframe dumps the next frame (screenshot first, then set it),
- * debug.hakux.psmaxn=<n> keeps draws of at most n indices/vertices. */
+ * debug.xbased.psframe dumps the next frame (screenshot first, then set it),
+ * debug.xbased.psmaxn=<n> keeps draws of at most n indices/vertices. */
 static int64_t g_psf_frame = -2;
 static uint32_t g_psf_maxn;
 static uint64_t g_psf_seen[1024];
 static unsigned g_psf_nseen;
-/* debug (debug.hakux.norec, live): 1 records every draw's whole state (no
+/* debug (debug.xbased.norec, live): 1 records every draw's whole state (no
  * cache of the recorded state), 2 keeps the vertex offset in the binding
  * (firstVertex 0), 3 both */
 static unsigned g_norec;
 
-/* debug (debug.hakux.probe=<program hash>[,<hash>...], hex, up to 4, live;
+/* debug (debug.xbased.probe=<program hash>[,<hash>...], hex, up to 4, live;
  * 0 = off): an occlusion query around each draw of those programs, so a
  * frame's samples per draw can be compared without changing how it renders
- * (no barrier or pass split). Logged (hakuX-hle-probe) 3 swaps later: per
+ * (no barrier or pass split). Logged (xbased-hle-probe) 3 swaps later: per
  * draw its samples, a letter for its viewport registers c58/c59 (the
  * frame's distinct pairs: a, b, ...), its program's index in the list, '*'
  * when recorded into a later submission than the frame's first draw, then
  * ':' and 16-bit hashes of its indices, the vertices they fetch, its
  * constant file, its pipeline and its recorded state (lines stop near 1 KiB:
- * probe few programs). debug.hakux.probez=<VkCompareOp + 1> overrides the
- * probed draws' depth test; debug.hakux.probefocus=<n> logs draw n of each
+ * probe few programs). debug.xbased.probez=<VkCompareOp + 1> overrides the
+ * probed draws' depth test; debug.xbased.probefocus=<n> logs draw n of each
  * program with its raw transform rows (c0..c3, c58, c59). */
 #define PROBE_FRAMES 4
 #define PROBE_N      128
@@ -4452,8 +4453,8 @@ static unsigned g_norec;
 static struct {
     uint64_t vsh[PROBE_PROGS];
     unsigned nvsh;
-    uint32_t zop;           /* debug.hakux.probez: VkCompareOp + 1 for probed draws, 0 = theirs */
-    int focus;              /* debug.hakux.probefocus: draw logged in full, -1 none */
+    uint32_t zop;           /* debug.xbased.probez: VkCompareOp + 1 for probed draws, 0 = theirs */
+    int focus;              /* debug.xbased.probefocus: draw logged in full, -1 none */
     VkQueryPool pool;
     bool failed;
     struct {
@@ -4521,9 +4522,9 @@ static void probe_log(uint64_t swap)
                       'a' + (char)j, vps[j][0], vps[j][1], vps[j][2], vps[j][3], vps[j][4],
                       vps[j][5], vps[j][6], vps[j][7]);
     }
-    hle_log("hakuX-hle-probe", "%s", line);
+    hle_log("xbased-hle-probe", "%s", line);
     if (g_probe.focus >= 0) {
-        /* debug.hakux.probefocus=<n>: draw n of each probed program, its
+        /* debug.xbased.probefocus=<n>: draw n of each probed program, its
          * samples and transform rows c0..c3, c58, c59 (raw bits) */
         uint32_t seen[PROBE_PROGS] = { 0 };
         for (uint32_t i = 0; i < f->n; i++) {
@@ -4539,7 +4540,7 @@ static void probe_log(uint64_t swap)
                 m += snprintf(line + m, sizeof(line) - m, "%s%08x", w % 4 ? "" : " ",
                               f->d[i].xf[w]);
             }
-            hle_log("hakuX-hle-probe", "%s", line);
+            hle_log("xbased-hle-probe", "%s", line);
         }
     }
     /* the inputs, once in a while (they repeat while the scene does) */
@@ -4551,7 +4552,7 @@ static void probe_log(uint64_t swap)
                           f->d[i].count, f->d[i].vfirst, f->d[i].consts, f->d[i].tex0,
                           f->d[i].bind0);
         }
-        hle_log("hakuX-hle-probe", "%s", line);
+        hle_log("xbased-hle-probe", "%s", line);
     }
     T.vkResetQueryPool(g_hvk.dev, g_probe.pool, base, PROBE_N);
     f->n = 0;
@@ -4635,7 +4636,7 @@ static int probe_begin(VkCommandBuffer cb, const HleCmdDraw *c, uint32_t vfirst,
 void hle_draw_psframe_poll(uint64_t swap)
 {
     if (g_psf_frame == -2) {
-        const char *e = getenv("HAKUX_HLE_PSFRAME");
+        const char *e = getenv("XBASED_HLE_PSFRAME");
         g_psf_frame = e ? atoll(e) : -1;
     }
     probe_log(swap);
@@ -4648,13 +4649,13 @@ void hle_draw_psframe_poll(uint64_t swap)
     next_poll = swap + 3;   /* every 3 swaps: odd, so re-arming reaches either frame parity */
     g_prop_gen++;           /* and the draws' own properties at their next draw */
     char v[PROP_VALUE_MAX] = "";
-    hle_prop_get("debug.hakux.norec", v);
+    hle_prop_get("debug.xbased.norec", v);
     if ((unsigned)atoi(v) != g_norec) {
         g_norec = (unsigned)atoi(v);
-        hle_log("hakuX-hle-pipe", "norec=%u (1: no state cache, 2: no firstVertex)", g_norec);
+        hle_log("xbased-hle-pipe", "norec=%u (1: no state cache, 2: no firstVertex)", g_norec);
     }
     v[0] = 0;
-    hle_prop_get("debug.hakux.probe", v);
+    hle_prop_get("debug.xbased.probe", v);
     {
         uint64_t pv[PROBE_PROGS] = { 0 };
         unsigned np = 0;
@@ -4672,43 +4673,43 @@ void hle_draw_psframe_poll(uint64_t swap)
         if (np != g_probe.nvsh || memcmp(pv, g_probe.vsh, sizeof(pv))) {
             memcpy(g_probe.vsh, pv, sizeof(pv));
             g_probe.nvsh = np;
-            hle_log("hakuX-hle-probe", "probe programs: %u (%s)", np, v);
+            hle_log("xbased-hle-probe", "probe programs: %u (%s)", np, v);
         }
     }
     v[0] = 0;
-    hle_prop_get("debug.hakux.eqtol", v);
+    hle_prop_get("debug.xbased.eqtol", v);
     if (g_eqtol_off != !strcmp(v, "0") || g_zeq_off != !strcmp(v, "1")) {
         g_eqtol_off = !strcmp(v, "0");
         g_zeq_off = !strcmp(v, "1");
-        hle_log("hakuX-hle-pipe", "EQUAL depth tests: %s",
+        hle_log("xbased-hle-pipe", "EQUAL depth tests: %s",
                 g_eqtol_off ? "exact" : g_zeq_off ? "a step behind, any in front" :
                 "a step behind, a few in front (the depth read)");
     }
-    hle_fixes_poll();                   /* (debug.hakux.fixes: -d3d_snap_bias, ...) */
+    hle_fixes_poll();                   /* (debug.xbased.fixes: -d3d_snap_bias, ...) */
     const bool trunc = !hle_fix(HLE_FIX_D3D_SNAP_BIAS);
     if (g_snap_trunc != trunc) {
         g_snap_trunc = trunc;
-        hle_log("hakuX-hle-pipe", "vertex positions: %s",
+        hle_log("xbased-hle-pipe", "vertex positions: %s",
                 g_snap_trunc ? "each truncated to 1/16 pixel" : "all moved by the rounding bias (1/32 pixel)");
     }
     v[0] = 0;
-    hle_prop_get("debug.hakux.probefocus", v);
+    hle_prop_get("debug.xbased.probefocus", v);
     g_probe.focus = v[0] ? atoi(v) : -1;
     v[0] = 0;
-    hle_prop_get("debug.hakux.probez", v);
+    hle_prop_get("debug.xbased.probez", v);
     if ((uint32_t)atoi(v) != g_probe.zop) {
         g_probe.zop = (uint32_t)atoi(v);
-        hle_log("hakuX-hle-probe", "probed draws' depth test: %s",
+        hle_log("xbased-hle-probe", "probed draws' depth test: %s",
                 g_probe.zop ? "overridden" : "theirs");
     }
     static HleProp psf_prop;
-    if (hle_prop_new(&psf_prop, "debug.hakux.psframe", v)) {
+    if (hle_prop_new(&psf_prop, "debug.xbased.psframe", v)) {
         char n[PROP_VALUE_MAX] = "";
-        hle_prop_get("debug.hakux.psmaxn", n);
+        hle_prop_get("debug.xbased.psmaxn", n);
         g_psf_maxn = (uint32_t)atoi(n);
         g_psf_frame = swap + 1;
         g_psf_nseen = 0;
-        hle_log("hakuX-hle-pipe", "psframe armed for swap %llu (maxn %u)",
+        hle_log("xbased-hle-pipe", "psframe armed for swap %llu (maxn %u)",
                 (unsigned long long)g_psf_frame, g_psf_maxn);
     }
 #endif
@@ -4747,7 +4748,7 @@ static void psframe_log(const HleCmdDraw *c, const HleCmdState *s, const HlePshK
     seen[nseen++] = h;
     g_psf_nseen = nseen;
     HleVkSurf *rts = hle_surf_get(rt_id);
-    hle_log("hakuX-hle-pipe", "psf #%u n=%u rt=%u/%d tex=%u,%u,%u,%u modes=%05x count=%x "
+    hle_log("xbased-hle-pipe", "psf #%u n=%u rt=%u/%d tex=%u,%u,%u,%u modes=%05x count=%x "
             "final=%08x/%08x shadow=%x/%x dot=%x in=%x cmp=%x blend=%u %x/%x bc=%08x op=%x atest=%u/%x/%x "
             "z=%u/%u/%x cw=%x vsh=%016llx",
             nseen, c->count, rt_id, rts ? (int)rts->fmt : -1, c->tex[0], c->tex[1], c->tex[2],
@@ -4760,7 +4761,7 @@ static void psframe_log(const HleCmdDraw *c, const HleCmdState *s, const HlePshK
     for (unsigned z = 0; z < 4; z++) {          /* each texture: format, size, signed channels */
         HleVkTex *tx = c->tex[z] ? tex_find(c->tex[z]) : NULL;
         if (tx) {
-            hle_log("hakuX-hle-pipe", "  tex%u %u: fmt %x %ux%u levels %u signed %x", z, c->tex[z], tx->xfmt,
+            hle_log("xbased-hle-pipe", "  tex%u %u: fmt %x %ux%u levels %u signed %x", z, c->tex[z], tx->xfmt,
                     tx->w, tx->h, tx->levels, s->tss[z][TSS_COLORSIGN] >> 28);
         }
     }
@@ -4770,7 +4771,7 @@ static void psframe_log(const HleCmdDraw *c, const HleCmdState *s, const HlePshK
             float f[6];
             memcpy(f, &s->tss[st][TSS_BUMPENVMAT00], 16);
             memcpy(f + 4, &s->tss[st][TSS_BUMPENVLSCALE], 8);
-            hle_log("hakuX-hle-pipe", "  bump st%u: %g %g %g %g l %g %g", st, f[0], f[1],
+            hle_log("xbased-hle-pipe", "  bump st%u: %g %g %g %g l %g %g", st, f[0], f[1],
                     f[2], f[3], f[4], f[5]);
         }
     }
@@ -4779,11 +4780,11 @@ static void psframe_log(const HleCmdDraw *c, const HleCmdState *s, const HlePshK
         memcpy(&fs, &s->rs[RS_FOGSTART], 4);
         memcpy(&fe, &s->rs[RS_FOGEND], 4);
         memcpy(&fd, &s->rs[RS_FOGDENSITY], 4);
-        hle_log("hakuX-hle-pipe", "  fog: table mode %u start %g end %g density %g colour %08x "
+        hle_log("xbased-hle-pipe", "  fog: table mode %u start %g end %g density %g colour %08x "
                 "(key %u)", s->rs[RS_FOGTABLEMODE], fs, fe, fd, s->rs[RS_FOGCOLOR], pk->fog);
     }
     if (c->vsh) {                               /* the program's input layout */
-        hle_log("hakuX-hle-pipe", "  a: %x %x %x %x %x %x stride=%u", c->attr[0], c->attr[1],
+        hle_log("xbased-hle-pipe", "  a: %x %x %x %x %x %x stride=%u", c->attr[0], c->attr[1],
                 c->attr[2], c->attr[3], c->attr[4], c->attr[5], c->bind_stride[0]);
         /* each binding's first two vertices (bytes) */
         for (unsigned b = 0; b < c->nbind && b < 6; b++) {
@@ -4801,17 +4802,17 @@ static void psframe_log(const HleCmdDraw *c, const HleCmdState *s, const HlePshK
                 }
                 m += snprintf(hex + m, sizeof(hex) - m, v ? "" : " | ");
             }
-            hle_log("hakuX-hle-pipe", "  bind%u %s %08x stride %u: %s", b,
+            hle_log("xbased-hle-pipe", "  bind%u %s %08x stride %u: %s", b,
                     ((c->guest_vb >> b) & 1) ? "pa" : "arena", c->bind_off[b], st, hex);
         }
     }
     for (unsigned i = 0; ((pk->shadow & 15) || c->count <= 6) && i < (pk->count & 0xFF) &&
                          i < 8; i++) {
-        hle_log("hakuX-hle-pipe", "  comb%u rgb in=%08x out=%08x a in=%08x out=%08x fog=%u", i,
+        hle_log("xbased-hle-pipe", "  comb%u rgb in=%08x out=%08x a in=%08x out=%08x fog=%u", i,
                 pk->rgb_in[i], pk->rgb_out[i], pk->alpha_in[i], pk->alpha_out[i], pk->fog);
     }
     if (c->count <= 6 && c->nbind) {           /* small draws: layout and raw vertices */
-        hle_log("hakuX-hle-pipe", "  attr: %x %x %x %x %x %x | bind0 off=%u stride=%u",
+        hle_log("xbased-hle-pipe", "  attr: %x %x %x %x %x %x | bind0 off=%u stride=%u",
                 c->attr[0], c->attr[1], c->attr[2], c->attr[3], c->attr[4], c->attr[5],
                 c->bind_off[0], c->bind_stride[0]);
         const uint8_t *vb = (c->guest_vb & 1) ? hle_pa_ptr(c->bind_off[0], 4 * 256)
@@ -4822,7 +4823,7 @@ static void psframe_log(const HleCmdDraw *c, const HleCmdState *s, const HlePshK
             for (unsigned b = 0; b < MIN(c->bind_stride[0], 176u) && m < (int)sizeof(hex) - 3; b++) {
                 m += snprintf(hex + m, sizeof(hex) - m, "%02x", vb[v * c->bind_stride[0] + b]);
             }
-            hle_log("hakuX-hle-pipe", "  v%u: %s", v, hex);
+            hle_log("xbased-hle-pipe", "  v%u: %s", v, hex);
         }
     }
     static uint64_t vdumped[32];
@@ -4839,18 +4840,18 @@ static void psframe_log(const HleCmdDraw *c, const HleCmdState *s, const HlePshK
                 break;
             }
         }
-        hle_log("hakuX-hle-pipe", "  vsh %016llx slots=%u attr: %x %x %x %x %x %x %x %x %x %x "
+        hle_log("xbased-hle-pipe", "  vsh %016llx slots=%u attr: %x %x %x %x %x %x %x %x %x %x "
                 "%x %x %x %x %x %x", (unsigned long long)c->vsh, ns, c->attr[0], c->attr[1],
                 c->attr[2], c->attr[3], c->attr[4], c->attr[5], c->attr[6], c->attr[7],
                 c->attr[8], c->attr[9], c->attr[10], c->attr[11], c->attr[12], c->attr[13],
                 c->attr[14], c->attr[15]);
         for (uint32_t i = 0; i < ns; i++) {
-            hle_log("hakuX-hle-pipe", "  vtok %u: %08x %08x %08x %08x", i, tok[4 * i],
+            hle_log("xbased-hle-pipe", "  vtok %u: %08x %08x %08x %08x", i, tok[4 * i],
                     tok[4 * i + 1], tok[4 * i + 2], tok[4 * i + 3]);
         }
         const float (*cf)[4] = (const float (*)[4])(g_harena.map + c->consts_off);
         for (unsigned i = 0; i < 192; i += 4) {
-            hle_log("hakuX-hle-pipe", "  c%u: %g %g %g %g | %g %g %g %g | %g %g %g %g | "
+            hle_log("xbased-hle-pipe", "  c%u: %g %g %g %g | %g %g %g %g | %g %g %g %g | "
                     "%g %g %g %g", i, cf[i][0], cf[i][1], cf[i][2], cf[i][3], cf[i + 1][0],
                     cf[i + 1][1], cf[i + 1][2], cf[i + 1][3], cf[i + 2][0], cf[i + 2][1],
                     cf[i + 2][2], cf[i + 2][3], cf[i + 3][0], cf[i + 3][1], cf[i + 3][2],
@@ -4858,7 +4859,7 @@ static void psframe_log(const HleCmdDraw *c, const HleCmdState *s, const HlePshK
         }
     }
     for (unsigned i = 0; i < (pk->count & 0xFF) && i < 8; i++) {
-        hle_log("hakuX-hle-pipe", "  st%u rgb %08x>%05x a %08x>%05x c0=%08x c1=%08x", i,
+        hle_log("xbased-hle-pipe", "  st%u rgb %08x>%05x a %08x>%05x c0=%08x c1=%08x", i,
                 pk->rgb_in[i], pk->rgb_out[i], pk->alpha_in[i], pk->alpha_out[i], psc[i],
                 psc[8 + i]);
     }
@@ -4869,7 +4870,7 @@ static void psframe_log(const HleCmdDraw *c, const HleCmdState *s, const HlePshK
         if (!tx && !sf) {
             continue;
         }
-        hle_log("hakuX-hle-pipe", "  t%u %s xfmt=0x%x %ux%ux%u%s lv=%u f=%u%s addr=%u,%u,%u "
+        hle_log("xbased-hle-pipe", "  t%u %s xfmt=0x%x %ux%ux%u%s lv=%u f=%u%s addr=%u,%u,%u "
                 "filt=%u,%u,%u maxmip=%u bias=%08x tci=%x ttf=%x", st, tx ? "tex" : "surf",
                 tx ? tx->xfmt : sf->d.xfmt, tx ? tx->w : sf->d.w, tx ? tx->h : sf->d.h,
                 tx ? tx->d : 1, tx && tx->vol ? " vol" : "",
@@ -4894,7 +4895,7 @@ static void drop(int why, const HleCmdDraw *c, uint32_t rt_id, uint32_t ds_id)
                                          "vertex layout", "no pipeline",
                                          "pipeline being built" };
     if (g_dr.drops[why]++ == 0) {
-        hle_log("hakuX-hle-back", "draw dropped (%s): n=%u prim=%u fvf=0x%x vsh=%016llx "
+        hle_log("xbased-hle-back", "draw dropped (%s): n=%u prim=%u fvf=0x%x vsh=%016llx "
                 "nbind=%u tex=%u,%u,%u,%u rt=%u ds=%u", k_why[why], c->count, c->prim, c->fvf,
                 (unsigned long long)c->vsh, c->nbind, c->tex[0], c->tex[1], c->tex[2],
                 c->tex[3], rt_id, ds_id);
@@ -5092,9 +5093,9 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         drop(DROP_TARGET, c, rt_id, ds_id);
         return;
     }
-    {   /* debug: HAKUX_HLE_SKIPVSH=<hash>[/<count>[/<alphatest>]][,...], those
+    {   /* debug: XBASED_HLE_SKIPVSH=<hash>[/<count>[/<alphatest>]][,...], those
          * programs' draws (with that index count, alpha test on/off) are dropped;
-         * the property debug.hakux.skipvsh (same syntax, "0" = none) replaces
+         * the property debug.xbased.skipvsh (same syntax, "0" = none) replaces
          * it live */
         static uint64_t skip[8];
         static int64_t skip_n[8], skip_at[8];
@@ -5104,15 +5105,15 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         const char *e = NULL;
         char v[PROP_VALUE_MAX];
         if (nskip < 0) {
-            e = getenv("HAKUX_HLE_SKIPVSH");
+            e = getenv("XBASED_HLE_SKIPVSH");
         }
         if (polled != g_prop_gen) {
             polled = g_prop_gen;
             v[0] = 0;
-            if (hle_prop_get("debug.hakux.skipvsh", v) > 0 && strcmp(v, last)) {
+            if (hle_prop_get("debug.xbased.skipvsh", v) > 0 && strcmp(v, last)) {
                 snprintf(last, sizeof(last), "%s", v);
                 e = v;
-                hle_log("hakuX-hle-pipe", "skipvsh: %s", v);
+                hle_log("xbased-hle-pipe", "skipvsh: %s", v);
             }
         }
         if (e || nskip < 0) {
@@ -5140,7 +5141,7 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
             }
         }
     }
-    {   /* debug: the property debug.hakux.vtok=<hash> logs that program's
+    {   /* debug: the property debug.xbased.vtok=<hash> logs that program's
          * tokens at its next draw */
         static uint64_t want;
         static unsigned polled;
@@ -5148,7 +5149,7 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
             static char last[PROP_VALUE_MAX];
             polled = g_prop_gen;
             char v[PROP_VALUE_MAX] = "";
-            if (hle_prop_get("debug.hakux.vtok", v) > 0 && strcmp(v, last)) {
+            if (hle_prop_get("debug.xbased.vtok", v) > 0 && strcmp(v, last)) {
                 snprintf(last, sizeof(last), "%s", v);
                 want = strtoull(v, NULL, 16);
             }
@@ -5157,9 +5158,9 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         const uint32_t *tok = want && c->vsh == want ? prog_find(c->vsh, &ns) : NULL;
         if (tok) {
             want = 0;
-            hle_log("hakuX-hle-pipe", "vtok %016llx slots=%u", (unsigned long long)c->vsh, ns);
+            hle_log("xbased-hle-pipe", "vtok %016llx slots=%u", (unsigned long long)c->vsh, ns);
             for (uint32_t i = 0; i < ns; i++) {
-                hle_log("hakuX-hle-pipe", "  vtok %u: %08x %08x %08x %08x", i, tok[4 * i],
+                hle_log("xbased-hle-pipe", "  vtok %u: %08x %08x %08x %08x", i, tok[4 * i],
                         tok[4 * i + 1], tok[4 * i + 2], tok[4 * i + 3]);
             }
         }
@@ -5339,9 +5340,9 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         for (unsigned st = 0; st < 4; st++) {
             k.pk.alpha_kill |= (c->tex[st] && s->tss[st][TSS_ALPHAKILL] != 0) << st;
         }
-        static int nosign = -1;             /* debug: HAKUX_HLE_TEXSIGN=0, textures unsigned (A/B) */
+        static int nosign = -1;             /* debug: XBASED_HLE_TEXSIGN=0, textures unsigned (A/B) */
         if (nosign < 0) {
-            const char *e = getenv("HAKUX_HLE_TEXSIGN");
+            const char *e = getenv("XBASED_HLE_TEXSIGN");
             nosign = e && !strcmp(e, "0");
         }
         for (unsigned st = 0; st < 4 && !nosign; st++) {
@@ -5369,7 +5370,7 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
             static unsigned s_logged;
             if (s_logged < 8) {
                 s_logged++;
-                hle_log("hakuX-hle-pipe", "signed texture draw: channels %04x modes %05x "
+                hle_log("xbased-hle-pipe", "signed texture draw: channels %04x modes %05x "
                         "(first 8 logged)", HLE_PSH_TSIGN(&k.pk), k.pk.tex_modes);
             }
         }
@@ -5495,9 +5496,9 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         }
         if (k.pk.shadow) {
             uint32_t f = s->rs[RS_SHADOWFUNC];
-            static int lit = -1;                /* debug: HAKUX_HLE_SHADOWLIT, always lit */
+            static int lit = -1;                /* debug: XBASED_HLE_SHADOWLIT, always lit */
             if (lit < 0) {
-                lit = getenv("HAKUX_HLE_SHADOWLIT") != NULL;
+                lit = getenv("XBASED_HLE_SHADOWLIT") != NULL;
             }
             /* D3DCMP_* (0x200 + n), or SET_SHADOW_COMPARE_FUNC's word as
              * pushed: the NV2A keeps its low 3 bits */
@@ -5505,18 +5506,18 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
             static unsigned s_logged;
             if (s_logged < 4) {
                 s_logged++;
-                hle_log("hakuX-hle-pipe", "shadow draw: stages=%x fmt=%x func=%x modes=%05x "
+                hle_log("xbased-hle-pipe", "shadow draw: stages=%x fmt=%x func=%x modes=%05x "
                         "tex=%u,%u,%u,%u", k.pk.shadow & 15, k.pk.shadow_fmt, f,
                         k.pk.tex_modes, c->tex[0], c->tex[1], c->tex[2], c->tex[3]);
             }
         }
         static int psdbg = -1;
         if (psdbg < 0) {
-            const char *e = getenv("HAKUX_HLE_PSDBG");     /* debug: HlePshKey.debug */
+            const char *e = getenv("XBASED_HLE_PSDBG");     /* debug: HlePshKey.debug */
             psdbg = e ? atoi(e) : 0;
         }
 #if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
-        {   /* on demand: debug.hakux.psdbg=<view> (0 = off) switches the combiner
+        {   /* on demand: debug.xbased.psdbg=<view> (0 = off) switches the combiner
              * debug view live; with pixhist.sh, a stage's value at a pixel. Polled
              * by program draws seen, not drawn: a view whose pipelines cannot be
              * made drops every draw, and must still be switched off. */
@@ -5524,7 +5525,7 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
             if (polled != g_prop_gen) {
                 char v[PROP_VALUE_MAX] = "";
                 polled = g_prop_gen;
-                if (hle_prop_get("debug.hakux.psdbg", v) > 0) {
+                if (hle_prop_get("debug.xbased.psdbg", v) > 0) {
                     psdbg = atoi(v);
                 }
             }
@@ -5533,7 +5534,7 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         k.pk.debug = psdbg;
         static int pbtint = -1;         /* debug: push-buffer runs' draws in magenta */
         if (pbtint < 0) {
-            pbtint = getenv("HAKUX_HLE_PBTINT") != NULL;
+            pbtint = getenv("XBASED_HLE_PBTINT") != NULL;
         }
         if (pbtint && c->dbg) {
             k.pk.debug = 18;
@@ -5570,12 +5571,12 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         if (pslog_on() && (cube_draw || (s_logged < 40 && g_dr.draws % 97 == 0))) {
             if (cube_draw) {
                 const HlePshKey *q = &k.pk;
-                hle_log("hakuX-hle-pipe", "cube draw: count=%x final=%08x/%08x c0=%08x %08x "
+                hle_log("xbased-hle-pipe", "cube draw: count=%x final=%08x/%08x c0=%08x %08x "
                         "%08x %08x c1=%08x %08x %08x %08x", q->count, q->final_abcd,
                         q->final_efg, pc.psc[0], pc.psc[1], pc.psc[2], pc.psc[3], pc.psc[8],
                         pc.psc[9], pc.psc[10], pc.psc[11]);
                 for (unsigned i = 0; i < (q->count & 0xFF) && i < 8; i++) {
-                    hle_log("hakuX-hle-pipe", "  stage %u rgb %08x -> %05x  alpha %08x -> %05x",
+                    hle_log("xbased-hle-pipe", "  stage %u rgb %08x -> %05x  alpha %08x -> %05x",
                             i, q->rgb_in[i], q->rgb_out[i], q->alpha_in[i], q->alpha_out[i]);
                 }
                 /* the vertex program (once per program), for host-side study */
@@ -5593,19 +5594,19 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
                             break;
                         }
                     }
-                    hle_log("hakuX-hle-pipe", "  vsh %016llx slots=%u in=%x attrs=%x %x %x %x %x",
+                    hle_log("xbased-hle-pipe", "  vsh %016llx slots=%u in=%x attrs=%x %x %x %x %x",
                             (unsigned long long)c->vsh, ns, in, c->attr[0], c->attr[2],
                             c->attr[3], c->attr[4], c->attr[9]);
                     const float (*cf)[4] = (const float (*)[4])(g_harena.map + c->consts_off);
                     static const unsigned k_c[] = { 58, 59, 97, 126, 128, 147, 148, 149, 150,
                                                     152, 163 };
                     for (unsigned i = 0; i < ARRAY_SIZE(k_c); i++) {
-                        hle_log("hakuX-hle-pipe", "  c[%u] = %g %g %g %g", k_c[i],
+                        hle_log("xbased-hle-pipe", "  c[%u] = %g %g %g %g", k_c[i],
                                 cf[k_c[i]][0], cf[k_c[i]][1], cf[k_c[i]][2], cf[k_c[i]][3]);
                     }
                     for (uint32_t i = 0; i < ns; i += 2) {
                         const uint32_t *t = tok + 4 * i;
-                        hle_log("hakuX-hle-pipe", "  vtok %u: %08x %08x %08x %08x %08x %08x %08x "
+                        hle_log("xbased-hle-pipe", "  vtok %u: %08x %08x %08x %08x %08x %08x %08x "
                                 "%08x", i, t[0], t[1], t[2], t[3], i + 1 < ns ? t[4] : 0,
                                 i + 1 < ns ? t[5] : 0, i + 1 < ns ? t[6] : 0,
                                 i + 1 < ns ? t[7] : 0);
@@ -5613,7 +5614,7 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
                 }
             }
             s_logged++;
-            hle_log("hakuX-hle-pipe", "psdraw tex=%05x c0=%08x %08x %08x c1=%08x %08x %08x "
+            hle_log("xbased-hle-pipe", "psdraw tex=%05x c0=%08x %08x %08x c1=%08x %08x %08x "
                     "fc=%08x %08x fog=%08x %.3g %.3g %.3g en=%u mode=%u tex=%u,%u,%u,%u",
                     k.pk.tex_modes, pc.psc[0], pc.psc[1], pc.psc[2], pc.psc[8], pc.psc[9],
                     pc.psc[10], pc.psc[16], pc.psc[17], pc.fog_color, pc.fog[0], pc.fog[1],
@@ -5622,7 +5623,7 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
             for (unsigned st = 0; st < 4; st++) {
                 HleVkTex *tx = tex_find(c->tex[st]);
                 if (tx) {
-                    hle_log("hakuX-hle-pipe", "  t%u id=%u xfmt=0x%x %ux%u levels=%u faces=%u "
+                    hle_log("xbased-hle-pipe", "  t%u id=%u xfmt=0x%x %ux%u levels=%u faces=%u "
                             "vkfmt=%d", st, tx->id, tx->xfmt, tx->w, tx->h, tx->levels,
                             tx->faces, (int)tx->fmt);
                 }
@@ -5730,7 +5731,7 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         } else {
             static unsigned s_logged;
             if (s_logged++ < 4) {
-                hle_log("hakuX-hle-back", "signed blend equation %x with factors %x / %x: "
+                hle_log("xbased-hle-back", "signed blend equation %x with factors %x / %x: "
                         "drawn unsigned", k.op, k.src, k.dst);
             }
             k.op = k.op == 0xF005 ? 0x800B : 0x8006;
@@ -5775,7 +5776,7 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         k.src = k.dst = 0;
         k.op = lop & 0xFFFFu;
         if (g_dr.logic_draws++ < 2) {
-            hle_log("hakuX-hle-back", "logic op %04x on a target of format %d", k.op, (int)rt->fmt);
+            hle_log("xbased-hle-back", "logic op %04x on a target of format %d", k.op, (int)rt->fmt);
         }
     }
     k.cfmt = rt ? rt->fmt : 0;
@@ -5801,12 +5802,12 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
             k.topo_class |= l8 << 16;
         }
     }
-    /* HAKUX_HLE_DBGFLAGS (debug): 1 stencil test off, 2 depth test off on
+    /* XBASED_HLE_DBGFLAGS (debug): 1 stencil test off, 2 depth test off on
      * stencil-tested draws, 4 polygon offset off, 8 W-buffering off, 16 fog
      * off, 32 culling off */
     static int dbgf = -1;
     if (dbgf < 0) {
-        const char *e = getenv("HAKUX_HLE_DBGFLAGS");
+        const char *e = getenv("XBASED_HLE_DBGFLAGS");
         dbgf = e ? (int)strtol(e, NULL, 0) : 0;
     }
     if (dbgf & 16) {
@@ -5867,10 +5868,15 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
      * surface are the ones without it). So the draw once per sample, the
      * viewport moved to put that sample's texels on the pixels' centres and
      * the pixel stage keeping those texels alone (psh.c nvFC): the rules a
-     * pixel's centre goes by then hold as they are. */
-    const bool aarep = prog && s->psh && s->aa && s->xs <= 2 && s->ys <= 2 &&
+     * pixel's centre goes by then hold as they are. Neither these passes nor
+     * the NV2A's line rule below under fast precision (precision.h): drawn
+     * as in 1.0.94, once and by the GPU's own lines (the passes' pixel
+     * stage, cut there, kept every sample; the lines, without their depth
+     * word, showed through Vice City's buildings). */
+    const bool fast = hle_precision_fast();
+    const bool aarep = !fast && prog && s->psh && s->aa && s->xs <= 2 && s->ys <= 2 &&
                        (rt ? rt->scale : ds ? ds->scale : 1) == 1;
-    if (prog && s->psh && ((k.topo_class & 0xFF) == 1 || nvtri) && g_hvk.caps.gs && (!s->aa || aarep) &&
+    if (!fast && prog && s->psh && ((k.topo_class & 0xFF) == 1 || nvtri) && g_hvk.caps.gs && (!s->aa || aarep) &&
         (rt ? rt->scale : ds ? ds->scale : 1) == 1) {
         /* the width in the key's width bits as the title set it (0: none drawn) */
         k.topo_class = (k.topo_class & 0xFFFFu) | (s->rs[RS_NV_LINEWIDTH] & 0x1FF) << 16;
@@ -6015,7 +6021,7 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
      * which flash unlit. LESSEQUAL one step toward the eye passes a step
      * either way and still fails hidden surfaces; the shader discards what
      * is further in front (hle_draw_zeq, bound by back.c). Only on the drivers
-     * with HLE_QUIRK_EQ_DEPTH_STEP; debug.hakux.eqtol=0 turns it off (live). */
+     * with HLE_QUIRK_EQ_DEPTH_STEP; debug.xbased.eqtol=0 turns it off (live). */
     bool eq_tol = zt && tri && !(dbgf & 4) && !s->rs[RS_ZWRITEENABLE] &&
                   s->rs[RS_ZFUNC] == 0x202 && hle_quirk(HLE_QUIRK_EQ_DEPTH_STEP) && !g_eqtol_off;
     if (eq_tol) {
@@ -6400,7 +6406,7 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         hle_surf_written(ds);           /* HLE_OP_ZREAD / ZWRITE: which wrote the memory last */
     }
     if (prog && !s->psh && g_psf_frame >= 0 && hle_back_swap_count() == (uint64_t)g_psf_frame) {
-        /* debug (debug.hakux.psframe): a program draw's fixed-function stages */
+        /* debug (debug.xbased.psframe): a program draw's fixed-function stages */
         char sb[256];
         int o = 0;
         for (unsigned i = 0; i < k.ps.nstages && o < (int)sizeof(sb) - 48; i++) {
@@ -6409,14 +6415,14 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
                           f->colorop, f->colorarg1, f->colorarg2, f->alphaop, f->alphaarg1,
                           f->alphaarg2, f->resultarg, f->texture, f->unset, f->alpha_kill);
         }
-        hle_log("hakuX-hle-pipe", "prog ff draw n=%u vsh=%016llx tex=%u,%u,%u,%u unset=%x "
+        hle_log("xbased-hle-pipe", "prog ff draw n=%u vsh=%016llx tex=%u,%u,%u,%u unset=%x "
                 "stages=%u psprite=%u%s", c->count, (unsigned long long)c->vsh, c->tex[0],
                 c->tex[1], c->tex[2], c->tex[3], c->tex_unset, k.ps.nstages,
                 s->rs[RS_POINTSPRITEENABLE], sb);
     }
     if (!prog && g_psf_frame >= 0 && hle_back_swap_count() == (uint64_t)g_psf_frame) {
-        /* debug (debug.hakux.psframe): a fixed-function draw's raster state */
-        hle_log("hakuX-hle-pipe", "ff draw n=%u prim=%u fvf=%x rt=%u %ux%u ds=%u sc=%d,%d %ux%u "
+        /* debug (debug.xbased.psframe): a fixed-function draw's raster state */
+        hle_log("xbased-hle-pipe", "ff draw n=%u prim=%u fvf=%x rt=%u %ux%u ds=%u sc=%d,%d %ux%u "
                 "vp=%g,%g scr=%g,%g,%g,%g cull=%x ff=%x zt=%d zw=%u zf=%x stn=%d "
                 "wmask=%x blend=%u atest=%u st0 tex=%u op=%u akill=%u",
                 c->count, c->prim, c->fvf, rt_id, tw, th, ds_id, sc.offset.x, sc.offset.y,
@@ -6645,7 +6651,7 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         const uint32_t *r = s->rs;
         float ps[8];
         memcpy(ps, &r[116], sizeof(ps));
-        hle_log("hakuX-hle-pipe", "points: n=%u fvf=0x%x prog=%d psh=%u sprite=%u size=%g "
+        hle_log("xbased-hle-pipe", "points: n=%u fvf=0x%x prog=%d psh=%u sprite=%u size=%g "
                 "min=%g scale=%u a=%g b=%g c=%g max=%g tex=%u,%u,%u,%u "
                 "op=%u,%u,%u,%u aop=%u,%u,%u,%u tci=%x,%x,%x,%x blend=%u %x/%x z=%u/%u",
                 c->count, c->fvf, prog, s->psh, r[RS_POINTSPRITEENABLE], ps[0], ps[1],
@@ -6696,8 +6702,8 @@ void hle_draw_ff_diag(void)
     }
     prev_draws = g_dr.draws;
     prev_verts = g_dr.verts;
-    hle_log("hakuX-hle-emit", "%s", line);
-    hle_log("hakuX-hle-back", "ff3d=%llu lit=%llu fog=%llu texgen=%llu texxform=%llu "
+    hle_log("xbased-hle-emit", "%s", line);
+    hle_log("xbased-hle-back", "ff3d=%llu lit=%llu fog=%llu texgen=%llu texxform=%llu "
             "blend=%llu psprite=%llu prog=%llu prog_fog=%llu dropped: state=%llu target=%llu "
             "skip=%llu layout=%llu pipeline=%llu",
             (unsigned long long)g_dr.ff3d, (unsigned long long)g_dr.ff_lit,
@@ -6715,7 +6721,7 @@ void hle_draw_ff_diag(void)
                           g_dr.prebuilt_used, g_dr.drops[DROP_PENDING], g_dr.ub_keys, g_dr.ub_draws };
         uint32_t inflight = hle_pipe_inflight();
         if (memcmp(v, p, sizeof(v)) || inflight) {
-            hle_log("hakuX-hle-pipe", "per s: cache=%llu queued=%llu built=%llu inplace=%llu "
+            hle_log("xbased-hle-pipe", "per s: cache=%llu queued=%llu built=%llu inplace=%llu "
                     "inflight=%u prebuilt_used=%llu skipped_draws=%llu interpreters=%llu/%llu | pipelines %u "
                     "(prebuilt %llu)",
                     (unsigned long long)(v[0] - p[0]), (unsigned long long)(v[1] - p[1]),

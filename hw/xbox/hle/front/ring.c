@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — SPSC command ring.
+ * xbased HLE GPU — SPSC command ring.
  */
 #include "hw/xbox/hle/front/ring.h"
 

@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — back-end internals shared by the vk/ sources (CONFIG_VULKAN
+ * xbased HLE GPU — back-end internals shared by the vk/ sources (CONFIG_VULKAN
  * only).
  */
 #ifndef HW_XBOX_HLE_VK_BACK_INT_H
@@ -197,8 +197,8 @@ extern unsigned g_hle_zeq;
  * (the depth's: zbar). */
 void hle_draw_fb_bind(VkCommandBuffer cb, HleVkSurf *rt, HleVkSurf *ds, VkImageView zv,
                       bool zbar);
-extern bool g_hle_fbbar_off;            /* debug (debug.hakux.fbbar=0): no barrier */
-/* debug (debug.hakux.gpucut): 1 (frag) draws scissored to one pixel, 2 (draw)
+extern bool g_hle_fbbar_off;            /* debug (debug.xbased.fbbar=0): no barrier */
+/* debug (debug.xbased.gpucut): 1 (frag) draws scissored to one pixel, 2 (draw)
  * the state recorded and no draw, 3 (pass) neither: the passes alone, 4 (tri)
  * draws of 3 vertices scissored to one pixel */
 extern int g_hle_gpucut;

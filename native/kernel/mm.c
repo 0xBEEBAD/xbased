@@ -1,5 +1,5 @@
 /*
- * hakuX native core — memory manager.
+ * xbased native core — memory manager.
  *
  * Virtual memory (NtAllocateVirtualMemory and friends) in the title's
  * 0x00010000-0x7FFE0000 range: reservations at 64 KiB granularity, commits
@@ -127,7 +127,7 @@ static void log_holders(NcKernel *k, const char *why)
         x = blocks[t], blocks[t] = blocks[best], blocks[best] = x;
         m += snprintf(line + m, sizeof(line) - (size_t)m, " %08x %uK/%u", ra[t], bytes[t] >> 10, blocks[t]);
     }
-    nc_log("hakuX-native-mm", "%s", line);
+    nc_log("xbased-native-mm", "%s", line);
     m = snprintf(line, sizeof(line), "%s: regions by committed (of %u):", why, g_nregions);
     bool used[MAX_REGIONS] = {false};
     for (unsigned t = 0; t < 12; t++) {
@@ -152,7 +152,7 @@ static void log_holders(NcKernel *k, const char *why)
         m += snprintf(line + m, sizeof(line) - (size_t)m, " %08x+%x:%uK%s", g_regions[best].base,
                       g_regions[best].size, best_c >> 10, g_regions[best].image ? "(image)" : "");
     }
-    nc_log("hakuX-native-mm", "%s", line);
+    nc_log("xbased-native-mm", "%s", line);
 }
 
 static Region *region_at(uint32_t va)
@@ -357,13 +357,13 @@ static uint64_t NtAllocateVirtualMemory(NcKernel *k, NcFrame *f, const uint32_t 
         size = end - base;
         Region *r = region_at(base);
         if (!r || end > r->base + r->size) {
-            nc_log("hakuX-native-mm", "commit %08x+%x: not inside a reservation (%s %08x+%x)", base, size,
+            nc_log("xbased-native-mm", "commit %08x+%x: not inside a reservation (%s %08x+%x)", base, size,
                    r ? "region" : "no region", r ? r->base : 0, r ? r->size : 0);
             return 0xC000002Du; /* STATUS_CONFLICTING_ADDRESSES-ish: not reserved */
         }
     }
     if ((type & MEM_COMMIT) && !commit(k, base, size, !(type & MEM_NOZERO))) {
-        nc_log("hakuX-native-mm", "commit %08x+%x: out of physical memory (%u KiB free)", base, size,
+        nc_log("xbased-native-mm", "commit %08x+%x: out of physical memory (%u KiB free)", base, size,
                nc_vm_free_bytes(k->vm) >> 10);
         if (reserved) {
             g_nregions--;   /* the reservation this call made goes with it */
@@ -384,7 +384,7 @@ static uint64_t NtAllocateVirtualMemory(NcKernel *k, NcFrame *f, const uint32_t 
     if ((type & MEM_COMMIT) && size >= 0x40000) {
         char frames[96];
         nc_kernel_frame_chain(k, f, frames, sizeof(frames)); /* who grows the heap by this much */
-        nc_log("hakuX-native-mm", "allocate %08x+%x type %x protect %x | frames%s", base, size, type,
+        nc_log("xbased-native-mm", "allocate %08x+%x type %x protect %x | frames%s", base, size, type,
                a[4], frames);
     }
     return NC_STATUS_SUCCESS;
@@ -480,7 +480,7 @@ static uint64_t NtProtectVirtualMemory(NcKernel *k, NcFrame *f, const uint32_t *
     }
     static unsigned s_logged; /* JSRF flips a region's protection every frame */
     if (s_logged < 16) {
-        nc_log("hakuX-native-mm", "protect %08x+%x %x (was %x)%s", base, size, a[2], old,
+        nc_log("xbased-native-mm", "protect %08x+%x %x (was %x)%s", base, size, a[2], old,
                ++s_logged == 16 ? " (no more protect logs)" : "");
     }
     return NC_STATUS_SUCCESS;
@@ -568,7 +568,7 @@ static void log_splitters(NcKernel *k)
         }
         p = q;
     }
-    nc_log("hakuX-native", "%s", line);
+    nc_log("xbased-native", "%s", line);
 }
 
 /* What a used page is to compaction (vm.c movable): kind, and the contiguous
@@ -630,12 +630,12 @@ static void log_phys_map(NcKernel *k)
         }
         n += snprintf(line + n, sizeof(line) - (size_t)n, " %x+%uK=%s", p * NC_PAGE, (q - p) * (NC_PAGE >> 10), what);
         if (n > (int)sizeof(line) - 80) {
-            nc_log("hakuX-native", "%s", line);
+            nc_log("xbased-native", "%s", line);
             n = snprintf(line, sizeof(line), "mm:   map (%u):", ++lines);
         }
         p = q;
     }
-    nc_log("hakuX-native", "%s", line);
+    nc_log("xbased-native", "%s", line);
 }
 
 /* The last title's RAM after a quick reboot (a relaunch into another XBE).
@@ -709,7 +709,7 @@ static void stale_save(NcKernel *k)
     if (!ok) {
         unlink(path);
     }
-    nc_log("hakuX-native-mm", "the last title's RAM: %u KiB in use%s", hdr[2] * (NC_PAGE >> 10),
+    nc_log("xbased-native-mm", "the last title's RAM: %u KiB in use%s", hdr[2] * (NC_PAGE >> 10),
            ok ? ", for the next title" : ": not written");
 }
 
@@ -730,7 +730,7 @@ static void stale_restore(NcKernel *k)
             g_stale_page[p] = 1;
             g_stale_left++;
         }
-        nc_log("hakuX-native-mm", "the last title's RAM: %u KiB back for its blocks", g_stale_left * (NC_PAGE >> 10));
+        nc_log("xbased-native-mm", "the last title's RAM: %u KiB back for its blocks", g_stale_left * (NC_PAGE >> 10));
     }
     if (!g_stale_left) {
         free(g_stale);
@@ -806,7 +806,7 @@ static uint32_t contig_alloc(NcKernel *k, uint32_t size, uint32_t lo, uint32_t h
         static unsigned s_moves;
         const unsigned n = ++s_moves;
         if (n <= 8 || !(n & (n - 1))) {
-            nc_log("hakuX-native", "mm: contiguous allocation of %u KiB at %08x: %u pages relocated (#%u)",
+            nc_log("xbased-native", "mm: contiguous allocation of %u KiB at %08x: %u pages relocated (#%u)",
                    size >> 10, pa, moved, n);
         }
     }
@@ -822,7 +822,7 @@ static uint32_t contig_alloc(NcKernel *k, uint32_t size, uint32_t lo, uint32_t h
         if (n <= 4 || !(n & (n - 1))) {
             char runs[400];
             nc_vm_free_runs(k->vm, runs, sizeof(runs));
-            nc_log("hakuX-native", "mm: contiguous allocation of %u KiB failed (#%u; free %u KiB:%s)", size >> 10, n,
+            nc_log("xbased-native", "mm: contiguous allocation of %u KiB failed (#%u; free %u KiB:%s)", size >> 10, n,
                    nc_vm_free_bytes(k->vm) >> 10, runs);
             log_splitters(k);
             log_phys_map(k);
@@ -894,7 +894,7 @@ static void contig_free(NcKernel *k, uint32_t va, uint32_t ra)
     } else if (va) {
         static unsigned s_logged; /* a free that matches no block keeps its memory */
         if (s_logged++ < 16) {
-            nc_log("hakuX-native-mm", "contiguous free of %08x from %08x: no such block", va, ra);
+            nc_log("xbased-native-mm", "contiguous free of %08x from %08x: no such block", va, ra);
         }
     }
 }
@@ -1057,7 +1057,7 @@ static uint64_t MmPersistContiguousMemory(NcKernel *k, NcFrame *f, const uint32_
     } else if (!keep && i < g_nkept) {
         g_kept[i] = g_kept[--g_nkept];
     }
-    nc_log("hakuX-native-mm", "MmPersistContiguousMemory %08x+%u: %s", va, len, keep ? "kept" : "released");
+    nc_log("xbased-native-mm", "MmPersistContiguousMemory %08x+%u: %s", va, len, keep ? "kept" : "released");
     return 0;
 }
 
@@ -1093,7 +1093,7 @@ void nc_mm_keep_save(NcKernel *k, uint32_t saved)
         k->hle_keep(0, k->vm->ram_size);    /* all of RAM goes over (stale_save) */
     }
     if (k->hle_keep_wait && !k->hle_keep_wait(2000000000ull)) {
-        nc_log("hakuX-native-mm", "kept memory: the GPU's copies did not come back; saved as it is");
+        nc_log("xbased-native-mm", "kept memory: the GPU's copies did not come back; saved as it is");
     }
     nc_vm_will_read(NC_CONTIG_WINDOW, k->vm->ram_size);  /* the window's pages a target closed */
     stale_save(k);
@@ -1119,7 +1119,7 @@ void nc_mm_keep_save(NcKernel *k, uint32_t saved)
     if (!ok) {
         unlink(path);
     }
-    nc_log("hakuX-native-mm", "kept memory: %u range(s), %u KiB, saved display %08x%s", g_nkept, bytes >> 10, saved,
+    nc_log("xbased-native-mm", "kept memory: %u range(s), %u KiB, saved display %08x%s", g_nkept, bytes >> 10, saved,
            ok ? " for the next title" : ": not written");
 }
 
@@ -1146,7 +1146,7 @@ uint32_t nc_mm_keep_restore(NcKernel *k)
         const bool fits = (va & NC_CONTIG_WINDOW) && pa < k->vm->ram_size && len <= k->vm->ram_size &&
                           size <= k->vm->ram_size - pa && g_ncontig < MAX_CONTIG;
         if (!fits || !nc_vm_claim_phys(k->vm, pa, size) || fread(k->vm->ram + pa, 1, len, fp) != len) {
-            nc_log("hakuX-native-mm", "kept memory %08x+%u: not restored", va, len);
+            nc_log("xbased-native-mm", "kept memory %08x+%u: not restored", va, len);
             if (fits) {
                 fseek(fp, len, SEEK_CUR);
             }
@@ -1155,7 +1155,7 @@ uint32_t nc_mm_keep_restore(NcKernel *k)
         g_contig[g_ncontig++] = (Contig){va, size, 0, 0, PAGE_READWRITE};
         g_kept[g_nkept].va = va;
         g_kept[g_nkept++].len = len;
-        nc_log("hakuX-native-mm", "kept memory %08x+%u restored", va, len);
+        nc_log("xbased-native-mm", "kept memory %08x+%u restored", va, len);
     }
     fclose(fp);
     unlink(path);
@@ -1397,7 +1397,7 @@ bool nc_mm_state_load(NcRd *r, unsigned v)
         }
     }
     if (st.nro) {
-        nc_log("hakuX-native-state", "mm: %u read-only pages of the title's (%u runs)", pages, st.nro);
+        nc_log("xbased-native-state", "mm: %u read-only pages of the title's (%u runs)", pages, st.nro);
     }
     return !r->fail;
 }

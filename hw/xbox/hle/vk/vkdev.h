@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — own Vulkan instance/device (spec §5.1, D7).
+ * xbased HLE GPU — own Vulkan instance/device (spec §5.1, D7).
  * Include only under CONFIG_VULKAN.
  */
 #ifndef HW_XBOX_HLE_VK_VKDEV_H
@@ -53,7 +53,7 @@ typedef struct HleCaps {
     bool floor_ok;
     char missing[256];          /* floor features absent (comma list) */
     /* What the other vendors' drivers lack (Mali, Xclipse, PowerVR), each with a
-     * substitute; all true on Adreno. debug.hakux.caps / HAKUX_HLE_CAPS turns them
+     * substitute; all true on Adreno. debug.xbased.caps / XBASED_HLE_CAPS turns them
      * off by name ("-bc,-vids,..."): any device runs the substitutes. */
     bool bc;                    /* BC1-3 sampled: DXT uploaded as is, else decoded to
                                    A8R8G8B8 on the way into the arena (pb/pbres.c) */

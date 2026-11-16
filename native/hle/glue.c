@@ -1,5 +1,5 @@
 /*
- * hakuX native core — the HLE GPU (hw/xbox/hle) on the native core: boot,
+ * xbased native core — the HLE GPU (hw/xbox/hle) on the native core: boot,
  * the debug probes and the PC samplers. What the HLE asks of its host
  * (host.h) is host_native.c's.
  *
@@ -106,7 +106,7 @@ void nc_hle_boot(NcKernel *k, NcVm *vm, NcCpu *cpu, const NcCpuContext *boot)
         }
     }
     if (!hle_active()) {
-        nc_log("hakuX-native-hle", "HLE GPU off (HAKUX_HLE_MODE unset)");
+        nc_log("xbased-native-hle", "HLE GPU off (XBASED_HLE_MODE unset)");
         return;
     }
     g_active = true;
@@ -122,15 +122,15 @@ void nc_hle_boot(NcKernel *k, NcVm *vm, NcCpu *cpu, const NcCpuContext *boot)
     hle_title_start();
     nc_hle_host_flush_discard(); /* nothing translated yet */
     if (hle_pb_active()) {
-        nc_log("hakuX-native-hle", "title %08x in push-buffer mode", g_hle.title.xbe.title_id);
+        nc_log("xbased-native-hle", "title %08x in push-buffer mode", g_hle.title.xbe.title_id);
     } else {
-        nc_log("hakuX-native-hle", "title %08x: no push-buffer mode, nothing is drawn",
+        nc_log("xbased-native-hle", "title %08x: no push-buffer mode, nothing is drawn",
                g_hle.title.xbe.title_id);
     }
     if (g_hle_unavailable[0]) {
         /* the Vulkan driver lacks what the HLE GPU needs (vkdev.c says what) */
         nc_hle_set_fatal(NC_FATAL_DRIVER, g_hle_unavailable);
-        nc_log("hakuX-native-hle", "can't run the title: %s", g_fatal);
+        nc_log("xbased-native-hle", "can't run the title: %s", g_fatal);
     }
 }
 
@@ -156,7 +156,7 @@ bool nc_hle_pb_active(void)
  * code read as the last call's address (the DPC return stub, 80010f10). They
  * ask the vCPU thread instead: a SIGPROF there reads the host PC it stopped
  * at, a guest EIP in JIT code (FEX's block RIP table) or the offset in this
- * library in host code (addr2line on the unstripped libhakuxcore.so). */
+ * library in host code (addr2line on the unstripped libxbasedcore.so). */
 #define SMP_SIGNAL SIGPROF
 #define SMP_OUTSIDE 0x07FFFFFFu /* a host PC outside this library (libc, the driver) */
 
@@ -223,7 +223,7 @@ static void smp_setup(void)
     }
     g_smp_ready = true;
     g_hle_pc_sampler = smp_sample;
-    nc_log("hakuX-native-hle", "pc sampler: the vCPU thread suspended per sample, core at %p", info.dli_fbase);
+    nc_log("xbased-native-hle", "pc sampler: the vCPU thread suspended per sample, core at %p", info.dli_fbase);
 }
 #else
 static void smp_signal(int sig, siginfo_t *si, void *uc)
@@ -295,7 +295,7 @@ static void smp_setup(void)
     g_smp_thread = pthread_self();
     g_smp_ready = true;
     g_hle_pc_sampler = smp_sample;
-    nc_log("hakuX-native-hle", "pc sampler: SIGPROF on the vCPU thread, core library at %p", info.dli_fbase);
+    nc_log("xbased-native-hle", "pc sampler: SIGPROF on the vCPU thread, core library at %p", info.dli_fbase);
 }
 
 

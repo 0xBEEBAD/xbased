@@ -1,5 +1,5 @@
 /*
- * hakuX front end — the Games screen's search, filters, order and view
+ * xbased front end — the Games screen's search, filters, order and view
  * (dash_int.h): a screen of rows (the search, a publisher, a year, a
  * region, the order, the view, favorites and the last played first) with
  * an on-screen keyboard for the search, so a gamepad types as well as the

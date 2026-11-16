@@ -1,5 +1,5 @@
 /*
- * hakuX front end — xemu's saves brought in (xemu_import.h).
+ * xbased front end — xemu's saves brought in (xemu_import.h).
  *
  * xemu.toml's [sys.files] names the files: bootrom_path (the MCPX 1.0 boot
  * ROM), flashrom_path (the BIOS), eeprom_path (the EEPROM, default beside

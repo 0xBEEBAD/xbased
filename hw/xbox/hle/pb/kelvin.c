@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — push-buffer mode's Kelvin (class 0x97) register shadow.
+ * xbased HLE GPU — push-buffer mode's Kelvin (class 0x97) register shadow.
  *
  * The decoder hands every Kelvin method here, and the registers are kept as
  * the NV2A holds them, with a bit per register written. A draw takes its

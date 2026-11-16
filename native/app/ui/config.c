@@ -1,5 +1,5 @@
 /*
- * hakuX front end — settings files (config.h).
+ * xbased front end — settings files (config.h).
  */
 #include "native/app/ui/config.h"
 
@@ -107,7 +107,7 @@ bool cfg_save(const Config *c)
     if (!f) {
         return false;
     }
-    /* the header (hakuX's earlier one becomes xbased's) */
+    /* the header (xbased's earlier one becomes xbased's) */
     const char *head = "# xbased options, one a line (the command line's come after and win)\n";
     fputs(c->comments[0] && strncmp(c->comments, "# hakuX options", 15) ? c->comments : head, f);
     for (int i = 0; i < c->n; i++) {

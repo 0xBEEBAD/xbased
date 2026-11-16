@@ -1,5 +1,5 @@
 /*
- * hakuX native core — a disc image over NBD (nbd_image.h): the fixed
+ * xbased native core — a disc image over NBD (nbd_image.h): the fixed
  * newstyle handshake (NBD_OPT_GO, else NBD_OPT_EXPORT_NAME), then simple
  * READ requests, one at a time on one connection (a lock around each),
  * made again once if it drops.
@@ -176,7 +176,7 @@ static bool connect_conn(Conn *c)
 {
     char host[256], port[16], name[256];
     if (!parse_uri(c->uri, host, sizeof(host), port, sizeof(port), name, sizeof(name))) {
-        nc_log("hakuX-native", "disc: %s is not an nbd://host[:port][/export] address", c->uri);
+        nc_log("xbased-native", "disc: %s is not an nbd://host[:port][/export] address", c->uri);
         return false;
     }
     struct addrinfo hints, *res = NULL;
@@ -184,7 +184,7 @@ static bool connect_conn(Conn *c)
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
     if (getaddrinfo(host, port, &hints, &res) != 0 || !res) {
-        nc_log("hakuX-native", "disc: NBD server %s:%s not found", host, port);
+        nc_log("xbased-native", "disc: NBD server %s:%s not found", host, port);
         return false;
     }
     NbdSock s = NBD_NO_SOCK;
@@ -201,14 +201,14 @@ static bool connect_conn(Conn *c)
     }
     freeaddrinfo(res);
     if (s == NBD_NO_SOCK) {
-        nc_log("hakuX-native", "disc: can't connect to the NBD server at %s:%s", host, port);
+        nc_log("xbased-native", "disc: can't connect to the NBD server at %s:%s", host, port);
         return false;
     }
     const int one = 1;
     setsockopt(s, IPPROTO_TCP, TCP_NODELAY, (const char *)&one, sizeof(one));
     uint8_t hello[18];
     if (!recv_all(s, hello, sizeof(hello)) || memcmp(hello, "NBDMAGIC", 8) || memcmp(hello + 8, "IHAVEOPT", 8)) {
-        nc_log("hakuX-native", "disc: %s doesn't speak the NBD newstyle handshake", c->uri);
+        nc_log("xbased-native", "disc: %s doesn't speak the NBD newstyle handshake", c->uri);
         nbd_sock_close(s);
         return false;
     }
@@ -268,12 +268,12 @@ static bool connect_conn(Conn *c)
         }
     }
     if (!ok || !have || !c->size) {
-        nc_log("hakuX-native", "disc: the NBD server at %s didn't offer its export", c->uri);
+        nc_log("xbased-native", "disc: the NBD server at %s didn't offer its export", c->uri);
         nbd_sock_close(s);
         return false;
     }
     c->s = s;
-    nc_log("hakuX-native", "disc: NBD export %s, %llu MiB", c->uri, (unsigned long long)(c->size >> 20));
+    nc_log("xbased-native", "disc: NBD export %s, %llu MiB", c->uri, (unsigned long long)(c->size >> 20));
     return true;
 }
 
@@ -388,7 +388,7 @@ static bool read_once(Conn *c, uint8_t *buf, uint32_t len, uint64_t off)
         return false;
     }
     if (be32(rep + 4)) {
-        nc_log("hakuX-native", "disc: the NBD server failed a read at +0x%llx (error %u)", (unsigned long long)off,
+        nc_log("xbased-native", "disc: the NBD server failed a read at +0x%llx (error %u)", (unsigned long long)off,
                be32(rep + 4));
         return false;
     }

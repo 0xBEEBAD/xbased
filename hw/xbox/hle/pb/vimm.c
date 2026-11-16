@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — Kelvin's immediate vertex data (vimm.h).
+ * xbased HLE GPU — Kelvin's immediate vertex data (vimm.h).
  *
  * What each method writes is the hardware's as xemu's pgraph has it (which
  * follows the nxdk pgraph tests): the forms with fewer components than four

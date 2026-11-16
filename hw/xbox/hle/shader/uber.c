@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — interpreter shaders (uber.h). Pure.
+ * xbased HLE GPU — interpreter shaders (uber.h). Pure.
  *
  * The vertex stage runs the program's steps (hle_uber_prog: each parsed on the
  * CPU once into words) on the same register files as vsh.c's text names them

@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — pipelines linked from libraries (VK_EXT_graphics_pipeline_library):
+ * xbased HLE GPU — pipelines linked from libraries (VK_EXT_graphics_pipeline_library):
  * a pipeline's four parts (vertex input, the vertex stage with the
  * rasterizer's state, the pixel stage with the depth test's, the colour
  * output) each built once and kept by what it is made of, a new pipeline
@@ -48,7 +48,7 @@ typedef struct HleGplDesc {
 } HleGplDesc;
 
 /* The device links libraries (caps.gpl with dynamic vertex input and extended
- * dynamic state) and HAKUX_HLE_GPL is not 0. */
+ * dynamic state) and XBASED_HLE_GPL is not 0. */
 bool hle_gpl_on(void);
 /* The pipeline from its parts, those missing built (cache_only: from the
  * caches only, HLE_PB_COMPILE when one would compile); *built_ms: the time

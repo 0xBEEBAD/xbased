@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — front-end -> back-end commands (spec §5.3).
+ * xbased HLE GPU — front-end -> back-end commands (spec §5.3).
  * Every record is { HleCmdHdr, payload } padded to 8 bytes.
  */
 #ifndef HW_XBOX_HLE_FRONT_CMD_H
@@ -351,7 +351,7 @@ typedef struct HleCmdDraw {
     uint32_t ff_lights;         /* enabled lights: count | D3DLIGHTTYPE of light i <<
                                    (4 + 2 i); HLE_DRAW_LIT_DATA: the block holds the
                                    material and lights */
-    uint32_t dbg;               /* debug: 1 = from a push-buffer run (HAKUX_HLE_PBTINT) */
+    uint32_t dbg;               /* debug: 1 = from a push-buffer run (XBASED_HLE_PBTINT) */
     uint32_t diffuse_cur;       /* FVF draws without diffuse: arena offset + 1 of the
                                    diffuse register's current value (float4), 0 = none */
     float wscale;               /* untransformed FF draws: 1 / the projection's W-buffer

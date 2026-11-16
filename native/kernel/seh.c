@@ -1,5 +1,5 @@
 /*
- * hakuX native core — structured exception handling: RtlRaiseException and
+ * xbased native core — structured exception handling: RtlRaiseException and
  * RtlUnwind, as the Xbox kernel runs x86 SEH.
  *
  * Handlers are title code, so the kernel's loops over the registration
@@ -180,7 +180,7 @@ static void log_thrown(NcKernel *k, uint32_t obj)
             n += snprintf(line + n, sizeof(line) - (size_t)n, " [%u]\"%.*s\"", i, (int)len, s);
         }
     }
-    nc_log("hakuX-native", "%s", line);
+    nc_log("xbased-native", "%s", line);
 }
 
 /* The thread's level i (0: the outermost). */
@@ -283,7 +283,7 @@ static uint64_t RtlRaiseException(NcKernel *k, NcFrame *f, const uint32_t *a)
         char type[96];
         char calls[96];
         nc_kernel_frame_chain(k, f, calls, sizeof(calls));
-        nc_log("hakuX-native", "seh: t%u raises %08x at %08x%s%s | frames%s", t->id, rd(k, l->rec + ER_CODE), ret,
+        nc_log("xbased-native", "seh: t%u raises %08x at %08x%s%s | frames%s", t->id, rd(k, l->rec + ER_CODE), ret,
                rd(k, l->rec + ER_CODE) == CXX_EXCEPTION ? ", C++ " : "",
                rd(k, l->rec + ER_CODE) == CXX_EXCEPTION ? cxx_type(k, l->rec, type, sizeof(type)) : "", calls);
         if (rd(k, l->rec + ER_CODE) == CXX_EXCEPTION) {
@@ -338,7 +338,7 @@ bool nc_seh_fault(NcKernel *k, NcFrame *f, uint32_t code, uint32_t next_eip, uns
     if (s_logged++ < 32) {
         char calls[96];
         nc_kernel_frame_chain(k, f, calls, sizeof(calls));
-        nc_log("hakuX-native", "seh: t%u takes exception %08x at %08x (%08x %08x): to its handlers | frames%s"
+        nc_log("xbased-native", "seh: t%u takes exception %08x at %08x (%08x %08x): to its handlers | frames%s"
                " | eax %08x ebx %08x ecx %08x edx %08x esi %08x edi %08x ebp %08x esp %08x", t->id,
                code, eip, p0, p1, calls, nc_frame_gpr(f, NC_EAX), nc_frame_gpr(f, NC_EBX), nc_frame_gpr(f, NC_ECX),
                nc_frame_gpr(f, NC_EDX), nc_frame_gpr(f, NC_ESI), nc_frame_gpr(f, NC_EDI), nc_frame_gpr(f, NC_EBP), esp);

@@ -5,7 +5,7 @@ row says what happens instead, and why that is enough or what is missing.
 
 An export this kernel doesn't implement at all stops the guest when called
 ("kunimpl"). A title's unimplemented imports are named when its XBE loads
-(`hakuX-native-imports`), and `tools/native/imports.py` lists them over a
+(`xbased-native-imports`), and `tools/native/imports.py` lists them over a
 census (`tools/native/census.sh`).
 
 | Export | Here | Why |

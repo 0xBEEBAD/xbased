@@ -1,5 +1,5 @@
 /*
- * hakuX front end — the dashboard's Memory: the games' own saves on the
+ * xbased front end — the dashboard's Memory: the games' own saves on the
  * console's hard disk (E:\UDATA\<title ID>\<save>, Partition1 of the hdd
  * folder), with the names and icons the games gave them (TitleMeta.xbx,
  * SaveMeta.xbx: UTF-16 Key=Value; TitleImage.xbx, SaveImage.xbx: XPR0),

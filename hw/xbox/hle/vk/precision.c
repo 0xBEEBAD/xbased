@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — the GPU precision (see precision.h).
+ * xbased HLE GPU — the GPU precision (see precision.h).
  */
 #include "hw/xbox/hle/base.h"
 #include "hw/xbox/hle/vk/precision.h"
@@ -165,7 +165,7 @@ void hle_precision_init(VkPhysicalDevice phys)
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_PROPERTIES };
     VkPhysicalDeviceProperties2 q2 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &sg };
     vkGetPhysicalDeviceProperties2(phys, &q2);
-    hle_log("hakuX-hle-back", "precision: %s (%s, %s) [gpu %s, driver id %u, subgroups %u-%u]",
+    hle_log("xbased-hle-back", "precision: %s (%s, %s) [gpu %s, driver id %u, subgroups %u-%u]",
             g_fast ? "fast" : "exact", g_option == HLE_PREC_AUTO ? "auto" : "set", why, g_id, drv.driverID,
             sg.minSubgroupSize, sg.maxSubgroupSize);
     /* the dashboard shows auto's verdict and why */
@@ -206,7 +206,7 @@ void hle_precision_gpu_time(uint64_t ns)
         snprintf(reason, sizeof(reason), "measured: the GPU at its limit with the exact shaders (%.0f%% busy, %.0f "
                  "frames a second)", busy * 100.0, fps);
         verdict_write("fast", reason);
-        hle_log("hakuX-hle-back", "precision: the GPU can't keep up with the exact shaders (%.0f%% busy for %u s, %.0f "
+        hle_log("xbased-hle-back", "precision: the GPU can't keep up with the exact shaders (%.0f%% busy for %u s, %.0f "
                 "fps): fast from the next run (auto)", busy * 100.0, BOUND_SECS, fps);
     }
 }
@@ -237,7 +237,7 @@ void hle_precision_exact_build(double ms)
         snprintf(reason, sizeof(reason), "measured: the exact shaders took too long to build here (%u in %.1f s, "
                  "the longest %.1f s)", n, total / 1000.0, mx / 1000.0);
         verdict_write("fast", reason);
-        hle_log("hakuX-hle-back", "precision: the exact shaders take too long to build here (%u in %.1f s, the "
+        hle_log("xbased-hle-back", "precision: the exact shaders take too long to build here (%u in %.1f s, the "
                 "longest %.1f s): fast from the next run (auto)", n, total / 1000.0, mx / 1000.0);
     }
 }

@@ -1,5 +1,5 @@
 /*
- * hakuX front end — the game library (library.c): the game folders'
+ * xbased front end — the game library (library.c): the game folders'
  * disc images, their titles and icons (cached), and box art downloaded
  * from the libretro thumbnails (Microsoft - Xbox, Named_Boxarts).
  */

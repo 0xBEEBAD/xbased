@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — title fixes: what a title, or the titles that use Direct3D
+ * xbased HLE GPU — title fixes: what a title, or the titles that use Direct3D
  * as a whole, need on top of the base. See docs/hle-gpu-layers.md.
  *
  * The base is the NV2A: every rule in it is a behaviour of the chip, measured
@@ -23,8 +23,8 @@
  * rule never moves into this table to make a pgraph picture pass: if the
  * chip does it, it is the base's.
  *
- * A/B on any title: HAKUX_HLE_FIXES at start, or the live property
- * debug.hakux.fixes: names separated by commas or spaces, "+name" (or the
+ * A/B on any title: XBASED_HLE_FIXES at start, or the live property
+ * debug.xbased.fixes: names separated by commas or spaces, "+name" (or the
  * bare name) on and "-name" off on top of the title's defaults, "+all" /
  * "-all" every fix. Empty: the title's defaults.
  */
@@ -92,9 +92,9 @@ static inline bool hle_fix(uint32_t f)
     return (g_hle_fixes & f) != 0;
 }
 
-/* A title starts: its defaults, then HAKUX_HLE_FIXES and debug.hakux.fixes */
+/* A title starts: its defaults, then XBASED_HLE_FIXES and debug.xbased.fixes */
 void hle_fixes_init(const HleXbeInfo *x);
-/* Now and then (the draw path's property poll): debug.hakux.fixes changed */
+/* Now and then (the draw path's property poll): debug.xbased.fixes changed */
 void hle_fixes_poll(void);
 
 /* The names of the fixes in mask, comma separated ("-" for none), for logs

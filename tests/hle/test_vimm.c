@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — Kelvin's immediate vertex data (hw/xbox/hle/pb/vimm.c):
+ * xbased HLE GPU — Kelvin's immediate vertex data (hw/xbox/hle/pb/vimm.c):
  * every method number, the ones that are none between two that are, and what
  * each form writes.
  */

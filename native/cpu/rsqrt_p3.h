@@ -1,5 +1,5 @@
 /*
- * hakuX native core - the Pentium III's RSQRTSS / RSQRTPS, bit for bit.
+ * xbased native core - the Pentium III's RSQRTSS / RSQRTPS, bit for bit.
  *
  * The approximation is a table in the chip, and each vendor has its own:
  * an AMD host's differs from the Xbox's on more than half of the positive

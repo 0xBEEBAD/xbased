@@ -1,5 +1,19 @@
 # xbased changelog
 
+## 1.1.3 (2026-11)
+
+### Fixes
+- **Fast precision is as light as the older versions again.** Its pixel
+  shaders still did per-pixel work added for the exact mode (rounding every
+  step to the console's bytes, holding coordinates on texel edges, a pass
+  per sample on antialiased surfaces), which made full-screen effects up to
+  half again as expensive. At higher internal resolutions on integrated and
+  older GPUs that was the difference between full speed and half
+  (Midnight Club 3 at 3x). Fast now costs the same as 1.0.104 or less.
+- Fast precision: stray lines over Vice City's buildings.
+- Log lines and environment variables say xbased (`XBASED_*`; the older
+  `HAKUX_*` names still work). For LAN play every machine needs 1.1.3.
+
 ## 1.1.2 (2026-11)
 
 ### New

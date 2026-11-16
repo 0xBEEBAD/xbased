@@ -1,5 +1,5 @@
 /*
- * hakuX front end — the dashboard's drawing (ui.h).
+ * xbased front end — the dashboard's drawing (ui.h).
  *
  * Text: glyphs rasterized by stb_truetype at the size they are drawn at
  * (pixels: crisp at any window size) into one atlas texture, shelf-packed,

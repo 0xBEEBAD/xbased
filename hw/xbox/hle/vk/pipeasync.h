@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — pipelines built off the render thread, and before the game
+ * xbased HLE GPU — pipelines built off the render thread, and before the game
  * runs (pipeasync.c):
  * - Asynchronous builds (the app's "Asynchronous shader compilation"): a
  *   pipeline that would compile is built by worker threads while draws that
@@ -39,7 +39,7 @@ unsigned hle_pipe_spare_threads(unsigned least);
 /* the app's setting for new shaders: drawn by the interpreters meanwhile (vk/draw.c g_ub) */
 bool hle_pipe_hybrid(void);
 /* draw.c's init: the key size and the build function; the debug overrides
- * (debug.hakux.asyncpipe, debug.hakux.prebuild, debug.hakux.nocache) read.
+ * (debug.xbased.asyncpipe, debug.xbased.prebuild, debug.xbased.nocache) read.
  * variant: a suffix of the record's name for keys of another kind (the
  * vertex layout in them: "-vi"), so either kind keeps its own; "" none. */
 void hle_pipe_init(size_t key_size, HlePipeBuildFn build, const char *variant);

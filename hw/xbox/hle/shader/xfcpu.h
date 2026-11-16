@@ -1,5 +1,5 @@
 /*
- * hakuX HLE - the NV2A's transform unit on the CPU: the arithmetic of
+ * xbased HLE - the NV2A's transform unit on the CPU: the arithmetic of
  * xflib.h (the vertex programs' GLSL) in C, and a program run by it.
  *
  * The runs the GPU can't make go through here: a program that writes the

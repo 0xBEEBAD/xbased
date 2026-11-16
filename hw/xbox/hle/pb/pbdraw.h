@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — push-buffer mode's drawing: Kelvin (class 0x97) methods
+ * xbased HLE GPU — push-buffer mode's drawing: Kelvin (class 0x97) methods
  * into the back end's commands (front/cmd.h), on the decode thread. So
  * far: the render targets (SET_SURFACE_*), CLEAR_SURFACE, the frame
  * presented at each FLIP_INCREMENT_WRITE (the colour target just
@@ -151,7 +151,7 @@ const char *hle_pbd_phase(void);
 void hle_pbd_draw_counts(uint64_t *draws, uint64_t *ff, uint64_t *skipped, uint64_t *tex_defs);
 /* Visibility tests ended, and the submit boundaries they needed of their own */
 void hle_pbd_vis_counts(uint64_t *tests, uint64_t *kicks);
-/* debug (HAKUX_HLE_PB_NOVIS=1): no occlusion queries; visibility tests
+/* debug (XBASED_HLE_PB_NOVIS=1): no occlusion queries; visibility tests
  * report every pixel passed */
 bool hle_pbd_novis(void);
 

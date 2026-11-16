@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — a depth target's image as the NV2A's words (zpack.h).
+ * xbased HLE GPU — a depth target's image as the NV2A's words (zpack.h).
  */
 #include "hw/xbox/hle/tex/zpack.h"
 

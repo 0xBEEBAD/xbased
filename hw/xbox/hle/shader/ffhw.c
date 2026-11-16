@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — the NV2A fixed-function vertex stage as GLSL (pure). See
+ * xbased HLE GPU — the NV2A fixed-function vertex stage as GLSL (pure). See
  * ffhw.h. The transform engine's fixed function, as NV_vertex_program's
  * documentation and the hardware tests describe it (LLE's generator read as
  * reference only):

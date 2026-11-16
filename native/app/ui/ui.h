@@ -1,5 +1,5 @@
 /*
- * hakuX front end — the dashboard's drawing (ui.c): text in the bundled
+ * xbased front end — the dashboard's drawing (ui.c): text in the bundled
  * font with the system's CJK fonts behind it, shapes, the console's green
  * theme, over an SDL_Renderer (Direct3D on Windows, OpenGL/Vulkan on Linux),
  * or, in a game's process, as the overlay its own presenter composites over

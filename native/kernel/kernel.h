@@ -1,5 +1,5 @@
 /*
- * hakuX native core — the Xbox kernel (xboxkrnl), reimplemented.
+ * xbased native core — the Xbox kernel (xboxkrnl), reimplemented.
  *
  * Kernel memory lives at VA 0x80010000 (physical 0x10000), where the real
  * kernel image sits. Each function export has a trampoline there,
@@ -389,7 +389,7 @@ void nc_ps_slice_end(NcKernel *k, uint64_t now);
 /* The running thread gives way (Sleep(0), polling) to a ready thread of its
  * priority or above: rescheduled at the back of its priority's queue. */
 void nc_ps_yield(NcKernel *k);
-/* debug (debug.hakux.ncresume=<id>): NtResumeThread on thread t<id> */
+/* debug (debug.xbased.ncresume=<id>): NtResumeThread on thread t<id> */
 void nc_ps_debug_resume(NcKernel *k, unsigned id);
 void nc_ps_terminate_current(NcKernel *k, uint32_t status);
 

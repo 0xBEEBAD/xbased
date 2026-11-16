@@ -1,5 +1,5 @@
 /*
- * hakuX front end — the game library (library.h).
+ * xbased front end — the game library (library.h).
  *
  * The cache (<data>/covers/library.txt, cache_load): a line a file, so the
  * library shows at once and a scan reads only new or changed images; their

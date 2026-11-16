@@ -1,5 +1,5 @@
 /*
- * hakuX front end — the dashboard's pieces (dash*.c): the input, the
+ * xbased front end — the dashboard's pieces (dash*.c): the input, the
  * screen stack, the lists every screen is made of.
  */
 #ifndef NATIVE_APP_UI_DASH_INT_H

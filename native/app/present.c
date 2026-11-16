@@ -1,5 +1,5 @@
 /*
- * hakuX native core, app front end — presenting the HLE GPU's front image.
+ * xbased native core, app front end — presenting the HLE GPU's front image.
  *
  * Once per display refresh the window's thread hands its Android window to
  * the HLE GPU's presenter (hw/xbox/hle/vk/swapchain.h), which draws the
@@ -29,7 +29,7 @@ static bool g_shown;
 static uint64_t g_win_presented, g_win_start_ns, g_last_present_ns, g_seen_presented;
 static float g_fps, g_avg_ms, g_last_ms;
 
-/* debug.hakux.present, for comparisons on the device (read every 64
+/* debug.xbased.present, for comparisons on the device (read every 64
  * refreshes): "fxaa" / "nofxaa", "fsr" / "bilinear" (the upscaling),
  * "noaverage" (a larger frame sampled bilinearly); otherwise the settings. */
 static struct {
@@ -54,7 +54,7 @@ int nc_upscale_from_name(const char *v)
 bool nc_present_init(void)
 {
     hle_disp_gamma_by_consumer(true); /* before the core starts: frames come without it */
-    nc_log("hakuX-app", "present: Vulkan; FXAA %s, upscaling %s", g_fxaa ? "on" : "off",
+    nc_log("xbased-app", "present: Vulkan; FXAA %s, upscaling %s", g_fxaa ? "on" : "off",
            g_upscale == NC_UPSCALE_FSR ? "FSR" : g_upscale == NC_UPSCALE_NEAREST ? "nearest" : "bilinear");
     return true;
 }
@@ -159,7 +159,7 @@ static void debug_poll(void)
         return;
     }
     char v[PROP_VALUE_MAX] = "";
-    hle_prop_get("debug.hakux.present", v);
+    hle_prop_get("debug.xbased.present", v);
     g_dbg.fxaa = strstr(v, "nofxaa") ? 0 : strstr(v, "fxaa") ? 1 : -1;
     g_dbg.upscale = strstr(v, "fsr")        ? NC_UPSCALE_FSR
                     : strstr(v, "nearest")  ? NC_UPSCALE_NEAREST

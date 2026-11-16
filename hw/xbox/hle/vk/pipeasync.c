@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — asynchronous pipeline builds, the per-title pipeline
+ * xbased HLE GPU — asynchronous pipeline builds, the per-title pipeline
  * record and its prebuild (pipeasync.h).
  *
  * Workers: threads below normal priority, so the guest's CPU and the render
@@ -108,7 +108,7 @@ static struct {
     uint32_t pb_done, pb_total, pb_next;    /* atomics */
 } g_pa;
 
-/* -1 unset, else the value of HAKUX_HLE_<env> or debug.hakux.<prop> (0 / 1) */
+/* -1 unset, else the value of XBASED_HLE_<env> or debug.xbased.<prop> (0 / 1) */
 static int debug_switch(const char *env, const char *prop)
 {
     const char *e = getenv(env);
@@ -156,14 +156,14 @@ void hle_pipe_init(size_t key_size, HlePipeBuildFn build, const char *variant)
     g_pa.key_size = key_size;
     g_pa.variant = variant;
     g_pa.build = build;
-    int a = debug_switch("HAKUX_HLE_ASYNCPIPE", "debug.hakux.asyncpipe");
-    int p = debug_switch("HAKUX_HLE_PREBUILD", "debug.hakux.prebuild");
+    int a = debug_switch("XBASED_HLE_ASYNCPIPE", "debug.xbased.asyncpipe");
+    int p = debug_switch("XBASED_HLE_PREBUILD", "debug.xbased.prebuild");
     g_pa.async = a >= 0 ? a : g_pa.opt_async || (g_pa.opt_hybrid && !hle_pipe_hybrid());
     g_pa.prebuild = p >= 0 ? p : g_pa.opt_prebuild;
-    g_pa.nocache = debug_switch("HAKUX_HLE_NOCACHE", "debug.hakux.nocache") == 1;
+    g_pa.nocache = debug_switch("XBASED_HLE_NOCACHE", "debug.xbased.nocache") == 1;
     hle_mutex_init(&g_pa.mu);
     hle_cond_init(&g_pa.cv);
-    hle_log("hakuX-hle-pipe", "pipelines: asynchronous %s%s, prebuild %s%s%s",
+    hle_log("xbased-hle-pipe", "pipelines: asynchronous %s%s, prebuild %s%s%s",
             g_pa.async ? "on" : "off", a >= 0 ? " (debug)" : "",
             g_pa.prebuild ? "on" : "off", p >= 0 ? " (debug)" : "",
             g_pa.nocache ? ", no disk caches (debug)" : "");
@@ -253,7 +253,7 @@ bool hle_pipe_queue(uint64_t hash, const void *key, uint64_t vsh, const uint32_t
     if (!g_pa.started) {
         const long ncpu = sysconf(_SC_NPROCESSORS_ONLN);
         const unsigned nw = hle_pipe_spare_threads(2);
-        hle_log("hakuX-hle-pipe", "pipeline workers: %u (%ld host threads)", nw, ncpu);
+        hle_log("xbased-hle-pipe", "pipeline workers: %u (%ld host threads)", nw, ncpu);
         for (unsigned i = 0; i < nw; i++) {
             hle_thread_create(&g_pa.th[i], "hle.pipe", worker, NULL, HLE_THREAD_DETACHED);
         }
@@ -512,7 +512,7 @@ void hle_pipe_title(uint32_t title_id, uint32_t timedate)
     if (g_file_set_contents(tmp, (const gchar *)b.p, (gssize)b.n, NULL)) {
         rename(tmp, g_pa.path);
     }
-    hle_log("hakuX-hle-pipe", "pipeline record %s: %s, %u pipelines, %u programs (%zu bytes)",
+    hle_log("xbased-hle-pipe", "pipeline record %s: %s, %u pipelines, %u programs (%zu bytes)",
             g_pa.path, read ? "read" : "new", g_pa.nlist, g_pa.nprogs, b.n);
     g_free(b.p);
 }
@@ -613,7 +613,7 @@ void hle_pipe_prebuild(uint32_t max, void (*add)(uint64_t hash, VkPipeline p))
             failed++;
         }
     }
-    hle_log("hakuX-hle-pipe", "prebuild: %u of %u recorded pipelines in %.0f ms on %u threads "
+    hle_log("xbased-hle-pipe", "prebuild: %u of %u recorded pipelines in %.0f ms on %u threads "
             "(%u failed)", ok, g_pa.nlist, (g_get_monotonic_time() - t0) / 1000.0, nth, failed);
     hle_atomic_set(&g_pa.pb_total, 0);
     hle_atomic_set(&g_pa.pb_done, 0);

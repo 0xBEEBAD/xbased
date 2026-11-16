@@ -1,4 +1,4 @@
-/* hakuX front end — the interface's strings: X(id, en, es, fr, de, it, pt, ru, pl, ja, zh, ko).
+/* xbased front end — the interface's strings: X(id, en, es, fr, de, it, pt, ru, pl, ja, zh, ko).
  * Included by i18n.h and i18n.c. */
 /* main menu */
 X(S_GAMES, "Games", "Juegos", "Jeux", "Spiele", "Giochi", "Jogos", "Игры", "Gry", "ゲーム", "游戏", "게임")

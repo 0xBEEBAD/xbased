@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — fixed-function GLSL generators (pure). See ff.h.
+ * xbased HLE GPU — fixed-function GLSL generators (pure). See ff.h.
  * - VS: XYZRHW (screen space) and transformed positions; D3D8 lighting
  *   (directional, point, spot; material colour sources, specular, local
  *   viewer), vertex blending (up to 3 weights), texgen (camera-space
@@ -40,6 +40,7 @@ bool g_hle_glsl_zw;                     /* ff.h */
 bool g_hle_glsl_zclamp;                 /* ff.h */
 bool g_hle_glsl_f64;                    /* ff.h */
 bool g_hle_glsl_i64;                    /* ff.h */
+bool g_hle_psh_fast;                    /* ff.h */
 bool g_hle_glsl_fixed;                  /* ff.h */
 
 size_t hle_glsl_fixed_slots(char *src, size_t cap)

@@ -1,5 +1,5 @@
 /*
- * hakuX front end — discs and XPR images (xbox_data.h), as the Android
+ * xbased front end — discs and XPR images (xbox_data.h), as the Android
  * app's XboxDisc.kt and XprImage.kt read them.
  */
 #include "native/app/ui/xbox_data.h"

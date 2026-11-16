@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — first-write barrier and write recorder.
+ * xbased HLE GPU — first-write barrier and write recorder.
  */
 #include "hw/xbox/hle/base.h"
 #include "hw/xbox/hle/hle.h"
@@ -132,7 +132,7 @@ void hle_barrier_init(uint64_t ram_size)
     g_contended = g_new0(uint32_t, (ram_size >> 12) / 32 + 1);
     g_cspan = g_new0(uint32_t, ram_size >> 12);
     g_hot = g_new0(uint8_t, ram_size >> 12);
-    if (!getenv("HAKUX_HLE_NO_CLEAN")) {     /* debug: no cache cleaning (A/B) */
+    if (!getenv("XBASED_HLE_NO_CLEAN")) {     /* debug: no cache cleaning (A/B) */
         g_wseq = g_new0(uint32_t, ram_size >> 12);
         g_cseq = g_new0(uint32_t, ram_size >> 12);
         g_bseq = g_new0(uint32_t, (ram_size >> (12 + WBLOCK_SHIFT)) + 1);
@@ -831,7 +831,7 @@ static bool rpt_access(uint32_t pa)
                 if (stuck) {
                     g_rpt.held++;
                 } else if (g_rpt.timeouts++ < 8) {
-                    hle_log("hakuX-hle-pb", "report gate: page %08x's reports not %s in %lld ms",
+                    hle_log("xbased-hle-pb", "report gate: page %08x's reports not %s in %lld ms",
                             g_rpt.page[pg] << 12, ahead ? "reached" : "written",
                             (ahead ? RPT_AHEAD_NS : RPT_WAIT_NS) / 1000000);
                 }
@@ -1064,7 +1064,7 @@ void hle_mem_first_write(uint64_t ram_addr, unsigned size)
         /* Nothing was ever armed, so no HLE bit should be clean. A trap here
          * means the dirty client is not maintained (Step 1(c)). */
         if (g_st.unarmed++ == 0) {
-            hle_log("hakuX-hle-mem", "barrier: UNARMED trap at pa=%08x", pa);
+            hle_log("xbased-hle-mem", "barrier: UNARMED trap at pa=%08x", pa);
         }
         return;
     }

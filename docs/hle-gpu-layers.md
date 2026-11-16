@@ -72,7 +72,7 @@ Homebrew is not a goal and nothing is added for it.
 | `d3d_method_runs` | D3D build 4928 | Its push buffer carries long non-incrementing runs the decoder takes whole. | None: an optimisation. |
 | `d3d_lazy_zalias` | D3D | A colour target over a depth target's memory, the depth drawn after it, takes the depth's words before its first partial write in the base (a landing and a wait for the GPU). D3D places a target there once it is done with the depth and draws it anew: Fable's 128 x 128 target inside its 256 x 256 shadow map, every frame, ran at 0.586 of 1.0.104's fps. | None on pgraph (Color_zeta_overlap runs the base). To go once the copy is made on the GPU (a remapping ZREAD pass). |
 
-`HAKUX_HLE_FIXES` at start, or the live property `debug.hakux.fixes`, turns
+`XBASED_HLE_FIXES` at start, or the live property `debug.xbased.fixes`, turns
 any of them off or on for A/B: `-d3d_snap_bias`, `+all`, `-all`. A title with
 no D3D library has none on, and the log says so (`title fixes: -`).
 

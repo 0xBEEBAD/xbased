@@ -1,5 +1,5 @@
 /*
- * hakuX HLE - the NV2A's transform unit on the CPU (xfcpu.h): xflib.h's
+ * xbased HLE - the NV2A's transform unit on the CPU (xfcpu.h): xflib.h's
  * arithmetic in C, line for line, and vsh.c's reading of a program.
  */
 #include "hw/xbox/hle/shader/xfcpu.h"

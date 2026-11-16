@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — Xbox pixel shaders -> GLSL (pure). See psh.h.
+ * xbased HLE GPU — Xbox pixel shaders -> GLSL (pure). See psh.h.
  *
  * Register combiners (D3DPIXELSHADERDEF, NV_register_combiners on NV2A):
  * - input byte: bits 0-3 register, bit 4 alpha channel (RGB portion: .aaa;
@@ -580,6 +580,66 @@ static const char k_nvrsign[] =
     "  umulExtended(mr, fx, h, l);\n"                    /* against 2^47: (2^23 m)(2^-24 r) = 1 */
     "  return h > 0x8000u || (h == 0x8000u && l != 0u) ? 1 : h == 0x8000u ? 0 : -1;\n"
     "}\n";
+
+/* text's every copy of pat cut out of buf (len its length); the new length */
+static size_t cut_all(char *buf, size_t len, const char *pat)
+{
+    const size_t n = strlen(pat);
+    for (char *f = buf; (f = strstr(f, pat)) != NULL; ) {
+        memmove(f, f + n, len - (size_t)(f - buf) - n + 1);
+        len -= n;
+    }
+    return len;
+}
+
+/* Fast precision (g_hle_psh_fast): the per-pixel steps added after 1.0.94
+ * for the console's exact bytes cut from the text, as 1.0.94 drew: each
+ * combiner output's and the colour's rounding to a byte, the vertex
+ * colours' bytes, the samples' own passes of an antialiased surface (their
+ * discard kept the GPU's early depth test off in every shader) and a 2D
+ * stage's coordinate held on a texel edge (a texture size and its steps on
+ * every flat draw: the full-screen passes of Midnight Club 3's blur cost
+ * half as much again, #309). */
+static size_t fast_cut(char *buf, size_t len)
+{
+    static const char *const k_cut[] = {
+        "  if ((pc.flags & 4096u) != 0u && pc.mvp[1].x >= 1.0) {\n"
+        "    ivec2 ms = ivec2(pc.mvp[1].xy), mp = ivec2(nvFC.xy);\n"
+        "    nvAAk = mp - (mp / ms) * ms != ivec2(pc.mvp[1].zw);\n"
+        "    nvFC.xy = vec2(mp / ms) + 0.5;\n"
+        "  }\n",
+        "  if (nvAAk) discard;\n",
+        "  v0 = NVC8(v0) / 255.0; v1 = NVC8(v1) / 255.0;\n",
+        "  outc = floor(outc * 255.0 + 0.5) / 255.0;\n",
+    };
+    for (unsigned i = 0; i < sizeof(k_cut) / sizeof(k_cut[0]); i++) {
+        len = cut_all(buf, len, k_cut[i]);
+    }
+    /* the combiners' outputs to their nearest 1 / 255 */
+    static const char k_round[] = " * 255.0 + (0.5 + 1.0 / 1024.0)) / 255.0;\n";
+    for (char *f; (f = strstr(buf, k_round)) != NULL; ) {
+        char *ls = f;
+        while (ls > buf && ls[-1] != '\n') {
+            ls--;
+        }
+        char *le = f + sizeof(k_round) - 1;
+        memmove(ls, le, len - (size_t)(le - buf) + 1);
+        len -= (size_t)(le - ls);
+    }
+    /* sampx's texel-edge hold (2D stages) */
+    static const char k_tie[] = "  if (dFdx(nvFC        .w) == 0.0 && dFdy(nvFC        .w) == 0.0) {\n"
+                                "    vec2 qs = vec2(textureSize(sampler2D(";
+    for (char *f; (f = strstr(buf, k_tie)) != NULL; ) {
+        char *e = strstr(f, "\n  }\n");
+        if (!e) {
+            break;
+        }
+        e += 5;
+        memmove(f, e, len - (size_t)(e - buf) + 1);
+        len -= (size_t)(e - f);
+    }
+    return len;
+}
 
 size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsupported)
 {
@@ -2800,6 +2860,9 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
         char *f = strstr(buf, "HLE_REAL_FC_");
         if (f) {
             memcpy(f, "gl_FragCoord", 12);
+        }
+        if (g_hle_psh_fast) {
+            b.len = fast_cut(buf, b.len);
         }
     }
     return b.overflow ? 0 : b.len;

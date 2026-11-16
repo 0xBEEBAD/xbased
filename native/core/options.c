@@ -1,5 +1,5 @@
 /*
- * hakuX native core — a run's options (options.h), shared by the app's front
+ * xbased native core — a run's options (options.h), shared by the app's front
  * end (native/app/app_main.c) and xboxrun (native/run/xboxrun.c).
  */
 #include "native/core/options.h"
@@ -67,17 +67,17 @@ bool nc_option(NcOptions *o, const char *arg)
         o->fps_cap = atoi(v) > 0 ? atoi(v) : 0;
     } else if ((v = value(arg, "loadstate="))) {
         nc_core_set_loadstate(v);
-        nc_log("hakuX-app", "savestate %s", v);
+        nc_log("xbased-app", "savestate %s", v);
     } else if ((v = value(arg, "mods="))) {
         nc_mods_set_manifest(v);                /* read as the disc opens */
     } else if ((v = value(arg, "version="))) {
         nc_state_set_core_version(v);
     } else if ((v = value(arg, "aniso="))) {
         nc_hle_set_anisotropy(atoi(v));
-        nc_log("hakuX-app", "anisotropic filtering %sx", v);
+        nc_log("xbased-app", "anisotropic filtering %sx", v);
     } else if ((v = value(arg, "scale="))) {
         nc_hle_set_render_scale(atoi(v));
-        nc_log("hakuX-app", "render scale %sx", v);
+        nc_log("xbased-app", "render scale %sx", v);
     } else if ((v = value(arg, "shaders="))) {
         o->shaders = !strcmp(v, "async") ? NC_SHADERS_ASYNC : !strcmp(v, "sync") ? NC_SHADERS_SYNC : NC_SHADERS_HYBRID;
     } else if ((v = value(arg, "asyncpipe="))) {
@@ -108,12 +108,12 @@ bool nc_option(NcOptions *o, const char *arg)
         const bool surround = !strcmp(v, "5.1");
         nc_kernel_set_audio(surround);
         nc_audio_set_channels(surround ? 6 : 2);
-        nc_log("hakuX-app", "audio %s", surround ? "5.1 (Dolby Digital)" : "stereo");
+        nc_log("xbased-app", "audio %s", surround ? "5.1 (Dolby Digital)" : "stereo");
     } else if ((v = value(arg, "pal60="))) {
         nc_kernel_set_pal60(atoi(v) != 0);      /* PAL titles at 60 Hz (default) or 50 */
     } else if ((v = value(arg, "lang="))) {
         nc_kernel_set_language(atoi(v));
-        nc_log("hakuX-app", "console language %s", v);
+        nc_log("xbased-app", "console language %s", v);
     } else if ((v = value(arg, "langfixed="))) {
         nc_kernel_set_language_fixed(atoi(v) != 0);     /* the game's own: kept on any disc */
     } else if ((v = value(arg, "clock="))) {
@@ -132,23 +132,23 @@ void nc_options_apply(const NcOptions *o)
      * 480p/720p/1080i) and the cable it finds (HD modes need component). */
     nc_kernel_set_video(o->video, o->av_pack);
     if (o->video >= 0) {
-        nc_log("hakuX-app", "video flags %08llx, AV pack %d", (unsigned long long)o->video, o->av_pack);
+        nc_log("xbased-app", "video flags %08llx, AV pack %d", (unsigned long long)o->video, o->av_pack);
     }
     if (o->uncap) {
-        setenv("HAKUX_HLE_UNCAP", "1", 1);
+        setenv("XBASED_HLE_UNCAP", "1", 1);
     } else {
-        unsetenv("HAKUX_HLE_UNCAP");
+        unsetenv("XBASED_HLE_UNCAP");
     }
     if (o->uncap && o->fps_cap > 0) {
         char n[16];
         snprintf(n, sizeof(n), "%d", o->fps_cap);
-        setenv("HAKUX_HLE_FPSCAP", n, 1);
-        nc_log("hakuX-app", "frame rate uncapped, at most %d fps", o->fps_cap);
+        setenv("XBASED_HLE_FPSCAP", n, 1);
+        nc_log("xbased-app", "frame rate uncapped, at most %d fps", o->fps_cap);
     } else {
-        unsetenv("HAKUX_HLE_FPSCAP");
+        unsetenv("XBASED_HLE_FPSCAP");
     }
     nc_hle_set_pipeline_options(o->shaders == NC_SHADERS_ASYNC, o->prebuild, o->shaders == NC_SHADERS_HYBRID);
-    nc_log("hakuX-app", "shaders: new ones %s, cached ones built before the game %s",
+    nc_log("xbased-app", "shaders: new ones %s, cached ones built before the game %s",
            o->shaders == NC_SHADERS_ASYNC ? "built asynchronously (their draws skipped meanwhile)" :
            o->shaders == NC_SHADERS_SYNC ? "waited for" : "drawn by the interpreters while they build",
            o->prebuild ? "on" : "off");

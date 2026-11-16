@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — pipelines linked from libraries (gpl.h).
+ * xbased HLE GPU — pipelines linked from libraries (gpl.h).
  *
  * Four tables of parts by key, shared by the render thread and the pipeline
  * workers under one lock (held for lookups only: a part is built outside
@@ -56,7 +56,7 @@ static const VkGraphicsPipelineLibraryFlagsEXT k_part_flag[PART_N] = {
 bool hle_gpl_on(void)
 {
     if (g_gl.on < 0) {
-        const char *e = getenv("HAKUX_HLE_GPL");
+        const char *e = getenv("XBASED_HLE_GPL");
         bool on = g_hvk.caps.gpl && g_hvk.caps.vids && g_hvk.caps.eds1 && g_hvk.caps.eds2 &&
                   !(e && *e && atoi(e) == 0);
         if (on) {
@@ -75,7 +75,7 @@ bool hle_gpl_on(void)
                 g_gl.tab[k] = g_new0(Part, PART_CAP);
             }
         }
-        hle_log("hakuX-hle-pipe", "pipelines linked from libraries: %s", on ? "on" : "off");
+        hle_log("xbased-hle-pipe", "pipelines linked from libraries: %s", on ? "on" : "off");
         g_gl.on = on;
     }
     return g_gl.on > 0;

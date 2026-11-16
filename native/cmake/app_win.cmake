@@ -30,27 +30,27 @@ set(NC_APP_SOURCES
 )
 if(WIN32)
   enable_language(RC)
-  add_executable(hakux WIN32 ${NC_APP_SOURCES} "${CMAKE_CURRENT_SOURCE_DIR}/app/win/xbased.rc")
-  # the linker's map: the profile's offsets resolved where there is no debug info (HAKUX_PROF)
-  target_link_options(hakux PRIVATE "-Wl,-Map=$<TARGET_FILE_DIR:hakux>/xbased.map")
-  target_link_libraries(hakux PRIVATE ole32 uuid shell32 mpr)   # the desktop shortcuts (app/ui/shortcut.c); mpr: a network drive's share (dash_browse.c)
+  add_executable(xbased WIN32 ${NC_APP_SOURCES} "${CMAKE_CURRENT_SOURCE_DIR}/app/win/xbased.rc")
+  # the linker's map: the profile's offsets resolved where there is no debug info (XBASED_PROF)
+  target_link_options(xbased PRIVATE "-Wl,-Map=$<TARGET_FILE_DIR:xbased>/xbased.map")
+  target_link_libraries(xbased PRIVATE ole32 uuid shell32 mpr)   # the desktop shortcuts (app/ui/shortcut.c); mpr: a network drive's share (dash_browse.c)
 else()
-  add_executable(hakux ${NC_APP_SOURCES})
+  add_executable(xbased ${NC_APP_SOURCES})
 endif()
 # xbased (.exe), with its icon and version on Windows (app/win/xbased.rc)
-set_target_properties(hakux PROPERTIES OUTPUT_NAME xbased)
+set_target_properties(xbased PROPERTIES OUTPUT_NAME xbased)
 # xbased's version, set here alone: the app's (xbased_version.h, from
 # app/version.h.in) and the executable's version information (xbased.rc)
-set(XBASED_VERSION 1.1.2)
+set(XBASED_VERSION 1.1.3)
 string(REPLACE "." "," XBASED_VERSION_RC "${XBASED_VERSION}")
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/app/version.h.in" "${CMAKE_CURRENT_BINARY_DIR}/gen/xbased_version.h" @ONLY)
-target_include_directories(hakux PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/gen")
-target_link_libraries(hakux PRIVATE hakux_native hakux_hle SDL3::SDL3)
-target_include_directories(hakux PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../third_party/stb")  # public domain, vendored
-target_compile_options(hakux PRIVATE -Wall -Wno-unused-parameter -Wno-unused-function)
+target_include_directories(xbased PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/gen")
+target_link_libraries(xbased PRIVATE xbased_native xbased_hle SDL3::SDL3)
+target_include_directories(xbased PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../third_party/stb")  # public domain, vendored
+target_compile_options(xbased PRIVATE -Wall -Wno-unused-parameter -Wno-unused-function)
 # the mods and cheats the game folders hold (mods/README.md), and the
 # dashboard's fonts, beside the executable
-add_custom_command(TARGET hakux POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy_directory "${NC_REPO}/mods" "$<TARGET_FILE_DIR:hakux>/mods"
-  COMMAND ${CMAKE_COMMAND} -E copy_directory "${NC_REPO}/cheats" "$<TARGET_FILE_DIR:hakux>/cheats"
-  COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/app/ui/fonts" "$<TARGET_FILE_DIR:hakux>/fonts")
+add_custom_command(TARGET xbased POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_directory "${NC_REPO}/mods" "$<TARGET_FILE_DIR:xbased>/mods"
+  COMMAND ${CMAKE_COMMAND} -E copy_directory "${NC_REPO}/cheats" "$<TARGET_FILE_DIR:xbased>/cheats"
+  COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/app/ui/fonts" "$<TARGET_FILE_DIR:xbased>/fonts")

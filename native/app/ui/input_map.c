@@ -1,5 +1,5 @@
 /*
- * hakuX front end — controller mapping (input_map.h).
+ * xbased front end — controller mapping (input_map.h).
  */
 #include "native/app/ui/input_map.h"
 

@@ -1,11 +1,11 @@
 /*
- * hakuX native core — a run's options, the arguments a front end passes on
+ * xbased native core — a run's options, the arguments a front end passes on
  * (the app's NativeCoreActivity.getArguments, xboxrun's command line):
  *
  *   uncap            every frame presented at once, without waiting for
- *                    vblank (the HLE GPU's HAKUX_HLE_UNCAP)
+ *                    vblank (the HLE GPU's XBASED_HLE_UNCAP)
  *   fpscap=N         uncapped, at most N frames a second (60, 120: the
- *                    HLE GPU's HAKUX_HLE_FPSCAP; 0 or absent, no limit)
+ *                    HLE GPU's XBASED_HLE_FPSCAP; 0 or absent, no limit)
  *   xcheat=FILE|ON  a cheat file (.etm, .xbtf: core/xcheat.h) run before the
  *                    title, its options on as the 1s and 0s say
  *   relaunch         a title's reboot into another of its XBEs

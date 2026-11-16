@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — title fixes (see fixes.h and docs/hle-gpu-layers.md).
+ * xbased HLE GPU — title fixes (see fixes.h and docs/hle-gpu-layers.md).
  *
  * The only file of the GPU layer that looks at which title is running (with
  * fixes_rt.c, which starts it). A new fix is a bit in fixes.h and a row here;

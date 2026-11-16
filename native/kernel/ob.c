@@ -1,5 +1,5 @@
 /*
- * hakuX native core — objects and handles.
+ * xbased native core — objects and handles.
  *
  * Objects live in guest memory as on the Xbox: an OBJECT_HEADER
  * (PointerCount, HandleCount, Type, Flags) followed by the body; handles
@@ -63,7 +63,7 @@ uint32_t nc_ob_create(NcKernel *k, enum NcObType type, uint32_t body_size)
 {
     if (freeable(type) && g_ob_size[type] != UINT32_MAX) {
         if (g_ob_size[type] && g_ob_size[type] != body_size) {
-            nc_log("hakuX-native", "ob: type %u objects of %u and %u bytes: not freed", type, g_ob_size[type],
+            nc_log("xbased-native", "ob: type %u objects of %u and %u bytes: not freed", type, g_ob_size[type],
                    body_size);
             g_ob_size[type] = UINT32_MAX;   /* for good: the sizes are mixed */
         } else {
@@ -100,7 +100,7 @@ uint32_t nc_ob_handle(NcKernel *k, uint32_t object, enum NcObType type)
             return i * 4;
         }
     }
-    nc_log("hakuX-native", "ob: out of handles");
+    nc_log("xbased-native", "ob: out of handles");
     return 0;
 }
 
@@ -299,7 +299,7 @@ static uint64_t ObOpenObjectByName(NcKernel *k, NcFrame *f, const uint32_t *a)
     if (!obj) {
         static unsigned told;
         if (told++ < 50) {
-            nc_log("hakuX-native", "ob: open %s: no such object", name[0] ? name : "(no name)");
+            nc_log("xbased-native", "ob: open %s: no such object", name[0] ? name : "(no name)");
         }
         return STATUS_OBJECT_NAME_NOT_FOUND;
     }

@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — the GPU precision (precision.c): the NV2A's own arithmetic
+ * xbased HLE GPU — the GPU precision (precision.c): the NV2A's own arithmetic
  * in the shaders (exact: the transform unit's operations, the colour
  * weights, texel ties and depth words in doubles and 64-bit integers), or
  * plain float (fast: the stand-ins' forms for every draw, close to 1.0.94's).

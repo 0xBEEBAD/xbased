@@ -1,5 +1,5 @@
 /*
- * hakuX front end — the dashboard's settings: the global ones (tabs), a
+ * xbased front end — the dashboard's settings: the global ones (tabs), a
  * game's, its mods and cheats, its save states, the controls and their
  * remapping, online play.
  */

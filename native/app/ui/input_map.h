@@ -1,5 +1,5 @@
 /*
- * hakuX front end — controller mapping (input_map.c): which key and which
+ * xbased front end — controller mapping (input_map.c): which key and which
  * gamepad button or axis drive each of the Duke's inputs, per player, as
  * the settings files keep it ("map.p1.a=Space|b0"), the devices players get
  * ("pad.p2=auto|keyboard|none|pad2"), and the keyboard shortcuts.

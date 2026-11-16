@@ -1,5 +1,5 @@
 /*
- * hakuX front end — the dashboard (dash.h): its loop, input, lists, and
+ * xbased front end — the dashboard (dash.h): its loop, input, lists, and
  * the main, games and game screens. Settings, controls, memory and online
  * are in dash_settings.c, dash_memory.c.
  */
@@ -511,9 +511,9 @@ static void poll_input(void)
     }
 }
 
-/* Scripted input and pictures (tests): HAKUX_AUTO_CMD=<file>, a command a
+/* Scripted input and pictures (tests): XBASED_AUTO_CMD=<file>, a command a
  * line as it grows: UP DOWN LEFT RIGHT OK BACK X Y LB RB, "shot <name>" (a
- * BMP in HAKUX_AUTO_DIR), "quit"; real input events too: "KEY <name>",
+ * BMP in XBASED_AUTO_DIR), "quit"; real input events too: "KEY <name>",
  * "MOUSE x y" (720p units), CLICK, RCLICK, "WHEEL n". */
 static char g_shot_req[256];
 static long long g_auto_off = -1;   /* -1: from the file's end at the next look */
@@ -522,7 +522,7 @@ static void auto_poll(void)
 {
     long long off = g_auto_off;
     static double seen;
-    const char *path = getenv("HAKUX_AUTO_CMD");
+    const char *path = getenv("XBASED_AUTO_CMD");
     if (!path || ui_time() - seen < 0.1) {
         return;
     }
@@ -592,7 +592,7 @@ static void auto_poll(void)
                 }
             }
         } else if (!strncmp(line, "shot ", 5)) {
-            const char *dir = getenv("HAKUX_AUTO_DIR");
+            const char *dir = getenv("XBASED_AUTO_DIR");
             snprintf(g_shot_req, sizeof(g_shot_req), "%s/shot_%s.bmp", dir ? dir : ".", line + 5);
         } else if (!strncmp(line, "size ", 5)) {
             int w = 0, h = 0;

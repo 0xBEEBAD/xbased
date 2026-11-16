@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — render-target / depth surfaces (spec §5.5: HLE-owned
+ * xbased HLE GPU — render-target / depth surfaces (spec §5.5: HLE-owned
  * images; identity by front-end object id).
  */
 #include "hw/xbox/hle/base.h"
@@ -93,10 +93,10 @@ static uint32_t surf_scale(const HleSurfDesc *d)
      * and added back over the scene it drew a bright outline around what
      * stands against a lit background (Prince of Persia: The Sands of Time's
      * Prince, 640 -> 320 -> 160 -> ... -> 16, #151). debug:
-     * HAKUX_HLE_HALFSCALE=0, scaled as before (A/B). */
+     * XBASED_HLE_HALFSCALE=0, scaled as before (A/B). */
     static int half = -1;
     if (half < 0) {
-        const char *e = getenv("HAKUX_HLE_HALFSCALE");
+        const char *e = getenv("XBASED_HLE_HALFSCALE");
         half = !e || strcmp(e, "0");
     }
     if (half && d->pitch && !d->role && !d->parent && d->w <= 360 && d->h <= 288) {
@@ -188,7 +188,7 @@ static void destroy_now(HleVkSurf *s)
     if (s->img && g_rec_open && s->rec_gen == g_rec_gen) {
         /* Must never happen: the open recording references this image. */
         if (g_surf_bugs++ < 8) {
-            hle_log("hakuX-hle-back", "BUG: destroying surface %u used by the open "
+            hle_log("xbased-hle-back", "BUG: destroying surface %u used by the open "
                     "recording", s->id);
         }
     }
@@ -308,13 +308,13 @@ HleVkSurf *hle_surf_define(const HleSurfDesc *d)
                 s->nfaces = d->faces == 6 && d->w == d->h ? 6 : 1;
             }
             if (s->fmt == VK_FORMAT_UNDEFINED) {
-                hle_log("hakuX-hle-back", "surface %u: format 0x%x not renderable",
+                hle_log("xbased-hle-back", "surface %u: format 0x%x not renderable",
                         d->id, d->xfmt);
             }
             static unsigned s_logged;
             if (s->general && s_logged < 48) {
                 s_logged++;
-                hle_log("hakuX-hle-back", "surface %u: %s %ux%u fmt 0x%x levels %u faces %u "
+                hle_log("xbased-hle-back", "surface %u: %s %ux%u fmt 0x%x levels %u faces %u "
                         "(parent %u level %u face %u)", d->id, d->parent ? "view" : "texture",
                         d->w, d->h, d->xfmt, s->nlevels, s->nfaces, d->parent, d->level,
                         d->face);
@@ -322,7 +322,7 @@ HleVkSurf *hle_surf_define(const HleSurfDesc *d)
             static unsigned s_unscaled;
             if (s->scale != g_hle_rscale && s_unscaled < 16) {
                 s_unscaled++;
-                hle_log("hakuX-hle-back", "surface %u: %ux%u fmt 0x%x at guest resolution",
+                hle_log("xbased-hle-back", "surface %u: %ux%u fmt 0x%x at guest resolution",
                         d->id, d->w, d->h, d->xfmt);
             }
             return s;
@@ -355,7 +355,7 @@ HleVkSurf *hle_surf_define(const HleSurfDesc *d)
             m += snprintf(line + m, sizeof(line) - m, " %ux%u/%x/%c:%u", hist[j].w, hist[j].h,
                           hist[j].f, "tgv"[hist[j].k], hist[j].n);
         }
-        hle_log("hakuX-hle-back", "surface table full (%u; %u to destroy):%s", HLE_MAX_VK_SURF,
+        hle_log("xbased-hle-back", "surface table full (%u; %u to destroy):%s", HLE_MAX_VK_SURF,
                 parked, line);
     }
     return NULL;

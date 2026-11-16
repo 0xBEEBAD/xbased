@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — fixed-function shader generators (spec §5.8 FF; pure).
+ * xbased HLE GPU — fixed-function shader generators (spec §5.8 FF; pure).
  * Keys are built by the back end from the draw state (render/texture-state
  * arrays + FVF); the generators emit GLSL 4.50 for glslang.
  *
@@ -255,6 +255,9 @@ extern bool g_hle_glsl_zw;
  * instead, so the near and far planes don't clip them; depth across a
  * primitive that crosses them comes from its clamped corners. */
 extern bool g_hle_glsl_zclamp;
+/* fast precision (vk/precision.h): the pixel stage without the per-pixel
+ * steps xbased added after 1.0.94 (psh.c fast_cut) */
+extern bool g_hle_psh_fast;
 extern bool g_hle_glsl_f64;        /* the device has doubles in shaders (psh.c: a line's shares) */
 extern bool g_hle_glsl_i64;        /* and 64-bit integers (psh.c nvzfast) */
 #define HLE_ZCLAMP_GLSL \
@@ -486,7 +489,7 @@ static inline const char *hle_push_glsl(void)
  * it (other vertices) tilted against each other by up to 1/16 of the depth
  * slope per pixel, at a grazing angle more than the decal stands off, and it
  * flickered out as the camera moved (Burnout 3's road stains and manhole
- * covers, Dead or Alive 2's eaves shadows). debug.hakux.snap=trunc: the
+ * covers, Dead or Alive 2's eaves shadows). debug.xbased.snap=trunc: the
  * truncation (HLE_SNAP_TRUNC_FLAG), for A/B. */
 #define HLE_SNAP_TRUNC_FLAG 8192u
 /* pc.flags: a quad list's triangles: a bump stage's coordinate on a texel edge (within 1/4096)

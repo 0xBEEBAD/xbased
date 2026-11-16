@@ -1,5 +1,5 @@
 /*
- * hakuX front end — xemu's saves brought in (xemu_import.c): the games'
+ * xbased front end — xemu's saves brought in (xemu_import.c): the games'
  * saves (E:\UDATA, E:\TDATA) copied out of xemu's hard disk image into the
  * console's hard disk folder, and re-signed for xbased with the keys of the
  * user's own xemu files (its BIOS, MCPX boot ROM and EEPROM, as xemu.toml

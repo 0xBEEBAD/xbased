@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — title fixes at run time: the title starts, the overrides
+ * xbased HLE GPU — title fixes at run time: the title starts, the overrides
  * (see fixes.h and docs/hle-gpu-layers.md).
  */
 #include "hw/xbox/hle/fixes/fixes.h"
@@ -20,27 +20,27 @@ static void set(uint32_t mask, const char *why)
     g_hle_fixes = mask;
     hle_fixes_names(mask, on, sizeof(on));
     hle_fixes_names(g_defaults, def, sizeof(def));
-    hle_log("hakuX-hle-mode", "title fixes: %s (title defaults %s%s%s)", on, def, why ? "; " : "",
+    hle_log("xbased-hle-mode", "title fixes: %s (title defaults %s%s%s)", on, def, why ? "; " : "",
             why ? why : "");
 }
 
 void hle_fixes_init(const HleXbeInfo *x)
 {
     g_defaults = hle_fixes_defaults(x);
-    const char *e = getenv("HAKUX_HLE_FIXES");
+    const char *e = getenv("XBASED_HLE_FIXES");
     unsigned bad = 0;
     uint32_t m = hle_fixes_apply(g_defaults, e, &bad);
 #if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
     char v[PROP_VALUE_MAX] = "";
-    hle_prop_get("debug.hakux.fixes", v);
+    hle_prop_get("debug.xbased.fixes", v);
     if (v[0]) {
         m = hle_fixes_apply(m, v, &bad);
     }
 #endif
     if (bad) {
-        hle_log("hakuX-hle-mode", "fixes: %u names in the override are not fixes (ignored)", bad);
+        hle_log("xbased-hle-mode", "fixes: %u names in the override are not fixes (ignored)", bad);
     }
-    set(m, e || bad ? "HAKUX_HLE_FIXES" : NULL);
+    set(m, e || bad ? "XBASED_HLE_FIXES" : NULL);
 }
 
 void hle_fixes_poll(void)
@@ -48,12 +48,12 @@ void hle_fixes_poll(void)
 #if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
     static char last[PROP_VALUE_MAX];
     char v[PROP_VALUE_MAX] = "";
-    hle_prop_get("debug.hakux.fixes", v);
+    hle_prop_get("debug.xbased.fixes", v);
     if (strcmp(v, last)) {
         strcpy(last, v);
         unsigned bad = 0;
-        set(hle_fixes_apply(hle_fixes_apply(g_defaults, getenv("HAKUX_HLE_FIXES"), &bad), v, &bad),
-            v[0] ? "debug.hakux.fixes" : NULL);
+        set(hle_fixes_apply(hle_fixes_apply(g_defaults, getenv("XBASED_HLE_FIXES"), &bad), v, &bad),
+            v[0] ? "debug.xbased.fixes" : NULL);
     }
 #endif
 }

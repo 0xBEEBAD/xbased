@@ -1,5 +1,5 @@
 /*
- * hakuX native core — a disc image served over NBD (nbd://host[:port][/export]),
+ * xbased native core — a disc image served over NBD (nbd://host[:port][/export]),
  * read-only: GDOX's physical discs (it serves a drive's disc to xemu that
  * way), or any NBD server's image.
  *

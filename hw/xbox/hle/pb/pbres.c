@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — push-buffer mode's resources (see pbres.h).
+ * xbased HLE GPU — push-buffer mode's resources (see pbres.h).
  */
 #include "hw/xbox/hle/base.h"
 #include "hw/xbox/hle/hle.h"
@@ -280,7 +280,7 @@ static bool yuv_define(uint32_t id, const uint32_t h5[5], const HleResDesc *d)
     yuv_texels(src, pitch, d->w, d->h, d->fmt == HLE_XFMT_UYVY, dst);
     static unsigned s_logged;
     if (s_logged++ < 4) {               /* movies: when their frames start converting */
-        hle_log("hakuX-hle-front", "YUV texture %u: %ux%u %s converted (#%u of 4 logged)", id,
+        hle_log("xbased-hle-front", "YUV texture %u: %ux%u %s converted (#%u of 4 logged)", id,
                 d->w, d->h, d->fmt == HLE_XFMT_UYVY ? "UYVY" : "YUY2", s_logged);
     }
     HleCmdTex *c = hle_fe_begin(HLE_OP_TEX, sizeof(*c));
@@ -312,7 +312,7 @@ static bool tex_desc(const uint32_t h5[5], uint32_t pitch, HleResDesc *dp, HleRe
     if (!hdr || !hle_res_info(&d, &ri)) {
         static unsigned s_logged;
         if (s_logged++ < 8) {
-            hle_log("hakuX-hle-front", "texture header not understood: %08x %08x %08x %08x "
+            hle_log("xbased-hle-front", "texture header not understood: %08x %08x %08x %08x "
                     "%08x (not bound; first 8 logged)", h5[0], h5[1], h5[2], h5[3], h5[4]);
         }
         return false;
@@ -322,7 +322,7 @@ static bool tex_desc(const uint32_t h5[5], uint32_t pitch, HleResDesc *dp, HleRe
         static uint32_t s_kinds;
         if (!(s_kinds & (1u << (d.kind & 31)))) {
             s_kinds |= 1u << (d.kind & 31);
-            hle_log("hakuX-hle-front", "texture kind %u not bound (%08x %08x %08x %08x %08x)",
+            hle_log("xbased-hle-front", "texture kind %u not bound (%08x %08x %08x %08x %08x)",
                     d.kind, h5[0], h5[1], h5[2], h5[3], h5[4]);
         }
         return false;
@@ -360,7 +360,7 @@ static bool tex_define(uint32_t id, const uint32_t h5[5], const HleResDesc *dp,
             }
             if (!s_seen[i]) {
                 s_seen[i] = d.fmt + 1;
-                hle_log("hakuX-hle-front", "texture format 0x%x not uploaded yet (%ux%u kind %u)",
+                hle_log("xbased-hle-front", "texture format 0x%x not uploaded yet (%ux%u kind %u)",
                         d.fmt, d.w, d.h, d.kind);
                 break;
             }
@@ -497,17 +497,17 @@ static bool tex_define(uint32_t id, const uint32_t h5[5], const HleResDesc *dp,
             pos += n;
         }
     }
-    {   /* debug: HAKUX_HLE_TEXDUMP=<id>, that texture's linear texels once */
+    {   /* debug: XBASED_HLE_TEXDUMP=<id>, that texture's linear texels once */
         static int64_t want = -2;
         if (want == -2) {
-            const char *e = getenv("HAKUX_HLE_TEXDUMP");
+            const char *e = getenv("XBASED_HLE_TEXDUMP");
             want = e ? atoll(e) : -1;
         }
 #if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
-        {   /* on demand: a new value of debug.hakux.texdump=<id>, its next upload */
+        {   /* on demand: a new value of debug.xbased.texdump=<id>, its next upload */
             static HleProp prop;
             char v[PROP_VALUE_MAX];
-            if (hle_prop_new(&prop, "debug.hakux.texdump", v) && atoll(v) > 0) {
+            if (hle_prop_new(&prop, "debug.xbased.texdump", v) && atoll(v) > 0) {
                 want = atoll(v);
             }
         }
@@ -518,7 +518,7 @@ static bool tex_define(uint32_t id, const uint32_t h5[5], const HleResDesc *dp,
                                                  hle_host_base_path(), id, oxfmt, d.w, d.h,
                                                  levels);
             g_file_set_contents(p, (const char *)dst, total, NULL);
-            hle_log("hakuX-hle-front", "texdump %s (%u bytes)", p, total);
+            hle_log("xbased-hle-front", "texdump %s (%u bytes)", p, total);
         }
     }
     HleCmdTex *c = hle_fe_begin(HLE_OP_TEX, sizeof(*c));

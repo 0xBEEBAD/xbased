@@ -1,10 +1,10 @@
 /*
- * xbased (hakuX for PC) — the front end: an SDL3 window, the controllers and
+ * xbased (xbased for PC) — the front end: an SDL3 window, the controllers and
  * the keyboard, the core on its own thread, the HLE GPU's frames presented
  * into the window once per display refresh (present.c), as the Android
  * app's NativeCoreActivity and app_main.c do.
  *
- *   hakux [disc image] [option...]
+ *   xbased [disc image] [option...]
  *
  * With no disc image, a file dialog asks for one. Options are the Android
  * app's arguments: the core's (native/core/options.h: scale=, loadstate=,
@@ -125,19 +125,15 @@ static void add_arg(const char *a)
         g_args[g_nargs++] = strdup(a);
     } else if (a && a[0] && !told) {
         told = true;
-        nc_log("hakuX-app", "more than %d options: %s and those after it left out", MAX_ARGS, a);
+        nc_log("xbased-app", "more than %d options: %s and those after it left out", MAX_ARGS, a);
     }
 }
 
-/* xbased.ini: one option a line (hakux.ini, an earlier build's, becomes it) */
+/* xbased.ini: one option a line */
 static void read_ini(void)
 {
-    char path[MAX_PATH + 16], old[MAX_PATH + 16];
+    char path[MAX_PATH + 16];
     snprintf(path, sizeof(path), "%s", cfg_global_path());
-    snprintf(old, sizeof(old), "%shakux.ini", g_data_dir);
-    if (GetFileAttributesA(path) == INVALID_FILE_ATTRIBUTES) {
-        MoveFileA(old, path);
-    }
     {   /* the old shader settings gone first (cfg_shaders_migrate) */
         Config c;
         cfg_load(&c, path);
@@ -234,7 +230,7 @@ static void game_options(const char *disc)
         }
     }
     if (c.n) {
-        nc_log("hakuX-app", "%d options of the game's (%s)", c.n, path);
+        nc_log("xbased-app", "%d options of the game's (%s)", c.n, path);
     }
     snprintf(g_key, sizeof(g_key), "%s", g.key);
     g_title_id = g.title_id;
@@ -395,7 +391,7 @@ static void run_again(const char *extra, bool hold)
     if (extra) {
         n += snprintf(cmd + n, sizeof(cmd) - (size_t)n, " \"%s\"", extra);
     }
-    nc_log("hakuX-app", "running again: %s", cmd);
+    nc_log("xbased-app", "running again: %s", cmd);
 #ifdef _WIN32
     SetEnvironmentVariableA("XBASED_HOLD", hold_path[0] ? hold_path : NULL);
     char ev_name[96];
@@ -490,7 +486,7 @@ static void *core_thread(void *arg)
     nc_win_thread_name("vcpu");
     nc_win_thread_priority(1);
     if (!nc_core_boot(&g_core, g_disc_fd)) {
-        nc_log("hakuX-app", "core: boot failed");
+        nc_log("xbased-app", "core: boot failed");
         if (!nc_hle_fatal()) {
             nc_hle_set_fatal(NC_FATAL_BOOT, "The game stopped while starting.");
         }
@@ -499,7 +495,7 @@ static void *core_thread(void *arg)
     }
     SDL_SetAtomicInt(&g_core_state, 1);
     nc_core_run(&g_core);
-    nc_log("hakuX-app", "core: stopped");
+    nc_log("xbased-app", "core: stopped");
     SDL_SetAtomicInt(&g_core_state, -1);
     return NULL;
 }
@@ -546,7 +542,7 @@ static void pad_added(SDL_JoystickID id)
     for (unsigned i = 0; i < 4; i++) {
         if (!g_pads[i]) {
             g_pads[i] = SDL_OpenGamepad(id);
-            nc_log("hakuX-app", "controller for player %u: %s", i + 1,
+            nc_log("xbased-app", "controller for player %u: %s", i + 1,
                    g_pads[i] ? SDL_GetGamepadName(g_pads[i]) : SDL_GetError());
             pads_changed();
             return;
@@ -574,7 +570,7 @@ static void joystick_added(SDL_JoystickID id)
              "back:b8,start:b9,leftstick:b10,rightstick:b11,dpup:h0.1,dpright:h0.2,dpdown:h0.4,dpleft:h0.8,"
              "leftx:a0,lefty:a1,rightx:a2,righty:a3,",
              guid, name ? name : "Joystick");
-    nc_log("hakuX-app", "joystick without a gamepad mapping: \"%s\" (%s); the generic layout given", name ? name : "?",
+    nc_log("xbased-app", "joystick without a gamepad mapping: \"%s\" (%s); the generic layout given", name ? name : "?",
            guid);
     SDL_AddGamepadMapping(map); /* a gamepad now: SDL_EVENT_GAMEPAD_ADDED follows */
 }
@@ -585,7 +581,7 @@ static void pad_removed(SDL_JoystickID id)
         if (g_pads[i] && SDL_GetGamepadID(g_pads[i]) == id) {
             SDL_CloseGamepad(g_pads[i]);
             g_pads[i] = NULL;
-            nc_log("hakuX-app", "player %u's controller unplugged", i + 1);
+            nc_log("xbased-app", "player %u's controller unplugged", i + 1);
             pads_changed();
         }
     }
@@ -700,7 +696,7 @@ static void *save_thread(void *arg)
     char path[MAX_PATH * 2];
     state_path(slot, path, sizeof(path));
     const char *err = nc_state_save(path);
-    nc_log("hakuX-app", "savestate %d: %s", slot, err ? err : "saved");
+    nc_log("xbased-app", "savestate %d: %s", slot, err ? err : "saved");
     if (!err) {
         /* its picture: the frame shown, the dashboard's thumbnail */
         char pic[MAX_PATH * 2];
@@ -722,7 +718,7 @@ static void *save_thread(void *arg)
 static void save_state(int slot)
 {
     if (SDL_GetAtomicInt(&g_core_state) != 1 || !hle_pb_active()) {
-        nc_log("hakuX-app", "savestate: not available now");
+        nc_log("xbased-app", "savestate: not available now");
         SDL_SetAtomicInt(&g_saved_slot, -1);
         return;
     }
@@ -743,7 +739,7 @@ static void load_state(int slot)
     state_path(slot, path, sizeof(path));
     const char *err = nc_state_compat(path);
     if (err) {
-        nc_log("hakuX-app", "savestate %d: %s", slot, err);
+        nc_log("xbased-app", "savestate %d: %s", slot, err);
         return;
     }
     snprintf(opt, sizeof(opt), "loadstate=%s", path);
@@ -814,9 +810,9 @@ static void fs_mode(SDL_Window *w)
         }
     }
     SDL_SetWindowFullscreenMode(w, best);
-    nc_log("hakuX-app", "full screen: %s", best ? "the panel's highest mode a multiple of 60 Hz" : "the desktop's");
+    nc_log("xbased-app", "full screen: %s", best ? "the panel's highest mode a multiple of 60 Hz" : "the desktop's");
     if (best) {
-        nc_log("hakuX-app", "full screen mode %dx%d at %.2f Hz (the desktop's %.2f)", best->w, best->h,
+        nc_log("xbased-app", "full screen mode %dx%d at %.2f Hz (the desktop's %.2f)", best->w, best->h,
                best->refresh_rate, r0);
     }
     SDL_free(ms);
@@ -1147,7 +1143,7 @@ static void quit_to_dash(SDL_Window *win)
     /* straight out: nothing of the run is taken back first (the
      * presenter's swapchain, the paused threads), so nothing can hold the
      * window */
-    nc_log("hakuX-app", "quit to the dashboard");
+    nc_log("xbased-app", "quit to the dashboard");
     if (!g_frame) {
         give_foreground(true);  /* else the frame hands it back (exit_now) */
     }
@@ -1249,7 +1245,7 @@ static void ingame_menu(SDL_Window *win, bool *paused, bool minimized)
     }
 }
 
-/* debug.hakux.state ("save:<slot>", "load:<slot>"), as the app's menu would */
+/* debug.xbased.state ("save:<slot>", "load:<slot>"), as the app's menu would */
 static void state_request_poll(void)
 {
     static char last[PROP_VALUE_MAX];
@@ -1259,7 +1255,7 @@ static void state_request_poll(void)
         return;
     }
     char v[PROP_VALUE_MAX] = "";
-    __system_property_get("debug.hakux.state", v);
+    __system_property_get("debug.xbased.state", v);
     if (!primed || !strcmp(v, last)) {
         primed = true;
         snprintf(last, sizeof(last), "%s", v);
@@ -1389,7 +1385,7 @@ static void shader_cache_by_version(const char *base)
         fprintf(f, "%s\n", XBASED_VERSION);
         fclose(f);
     }
-    nc_log("hakuX-app", "shader caches of %s cleared (%s)", seen[0] ? seen : "an earlier version",
+    nc_log("xbased-app", "shader caches of %s cleared (%s)", seen[0] ? seen : "an earlier version",
            XBASED_VERSION);
 }
 #ifdef _WIN32
@@ -1431,10 +1427,10 @@ static void hotkey_do(SDL_Window *win, int h, bool down, int slot, bool *paused,
 {
     if (!down) {
         if (h == IM_HK_TURBO) {
-            nc_win_prop_set("debug.hakux.uncap", g_uncap ? "1" : "0");
+            nc_win_prop_set("debug.xbased.uncap", g_uncap ? "1" : "0");
             char cap[16];
             snprintf(cap, sizeof(cap), "%d", g_fps_cap);
-            nc_win_prop_set("debug.hakux.fpscap", cap);
+            nc_win_prop_set("debug.xbased.fpscap", cap);
         }
         return;
     }
@@ -1451,7 +1447,7 @@ static void hotkey_do(SDL_Window *win, int h, bool down, int slot, bool *paused,
         *paused = !*paused;
         nc_kernel_set_paused(&g_core.kernel, *paused || minimized);
         nc_audio_set_paused(*paused || minimized);
-        nc_log("hakuX-app", "%s", *paused ? "paused" : "resumed");
+        nc_log("xbased-app", "%s", *paused ? "paused" : "resumed");
         break;
     case IM_HK_SAVE:
         save_state(slot);
@@ -1463,8 +1459,8 @@ static void hotkey_do(SDL_Window *win, int h, bool down, int slot, bool *paused,
         if (g_online) {
             break;      /* the console's pace only (online mode) */
         }
-        nc_win_prop_set("debug.hakux.uncap", "1");  /* frames as fast as they come, while held */
-        nc_win_prop_set("debug.hakux.fpscap", "0");
+        nc_win_prop_set("debug.xbased.uncap", "1");  /* frames as fast as they come, while held */
+        nc_win_prop_set("debug.xbased.fpscap", "0");
         break;
     case IM_HK_SHOT:
         screenshot();
@@ -1586,8 +1582,32 @@ static bool short_options(int *argc, char **argv)
     return true;
 }
 
+/* The environment's HAKUX_ names (before 1.1.3) as their XBASED_ ones, where
+ * those are not set themselves. */
+static void env_legacy(void)
+{
+    char *names[256];
+    unsigned n = 0;
+    for (char **e = environ; e && *e && n < 256; e++) {
+        if (!strncmp(*e, "HAKUX_", 6) && strchr(*e, '=')) {
+            names[n++] = strdup(*e);
+        }
+    }
+    for (unsigned i = 0; i < n; i++) {
+        char *eq = strchr(names[i], '=');
+        char name[160];
+        *eq = 0;
+        snprintf(name, sizeof(name), "XBASED_%s", names[i] + 6);
+        if (!getenv(name)) {
+            setenv(name, eq + 1, 0);
+        }
+        free(names[i]);
+    }
+}
+
 int main(int argc, char *argv[])
 {
+    env_legacy();
 #ifdef _WIN32
     if (argc > 1 && !strcmp(argv[1], "frame")) {
         return nc_frame_main(argc, argv);      /* the game's frame (win_frame.h) */
@@ -1643,9 +1663,9 @@ int main(int argc, char *argv[])
 #endif
     log_setup(opt_flag("console"), again);
     if (again) {
-        nc_log("hakuX-app", "---- started again (%s)", opt_flag("relaunch") ? "the title's relaunch" : "a state loaded");
+        nc_log("xbased-app", "---- started again (%s)", opt_flag("relaunch") ? "the title's relaunch" : "a state loaded");
     }
-    nc_log("hakuX-app", "xbased " XBASED_VERSION " (an original Xbox emulator by crazyriddler, based on hakuX), " NC_PLATFORM_NAME);
+    nc_log("xbased-app", "xbased " XBASED_VERSION " (an original Xbox emulator by crazyriddler, based on hakuX), " NC_PLATFORM_NAME);
     nc_win_mods_cleanup(g_exe_dir);     /* what an update took away (win_mods.h) */
 
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
@@ -1663,7 +1683,7 @@ int main(int argc, char *argv[])
         snprintf(db, sizeof(db), "%sgamecontrollerdb.txt", g_exe_dir);
         const int n = SDL_AddGamepadMappingsFromFile(db);
         if (n > 0) {
-            nc_log("hakuX-app", "%d gamepad mappings from %s", n, db);
+            nc_log("xbased-app", "%d gamepad mappings from %s", n, db);
         }
     }
     /* "dash" with no disc: the Xbox dashboard from the hard disk's C: drive,
@@ -1702,7 +1722,7 @@ int main(int argc, char *argv[])
             fatal_box("xbased", "Can't write the NBD disc's marker file in the data folder.");
             return 1;
         }
-        nc_log("hakuX-app", "disc from %s", disc);
+        nc_log("xbased-app", "disc from %s", disc);
         disc = nbd_marker;
     }
     if (!xbox_dash) {
@@ -1712,7 +1732,7 @@ int main(int argc, char *argv[])
         char xbe[MAX_PATH * 2];
         g_disc_fd = open(nc_fold_xbe_path(g_disc, xbe, sizeof(xbe)) ? xbe : g_disc, O_RDONLY | O_BINARY);
         if (g_disc_fd < 0) {
-            nc_log("hakuX-app", "can't open the disc %s", g_disc);
+            nc_log("xbased-app", "can't open the disc %s", g_disc);
         }
     } else {
         /* the controls as a game's (game_options), xbased.ini's alone: left
@@ -1737,17 +1757,17 @@ int main(int argc, char *argv[])
         /* downloaded content and title updates copied in by hand: signed for this console */
         const int resigned = xi_resign_downloads(hdd, g_title_id);
         if (resigned) {
-            nc_log("hakuX-app", "%d downloaded content file(s) of %08x re-signed for this console", resigned, g_title_id);
+            nc_log("xbased-app", "%d downloaded content file(s) of %08x re-signed for this console", resigned, g_title_id);
         }
     }
     nc_io_set_hdd_root(hdd);
-    setenv("HAKUX_HLE_MODE", "replace", 0);
+    setenv("XBASED_HLE_MODE", "replace", 0);
     {
         char base[1100];
         snprintf(base, sizeof(base), "%s/../hle", hdd);
         mkdir(base, 0775);
-        setenv("HAKUX_NATIVE_BASE", base, 0);
-        shader_cache_by_version(getenv("HAKUX_NATIVE_BASE"));
+        setenv("XBASED_NATIVE_BASE", base, 0);
+        shader_cache_by_version(getenv("XBASED_NATIVE_BASE"));
     }
 
     NcOptions opt;
@@ -1770,7 +1790,7 @@ int main(int argc, char *argv[])
             }
         }
         add_arg("devtime=2");     /* the drive's own timing */
-        nc_log("hakuX-app", "online mode: original frame rate and speed, no patches, mods or cheats (%d settings "
+        nc_log("xbased-app", "online mode: original frame rate and speed, no patches, mods or cheats (%d settings "
                "left out)", dropped);
     }
     for (int i = 0; i < g_nargs; i++) {
@@ -1846,7 +1866,7 @@ int main(int argc, char *argv[])
     g_uncap = opt.uncap;
     g_fps_cap = opt.fps_cap;
     nc_present_set_widescreen(opt.video >= 0 && (opt.video & NC_VIDEO_WIDESCREEN));
-    nc_log("hakuX-app", "native core: disc %s, hdd %s%s", g_disc, hdd, opt.uncap ? ", frame rate uncapped" : "");
+    nc_log("xbased-app", "native core: disc %s, hdd %s%s", g_disc, hdd, opt.uncap ? ", frame rate uncapped" : "");
 
     const char *title = strrchr(g_disc, '\\');
     const char *title2 = strrchr(g_disc, '/');
@@ -1884,7 +1904,7 @@ int main(int argc, char *argv[])
             }
             nc_frame_adopt(g_frame, win, wtitle, g_frame_hidden);
             dash_set_fullscreen_hook(frame_fullscreen);
-            nc_log("hakuX-app", "window: inside the session's frame");
+            nc_log("xbased-app", "window: inside the session's frame");
         }
     }
     if (!g_frame) {
@@ -1921,7 +1941,7 @@ int main(int argc, char *argv[])
         char fonts[MAX_PATH + 16];
         snprintf(fonts, sizeof(fonts), "%sfonts/", g_exe_dir);
         if (!ui_init_overlay(fonts, ov_present, ov_size)) {
-            nc_log("hakuX-app", "no overlay: the in-game menu on a renderer of its own");
+            nc_log("xbased-app", "no overlay: the in-game menu on a renderer of its own");
         }
         char path[MAX_PATH + 16];
         snprintf(path, sizeof(path), "%s", cfg_global_path());
@@ -2149,7 +2169,7 @@ int main(int argc, char *argv[])
             /* the frame's window went (its process fell), this run's with it:
              * not left running unseen, back to the dashboard */
             const char *why = hle_present_remote_why();
-            nc_log("hakuX-app", "window: the frame's gone%s%s: leaving", why[0] ? ": " : "", why);
+            nc_log("xbased-app", "window: the frame's gone%s%s: leaving", why[0] ? ": " : "", why);
             exit_now(0);
         }
 #endif
@@ -2157,7 +2177,7 @@ int main(int argc, char *argv[])
             if (hle_present_remote_state() < 0) {
                 g_frame_hidden = false;     /* no shared pictures: the window fills the frame, as before */
                 nc_frame_fill(g_frame, win);
-                nc_log("hakuX-app", "window: the frame's pictures can't be had: drawn in the window");
+                nc_log("xbased-app", "window: the frame's pictures can't be had: drawn in the window");
             } else if (hle_present_remote()) {
                 /* the frame's mouse, as this window's (the in-game menu's pointer) */
                 HleShareMouse ms[32];
@@ -2221,6 +2241,6 @@ int main(int argc, char *argv[])
         }
 #endif
     }
-    nc_log("hakuX-app", "native core: leaving");
+    nc_log("xbased-app", "native core: leaving");
     exit_now(0); /* the core thread has no stop yet */
 }

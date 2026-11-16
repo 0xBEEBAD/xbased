@@ -42,8 +42,8 @@ No BIOS, MCPX ROM or hard-disk image is needed.
 
 | Platform | File | |
 |---|---|---|
-| **Windows** 10/11 (x64) | `xbased-1.1.2-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
-| **Linux** (x86-64) | `xbased-1.1.2-x86_64.AppImage` | `chmod +x` it and run. Ubuntu 22.04 or newer, or any distribution of the same age. |
+| **Windows** 10/11 (x64) | `xbased-1.1.3-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
+| **Linux** (x86-64) | `xbased-1.1.3-x86_64.AppImage` | `chmod +x` it and run. Ubuntu 22.04 or newer, or any distribution of the same age. |
 
 Get them from **[Releases](https://github.com/crazyriddler/xbased/releases/latest)**.
 
@@ -281,7 +281,7 @@ repository:
   build/       build trees
 ```
 
-The executable is built from the `hakux` target and named `xbased`.
+The executable is built from the `xbased` target and named `xbased`.
 
 ### Windows (x64)
 
@@ -301,7 +301,7 @@ The executable is built from the `hakux` target and named `xbased`.
    tools/fetch_deps.sh
    cmake -S native -B ../build/win -G Ninja -DCMAKE_BUILD_TYPE=Release \
      -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
-   cmake --build ../build/win --target hakux
+   cmake --build ../build/win --target xbased
    ```
 
 `../build/win/xbased.exe` runs from the build folder (its fonts and mods are
@@ -330,7 +330,7 @@ copied beside it). It imports only system DLLs, so it runs on any Windows
    tools/fetch_deps.sh
    cmake -S native -B ../build/linux -G Ninja -DCMAKE_BUILD_TYPE=Release \
      -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
-   cmake --build ../build/linux --target hakux
+   cmake --build ../build/linux --target xbased
    ```
 
 `../build/linux/xbased` runs from the build folder. Settings, saves and states

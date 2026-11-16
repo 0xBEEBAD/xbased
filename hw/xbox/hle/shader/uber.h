@@ -1,5 +1,5 @@
 /*
- * hakuX HLE GPU — interpreter shaders ("uber"): one vertex stage and one pixel
+ * xbased HLE GPU — interpreter shaders ("uber"): one vertex stage and one pixel
  * stage that read the draw's vertex program and pixel-stage key from a buffer
  * (HleUberCfg) instead of having them compiled in, for the draws whose own
  * pipeline (the stand-in, vk/draw.c) is still being built: they draw at once,

@@ -1,5 +1,5 @@
 /*
- * hakuX front end — the dashboard (dash.c): the console-style menus
+ * xbased front end — the dashboard (dash.c): the console-style menus
  * before a game: the library, settings, saves, online. Runs until the user
  * leaves; each game it starts runs in a process of its own.
  */
