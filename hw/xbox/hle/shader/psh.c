@@ -626,6 +626,29 @@ static size_t fast_cut(char *buf, size_t len)
         memmove(ls, le, len - (size_t)(le - buf) + 1);
         len -= (size_t)(le - ls);
     }
+    /* a cube stage read by the GPU's own level, as 1.0.104 did (sampc: its
+     * edge hold cut, the level from the face coordinates and the size query
+     * then unused) */
+    static const char k_ctie[] = "  if ((pc.flags & (16u << s)) != 0u && dFdx(nvFC        .w) == 0.0 && dFdy(nvFC        .w) == 0.0) {\n"
+                                 "    vec2 q = (f0 + 1.0) * hs";
+    for (char *f; (f = strstr(buf, k_ctie)) != NULL; ) {
+        char *e = strstr(f, "\n  }\n");
+        if (!e) {
+            break;
+        }
+        e += 5;
+        memmove(f, e, len - (size_t)(e - buf) + 1);
+        len -= (size_t)(e - f);
+    }
+    static const char k_clod[] = "  return textureLod(samplerCube(uTexCube[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), dir, "
+                                 "log2(max(rho, 1.0e-6)));\n";
+    static const char k_ctex[] = "  return texture(samplerCube(uTexCube[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), dir);\n";
+    for (char *f; (f = strstr(buf, k_clod)) != NULL; ) {
+        const size_t a = sizeof(k_clod) - 1, b = sizeof(k_ctex) - 1;
+        memmove(f + b, f + a, len - (size_t)(f - buf) - a + 1);
+        memcpy(f, k_ctex, b);
+        len -= a - b;
+    }
     /* sampx's texel-edge hold (2D stages) */
     static const char k_tie[] = "  if (dFdx(nvFC        .w) == 0.0 && dFdy(nvFC        .w) == 0.0) {\n"
                                 "    vec2 qs = vec2(textureSize(sampler2D(";
@@ -723,7 +746,7 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
                 "  if ((pc.flags & (1u << s)) != 0u)\n"
                 "    uv /= vec2(textureSize(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[0]), 0)) /\n"
                 "          ((pc.flags & (256u << s)) != 0u ? float(pc.flags >> 24) : 1.0);\n"
-                "  uv = nvcte2(pc.tex[s], uv, vec2(textureSize(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[0]), 0)), dFdxCoarse(uv), dFdyCoarse(uv));\n"
+                "  uv = nvcte2i(pc.tex[s], uv, ti, dFdxCoarse(uv), dFdyCoarse(uv));\n"
                 "  if (pt || textureQueryLevels(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)])) > 1)\n"
                 "    return mix(f, fl ? clamp((f * 255.0 - 128.0) / 127.5, -1.0, 1.0) : sgn4(f), m);\n"
                 "  vec2 w = fract(uv * vec2(textureSize(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[0]), 0)) - 0.5);\n"
@@ -775,7 +798,7 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             "  if ((pc.flags & (1u << s)) != 0u)\n"
             "    uv /= vec2(textureSize(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[0]), 0)) /\n"
             "          ((pc.flags & (256u << s)) != 0u ? float(pc.flags >> 24) : 1.0);\n"
-            "  uv = nvcte2(pc.tex[s], uv, vec2(textureSize(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[0]), 0)), dFdxCoarse(uv), dFdyCoarse(uv));\n"
+            "  uv = nvcte2i(pc.tex[s], uv, ti, dFdxCoarse(uv), dFdyCoarse(uv));\n"
             "  vec2 tz = uv * vec2(textureSize(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[0]), 0));\n"
             "  float rho = max(length(dFdx(tz)), length(dFdy(tz)));\n"
             "  if (pt || rho > 1.0 || textureQueryLevels(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)])) > 1) return f;\n"
@@ -846,7 +869,7 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             "  if ((pc.flags & (1u << s)) != 0u)\n"
             "    uv /= vec2(textureSize(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[0]), 0)) /\n"
             "          ((pc.flags & (256u << s)) != 0u ? float(pc.flags >> 24) : 1.0);\n"
-            "  uv = nvcte2(pc.tex[s], uv, vec2(textureSize(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[0]), 0)), dFdxCoarse(uv), dFdyCoarse(uv));\n"
+            "  uv = nvcte2i(pc.tex[s], uv, ti, dFdxCoarse(uv), dFdyCoarse(uv));\n"
             "  if (pt || (pc.flags & (16u << s)) != 0u ||\n"
             "      textureQueryLevels(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)])) > 1)\n"
             "    return y ? ivec2(int(f.g * 255.0 + 0.5) * 256 + int(f.b * 255.0 + 0.5), 0)\n"
@@ -1965,7 +1988,7 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             "layout(set = 0, binding = 1) uniform sampler uSmp[];\n"
             "layout(set = 0, binding = 2) uniform textureCube uTexCube[];\n"
             "layout(set = 0, binding = 3) uniform texture3D uTex3D[];\n"
-            HLE_CTE_GLSL
+            HLE_CTE_GLSL HLE_CTE3I_GLSL
             /* (sampx's reads: a clamp-to-edge stage's by its unclamped coordinate's steps) */
             "#define NVT2C(sx, c) ((pc.tex[s] & 0x1C000000u) != 0u ? "
             "textureGrad(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[nonuniformEXT(sx)]), c, cgx, cgy) : "
@@ -2049,7 +2072,7 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
              * edge's tie took v 0 to a hair under it, the border's texel; ff.h
              * HLE_CTE_GLSL; a texture with its own border, in its image's
              * coordinates by now, is held there on the whole image) */
-            "  uv = nvcte2(pc.tex[s], uv, vec2(textureSize(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[0]), 0)), cgx, cgy);\n"
+            "  uv = nvcte2i(pc.tex[s], uv, ti, cgx, cgy);\n"
             "  HLE_BORDC2(s, uv);\n"
             "  if ((pc.tex[s] >> 30) != 0u) return sampan(ti, si, uv, agx, agy, pc.tex[s] >> 30);\n"
             "  return NVT2C(si, uv);\n"
@@ -2064,7 +2087,7 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             "    vec2 qt = uvw.xy * qs, qr = floor(qt + 0.5), qe = qr - HLE_NVTIE_AT(s) / 4096.0;\n"
             "    uvw.xy = mix(uvw.xy, qe / qs, lessThan(abs(qt - qr), max(vec2(1.0 / 65536.0), abs(qt) / 1048576.0 * HLE_NVNICE_AT(s))));\n"
             "  }\n"
-            "  uvw = nvcte3(pc.tex[s], uvw, vec3(textureSize(sampler3D(uTex3D[nonuniformEXT(ti)], uSmp[0]), 0)), dFdxCoarse(uvw), dFdyCoarse(uvw));\n"
+            "  uvw = nvcte3i(pc.tex[s], uvw, ti, dFdxCoarse(uvw), dFdyCoarse(uvw));\n"
             "  HLE_BORDER3(s, uvw);\n"
             "  HLE_BORDC3(s, uvw);\n"
             "  return texture(sampler3D(uTex3D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), "
@@ -2498,7 +2521,7 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
                     "  { uint ti = pc.tex[%u] & 0xFFFFu, si = (pc.tex[%u] >> 16) & 0x1FFu;\n"
                     "    vec2 dc = %s.%s;\n"
                     "    t%u = texture(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), "
-                    "nvcte2(pc.tex[%u], dc, vec2(textureSize(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[0]), 0)), "
+                    "nvcte2i(pc.tex[%u], dc, ti, "
                     "dFdxCoarse(dc), dFdyCoarse(dc))); }\n",
                 s, s, s, tex_in(k, in, tn), m == HLE_PST_DPNDNT_AR ? "ar" : "gb", s, s);
             break;

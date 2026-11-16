@@ -569,7 +569,7 @@ static const char k_fs_head[] =
     "layout(set = 0, binding = 1) uniform sampler uSmp[];\n"
     "layout(set = 0, binding = 2) uniform textureCube uTexCube[];\n"
     "layout(set = 0, binding = 3) uniform texture3D uTex3D[];\n"
-    HLE_CTE_GLSL
+    HLE_CTE_GLSL HLE_CTE3I_GLSL
     "layout(location = 0) in vec4 vDiffuse;\n"
     "layout(location = 1) in vec4 vSpecular;\n"
     "layout(location = 2) in vec4 vTex0;\n"
@@ -624,7 +624,7 @@ static const char k_fs_head[] =
     "    vec2 qt = uv * qs, qr = floor(qt + 0.5);\n"
     "    uv = mix(uv, qr / qs, lessThan(abs(qt - qr), vec2(bump ? 1.0 / 4096.0 : 1.0 / 65536.0)));\n"
     "  }\n"
-    "  uv = nvcte2(pc.tex[s], uv, vec2(textureSize(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[0]), 0)), dFdx(uv), dFdy(uv));\n"
+    "  uv = nvcte2i(pc.tex[s], uv, ti, dFdx(uv), dFdy(uv));\n"
     "  return texture(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), uv);\n"
     "}\n"
     /* the signed channels (psh.c sfun, signed_stage): converted, then filtered, as the
@@ -644,7 +644,7 @@ static const char k_fs_head[] =
     "  if ((pc.flags & (1u << s)) != 0u)\n"
     "    uv /= vec2(textureSize(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[0]), 0)) /\n"
     "          ((pc.flags & (256u << s)) != 0u ? float(pc.flags >> 24) : 1.0);\n"
-    "  uv = nvcte2(pc.tex[s], uv, vec2(textureSize(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[0]), 0)), dFdx(uv), dFdy(uv));\n"
+    "  uv = nvcte2i(pc.tex[s], uv, ti, dFdx(uv), dFdy(uv));\n"
     "  if (pt || textureQueryLevels(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)])) > 1)\n"
     "    return mix(f, fl ? clamp((f * 255.0 - 128.0) / 127.5, -1.0, 1.0) : sgn4(f), m);\n"
     "  vec2 w = fract(uv * vec2(textureSize(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[0]), 0)) - 0.5);\n"
@@ -678,7 +678,7 @@ static const char k_fs_head[] =
     "}\n"
     "vec4 samp3(uint s, vec3 uvw) {\n"
     "  uint ti = pc.tex[s] & 0xFFFFu, si = (pc.tex[s] >> 16) & 0x1FFu;\n"
-    "  return texture(sampler3D(uTex3D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), nvcte3(pc.tex[s], uvw, vec3(textureSize(sampler3D(uTex3D[nonuniformEXT(ti)], uSmp[0]), 0)), dFdx(uvw), dFdy(uvw)));\n"
+    "  return texture(sampler3D(uTex3D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), nvcte3i(pc.tex[s], uvw, ti, dFdx(uvw), dFdy(uvw)));\n"
     "}\n"
     "vec4 sampc(uint s, vec3 dir) {\n"
     "  if (dir == vec3(0.0)) return vec4(0.0, 0.0, 0.0, 1.0);\n"
@@ -960,8 +960,8 @@ static const char k_fs_main[] =
     "    else if (m == 15u || m == 16u) {\n"
     "      vec4 ti = gTR(ins);\n"
     "      uint xi = pc.tex[s] & 0xFFFFu, xs = (pc.tex[s] >> 16) & 0x1FFu;\n"
-    "      t = texture(sampler2D(uTex2D[nonuniformEXT(xi)], uSmp[nonuniformEXT(xs)]), nvcte2(pc.tex[s], m == 15u ? ti.ar : ti.gb, "
-    "vec2(textureSize(sampler2D(uTex2D[nonuniformEXT(xi)], uSmp[0]), 0)), dFdx(m == 15u ? ti.ar : ti.gb), dFdy(m == 15u ? ti.ar : ti.gb)));\n"
+    "      t = texture(sampler2D(uTex2D[nonuniformEXT(xi)], uSmp[nonuniformEXT(xs)]), nvcte2i(pc.tex[s], m == 15u ? ti.ar : ti.gb, "
+    "xi, dFdx(m == 15u ? ti.ar : ti.gb), dFdy(m == 15u ? ti.ar : ti.gb)));\n"
     "    } else if (m == 17u) t = vec4(0.0);\n"
     "    else if (m == 8u || m == 10u) t = samp(s, nvproj(tc).xy, false);\n"
     /* a signed stage: its texel as sampled kept (tr), the channels the texture unit gives

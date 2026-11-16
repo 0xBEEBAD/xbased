@@ -679,6 +679,17 @@ static inline const char *hle_push_glsl(void)
     "  bool pt = max(length(dx * sz), length(dy * sz)) <= 1.0 ? (t & 0x20000000u) != 0u : (t & 0x02000000u) != 0u;\n" \
     "  vec3 hi = pt ? 1.0 - 0.5 / sz : vec3(1.0);\n" \
     "  return mix(uvw, clamp(uvw, vec3(0.0), hi), notEqual(uvec3(t >> 26, t >> 27, t >> 28) & 1u, uvec3(0u)));\n" \
+    "}\n" \
+    /* (the texture's size asked only where the stage clamps: a size query is a \
+     * sampler message of its own on Intel's GPUs, as dear as a read, #309) */ \
+    "vec2 nvcte2i(uint t, vec2 uv, uint ti, vec2 dx, vec2 dy) {\n" \
+    "  if ((t & 0x0C000000u) == 0u) return uv;\n" \
+    "  return nvcte2(t, uv, vec2(textureSize(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[0]), 0)), dx, dy);\n" \
+    "}\n"
+#define HLE_CTE3I_GLSL \
+    "vec3 nvcte3i(uint t, vec3 uvw, uint ti, vec3 dx, vec3 dy) {\n" \
+    "  if ((t & 0x1C000000u) == 0u) return uvw;\n" \
+    "  return nvcte3(t, uvw, vec3(textureSize(sampler3D(uTex3D[nonuniformEXT(ti)], uSmp[0]), 0)), dx, dy);\n" \
     "}\n"
 
 #define HLE_TEXEL_EDGE_FLAG 4096u

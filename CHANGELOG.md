@@ -1,5 +1,17 @@
 # xbased changelog
 
+## 1.1.4 (2026-11)
+
+### Fixes
+- Lighter texture reads on Intel graphics: every texture read also asked
+  for the texture's size, which only a stage that clamps to its edge needs.
+  On Intel GPUs that query costs as much as the read itself, so games at
+  higher internal resolutions kept the GPU at its limit (Midnight Club 3 at
+  3x on Intel UHD, just under its 30 fps). Both precisions.
+- Fast precision: cube maps read as in 1.0.104.
+- The executable's file properties show its real version again (1.1.3's said
+  1.1.2).
+
 ## 1.1.3 (2026-11)
 
 ### Fixes

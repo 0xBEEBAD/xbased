@@ -551,8 +551,8 @@ size_t hle_ff_ps_glsl(const HleFfPsKey *k, char *buf, size_t cap)
                             "        vec2(textureSize(sampler2D(uTex2D[nonuniformEXT(pc.tex[%u] & 0xFFFFu)], uSmp[0]), 0)); }\n",
                         s, s, s, s);
                 }
-                put(&b, "  uv%u = nvcte2(pc.tex[%u], uv%u, vec2(textureSize(sampler2D("
-                        "uTex2D[nonuniformEXT(pc.tex[%u] & 0xFFFFu)], uSmp[0]), 0)), dFdx(uv%u), dFdy(uv%u));\n",
+                put(&b, "  uv%u = nvcte2i(pc.tex[%u], uv%u, "
+                        "pc.tex[%u] & 0xFFFFu, dFdx(uv%u), dFdy(uv%u));\n",
                     s, s, s, s, s, s);
             }
             put(&b, "  vec4 t%u = texture(sampler2D(uTex2D[nonuniformEXT(pc.tex[%u] & 0xFFFFu)], "
