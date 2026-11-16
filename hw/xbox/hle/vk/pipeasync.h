@@ -29,6 +29,13 @@ typedef HlePbResult (*HlePipeBuildFn)(const void *key, const uint32_t *tok, uint
 
 /* The app's settings, before the back end starts. */
 void hle_pipe_set_options(bool async, bool prebuild, bool hybrid);
+/* This thread below the emulation's (a builder of pipelines). */
+void hle_pipe_lower_priority(void);
+/* The device can't have the interpreters (draw.c uber_init, before
+ * hle_pipe_init): hybrid's new shaders built asynchronously instead. */
+void hle_pipe_no_interpreters(void);
+/* The host's threads beyond the emulation's own, 6 at most, least at least. */
+unsigned hle_pipe_spare_threads(unsigned least);
 /* the app's setting for new shaders: drawn by the interpreters meanwhile (vk/draw.c g_ub) */
 bool hle_pipe_hybrid(void);
 /* draw.c's init: the key size and the build function; the debug overrides

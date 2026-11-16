@@ -1,5 +1,29 @@
 # xbased changelog
 
+## 1.1.2 (2026-11)
+
+### New
+- **GPU precision** (Settings › System, or per game): **Exact** draws with
+  the console graphics chip's own arithmetic, the closest to a real Xbox and
+  the heaviest on the GPU; **Fast** uses plain float shaders, as xbased did
+  up to 1.0.94, much lighter on the GPU. **Automatic**, the
+  default, picks Fast on AMD Polaris and Vega cards and Vega integrated
+  graphics (their driver crashed building the exact shaders), on CPUs of 4
+  threads or fewer, and from the next run on a GPU that crashed building a
+  shader, took too long to build the exact ones or could not keep up with
+  them; Exact everywhere else. The setting's help shows what Automatic
+  chose last and why.
+- **Cached shaders built before the game** is on by default, in both
+  precisions.
+
+### Fixes
+- No more shader stutter on GPUs without pipeline libraries (AMD's Windows
+  driver, older Intel drivers): the hybrid mode can't run there and fell
+  back to synchronous builds, pausing the game for every new shader; it now
+  builds them in the background.
+- On CPUs with few threads, shader builds no longer take time from the
+  game: they run below its threads and only on the threads it leaves free.
+
 ## 1.1.1 (2026-11)
 
 ### New

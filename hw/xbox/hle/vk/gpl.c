@@ -18,6 +18,7 @@
 #include "hw/xbox/hle/hle.h"
 
 #include "hw/xbox/hle/vk/gpl.h"
+#include "hw/xbox/hle/vk/precision.h"
 #include "hw/xbox/hle/vk/pcache.h"
 #include "hw/xbox/hle/vk/vkdev.h"
 
@@ -152,7 +153,9 @@ static HlePbResult part_get(unsigned kind, uint64_t key, const VkGraphicsPipelin
         ci.flags |= VK_PIPELINE_CREATE_LIBRARY_BIT_KHR |
                     (cache_only ? VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT : 0);
         const int64_t t0 = g_get_monotonic_time();
+        hle_precision_build_enter();
         vr = T.vkCreateGraphicsPipelines(g_hvk.dev, hle_pcache_get(), 1, &ci, NULL, &p);
+        hle_precision_build_leave();
         *built_ms += (g_get_monotonic_time() - t0) / 1000.0;
         if (vr != VK_SUCCESS) {
             p = VK_NULL_HANDLE;
@@ -341,7 +344,9 @@ HlePbResult hle_gpl_build(const HleGplDesc *d, bool cache_only, bool side, VkPip
             .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, .pNext = &lci,
             .flags = cache_only ? VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT : 0,
             .layout = d->layout };
+        hle_precision_build_enter();
         const VkResult vr = T.vkCreateGraphicsPipelines(g_hvk.dev, hle_pcache_get(), 1, &link, NULL, out);
+        hle_precision_build_leave();
         r = vr == VK_SUCCESS ? HLE_PB_OK : vr == VK_PIPELINE_COMPILE_REQUIRED ? HLE_PB_COMPILE : HLE_PB_FAILED;
         if (r != HLE_PB_OK) {
             *out = VK_NULL_HANDLE;

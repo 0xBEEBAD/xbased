@@ -21,6 +21,7 @@
 #include "hw/xbox/hle/hle.h"
 
 #include "hw/xbox/hle/vk/pipeasync.h"
+#include "hw/xbox/hle/vk/precision.h"
 #include "hw/xbox/hle/vk/vkdev.h"
 
 #if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
@@ -130,9 +131,24 @@ void hle_pipe_set_options(bool async, bool prebuild, bool hybrid)
     g_pa.opt_hybrid = hybrid;
 }
 
+/* Fast precision (precision.h) has no hybrid mode: the interpreters are
+ * the exact forms' companions, and a device that needs the fast forms is one
+ * whose new shaders should not stall the frame either: hybrid's new shaders
+ * built asynchronously there (sync stays sync). The same where the device
+ * can't have the interpreters (no pipeline libraries: AMD's Windows driver,
+ * #307): hybrid was sync there, every new shader a wait of 30 to 45 ms on
+ * the render thread (a Ryzen 5600H's), so a scene's first frames came in at
+ * a few a second. */
+static bool g_no_interp;
+
+void hle_pipe_no_interpreters(void)
+{
+    g_no_interp = true;
+}
+
 bool hle_pipe_hybrid(void)
 {
-    return g_pa.opt_hybrid;
+    return g_pa.opt_hybrid && !hle_precision_fast() && !g_no_interp;
 }
 
 void hle_pipe_init(size_t key_size, HlePipeBuildFn build, const char *variant)
@@ -142,7 +158,7 @@ void hle_pipe_init(size_t key_size, HlePipeBuildFn build, const char *variant)
     g_pa.build = build;
     int a = debug_switch("HAKUX_HLE_ASYNCPIPE", "debug.hakux.asyncpipe");
     int p = debug_switch("HAKUX_HLE_PREBUILD", "debug.hakux.prebuild");
-    g_pa.async = a >= 0 ? a : g_pa.opt_async;
+    g_pa.async = a >= 0 ? a : g_pa.opt_async || (g_pa.opt_hybrid && !hle_pipe_hybrid());
     g_pa.prebuild = p >= 0 ? p : g_pa.opt_prebuild;
     g_pa.nocache = debug_switch("HAKUX_HLE_NOCACHE", "debug.hakux.nocache") == 1;
     hle_mutex_init(&g_pa.mu);
@@ -184,7 +200,7 @@ void hle_pipe_set_yield(bool (*fn)(void))
 
 /* ---- workers ----------------------------------------------------------------- */
 
-static void lower_priority(void)
+void hle_pipe_lower_priority(void)
 {
 #ifdef __linux__
     setpriority(PRIO_PROCESS, (id_t)syscall(SYS_gettid), 10);
@@ -197,7 +213,7 @@ static void lower_priority(void)
 static void *worker(void *opaque)
 {
     t_worker = true;
-    lower_priority();
+    hle_pipe_lower_priority();
     hle_mutex_lock(&g_pa.mu);
     for (;;) {
         while (!g_pa.qn || (g_yield && g_yield())) {
@@ -223,12 +239,20 @@ static void *worker(void *opaque)
     return NULL;
 }
 
+/* The host's threads beyond the emulation's own (EMU_THREADS), WORKERS_MAX
+ * at most, least at least */
+unsigned hle_pipe_spare_threads(unsigned least)
+{
+    const long ncpu = sysconf(_SC_NPROCESSORS_ONLN);
+    return ncpu > (long)(EMU_THREADS + least) ? MIN((unsigned)(ncpu - EMU_THREADS), WORKERS_MAX) : least;
+}
+
 bool hle_pipe_queue(uint64_t hash, const void *key, uint64_t vsh, const uint32_t *tok,
                     uint32_t nslots)
 {
     if (!g_pa.started) {
         const long ncpu = sysconf(_SC_NPROCESSORS_ONLN);
-        const unsigned nw = ncpu > EMU_THREADS + 2 ? MIN((unsigned)(ncpu - EMU_THREADS), WORKERS_MAX) : 2;
+        const unsigned nw = hle_pipe_spare_threads(2);
         hle_log("hakuX-hle-pipe", "pipeline workers: %u (%ld host threads)", nw, ncpu);
         for (unsigned i = 0; i < nw; i++) {
             hle_thread_create(&g_pa.th[i], "hle.pipe", worker, NULL, HLE_THREAD_DETACHED);

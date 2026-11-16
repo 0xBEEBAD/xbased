@@ -25,7 +25,9 @@ void nc_options_init(NcOptions *o)
      * building skipped the draws waiting for theirs (5 to 88 in a minute:
      * objects missing or flickering for a frame); asynchronous shaders stay a
      * setting, off unless turned on (its warning says what they can break) */
-    *o = (NcOptions){ .shaders = NC_SHADERS_HYBRID, .prebuild = false, .video = -1, .av_pack = NC_AV_PACK_HDTV };
+    /* (1.1.2: the cached shaders built before the game by default, in both
+     * precisions: a game's second run starts without its first one's builds) */
+    *o = (NcOptions){ .shaders = NC_SHADERS_HYBRID, .prebuild = true, .video = -1, .av_pack = NC_AV_PACK_HDTV };
 }
 
 static const char *value(const char *arg, const char *name)
@@ -82,6 +84,9 @@ bool nc_option(NcOptions *o, const char *arg)
         if (atoi(v) != 0) {
             o->shaders = NC_SHADERS_ASYNC;  /* (0: the mode as it is) */
         }
+    } else if ((v = value(arg, "precision="))) {
+        /* the GPU's precision (hw/xbox/hle/vk/precision.h): auto, exact or fast */
+        nc_hle_set_precision(!strcmp(v, "exact") ? 1 : !strcmp(v, "fast") ? 2 : 0);
     } else if ((v = value(arg, "prebuild="))) {
         o->prebuild = atoi(v) != 0;
     } else if ((v = value(arg, "devtime="))) {

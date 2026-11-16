@@ -14,6 +14,8 @@
 #include "hw/xbox/hle/hle.h"
 #include "hw/xbox/hle/core/probe.h"
 #include "hw/xbox/hle/vk/pipeasync.h"
+#include "hw/xbox/hle/vk/precision.h"
+#include "native/core/core.h"
 #include "hw/xbox/hle/mem/guestmem.h"
 #include "hw/xbox/hle/hitch.h"
 #include "native/core/irq.h"
@@ -36,6 +38,13 @@ static bool g_active;
 void nc_hle_set_pipeline_options(bool async, bool prebuild, bool hybrid)
 {
     hle_pipe_set_options(async, prebuild, hybrid);
+    nc_crash_hook = hle_precision_crashed;     /* a driver crash in a shader build: auto goes fast */
+}
+
+void nc_hle_set_precision(int mode)
+{
+    hle_precision_set_option(mode);
+    nc_crash_hook = hle_precision_crashed;     /* a driver crash in a shader build: auto goes fast */
 }
 
 void nc_hle_pipeline_progress(uint32_t *done, uint32_t *total)

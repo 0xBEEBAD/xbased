@@ -84,6 +84,7 @@ add_library(hakux_hle STATIC
   ${NC_HLE}/vk/draw.c
   ${NC_HLE}/vk/gpl.c
   ${NC_HLE}/vk/quirks.c
+  ${NC_HLE}/vk/precision.c
   ${NC_HLE}/vk/retire.c
   ${NC_HLE}/vk/gamma.c
   ${NC_HLE}/vk/guest_ram.c

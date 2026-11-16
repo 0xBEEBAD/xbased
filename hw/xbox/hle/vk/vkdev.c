@@ -9,6 +9,7 @@
 #include "hw/xbox/hle/hle.h"
 #include "hw/xbox/hle/host.h"
 #include "hw/xbox/hle/vk/vkdev.h"
+#include "hw/xbox/hle/vk/precision.h"
 #include "hw/xbox/hle/shader/glsl_compile.h"
 #include "hw/xbox/hle/vk/back.h"
 #include "hw/xbox/hle/vk/batch.h"
@@ -879,6 +880,7 @@ int hle_vk_init(void)
             c->push_desc, c->cbc, c->cbc_any, c->x4444, c->d24s8, c->bda, c->ahb, c->vk13,
             c->dyn_render, c->sync2, c->eds1, c->eds2, c->bindless, c->depth_clamp);
     hle_quirks_init(v->phys);           /* what this driver needs worked around */
+    hle_precision_init(v->phys);        /* exact or fast shaders (precision.h) */
     return 0;
 }
 

@@ -204,6 +204,48 @@ static const char *video_mode_name(void)
     return "";
 }
 
+
+static void help_panel(const char *s);
+
+/* The GPU precision (precision=, hw/xbox/hle/vk/precision.h): automatic,
+ * exact or fast; selected, its help with the last game's verdict (the
+ * HLE's last_precision.txt beside the hard disk). */
+static void precision_row(List *l, bool game)
+{
+    static const char *const pv[] = {"auto", "exact", "fast"};
+    const char *pn[] = {T(S_PREC_AUTO), T(S_PREC_EXACT), T(S_PREC_FAST)};
+    opt_choice(l, S_PRECISION, "precision", pv, pn, 3, "auto");
+    if (!list_selected(l)) {
+        return;
+    }
+    (void)game;
+    static char help[1400];
+    const char *hdd = cfg_get(&D.global, "hdd");
+    char path[1200], verdict[16] = "", why[400] = "";
+    if (hdd && hdd[0]) {
+        snprintf(path, sizeof(path), "%s/../hle/last_precision.txt", hdd);
+    } else {
+        snprintf(path, sizeof(path), "%shdd/../hle/last_precision.txt", cfg_data_dir());
+    }
+    FILE *f = fopen(path, "r");
+    if (f) {
+        if (fgets(verdict, sizeof(verdict), f) && fgets(why, sizeof(why), f)) {
+            verdict[strcspn(verdict, "\r\n")] = 0;
+            why[strcspn(why, "\r\n")] = 0;
+        } else {
+            verdict[0] = 0;
+        }
+        fclose(f);
+    }
+    if (verdict[0]) {
+        snprintf(help, sizeof(help), "%s %s %s (%s).", T(S_PREC_HELP), T(S_PREC_LAST),
+                 T(strcmp(verdict, "fast") ? S_PREC_EXACT : S_PREC_FAST), why);
+    } else {
+        snprintf(help, sizeof(help), "%s", T(S_PREC_HELP));
+    }
+    help_panel(help);
+}
+
 void scr_settings(void)
 {
     const float W = ui_w(), H = ui_h();
@@ -270,7 +312,8 @@ void scr_settings(void)
             const char *sn[] = {T(S_SHADERS_HYBRID), T(S_SHADERS_ASYNC), T(S_SHADERS_SYNC)};
             opt_choice(&l, S_SHADERS_MODE, "shaders", sv, sn, 3, "hybrid");
         }
-        opt_bool(&l, S_PREBUILD, "prebuild", false, false);
+        opt_bool(&l, S_PREBUILD, "prebuild", true, false);
+        precision_row(&l, false);
         break;
     }
     case 3: {
@@ -478,6 +521,7 @@ void scr_game_settings(void)
         const char *sn[] = {T(S_SHADERS_HYBRID), T(S_SHADERS_ASYNC), T(S_SHADERS_SYNC)};
         opt_choice(&l, S_SHADERS_MODE, "shaders", sv, sn, 3, "hybrid");
     }
+    precision_row(&l, true);
     if (list_row(&l, T(S_RESET_GAME), NULL, NULL)) {
         dash_ask(T(S_RESET_GAME), reset_game);
     }

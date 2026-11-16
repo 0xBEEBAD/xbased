@@ -21,6 +21,7 @@
 #include "hw/xbox/hle/vk/batch.h"
 #include "hw/xbox/hle/vk/pcache.h"
 #include "hw/xbox/hle/vk/pipeasync.h"
+#include "hw/xbox/hle/vk/precision.h"
 #include "hw/xbox/hle/hitch.h"
 #include "hw/xbox/hle/prof.h"
 #include "hw/xbox/hle/vk/display.h"
@@ -354,9 +355,10 @@ static void on_complete(uint64_t completed)
     }
 }
 
-/* GPU time per command buffer while the host-time profile is on (debug): a
+/* GPU time per command buffer while the host-time profile is on (debug), or
+ * while auto precision measures whether the GPU keeps up (precision.h): a
  * begin and an end timestamp per frame slot, read when the slot comes round
- * (its submission has completed); logged once a second. */
+ * (its submission has completed); the profile's logged once a second. */
 static struct {
     VkQueryPool pool;
     bool failed, armed[HLE_FRAMES];
@@ -375,13 +377,14 @@ static void gput_collect(unsigned slot)
                                 sizeof(t[0]), VK_QUERY_RESULT_64_BIT) == VK_SUCCESS &&
         t[1] >= t[0]) {
         uint64_t ns = (uint64_t)((double)(t[1] - t[0]) * g_hvk.props.limits.timestampPeriod);
+        hle_precision_gpu_time(ns);
         g_gput.ns += ns;
         g_gput.n++;
         g_gput.max_ns = MAX(g_gput.max_ns, ns);
     }
     int64_t now = hle_now_ns();
     if (now - g_gput.last_log >= 1000000000) {
-        if (g_gput.last_log && g_gput.n) {
+        if (g_gput.last_log && g_gput.n && g_hle_prof_on) {
             hle_log("hakuX-hle-prof", "gpu=%.1fms/s cbs=%llu avg=%.2fms max=%.2fms",
                     g_gput.ns / 1e6, (unsigned long long)g_gput.n,
                     g_gput.ns / 1e6 / g_gput.n, g_gput.max_ns / 1e6);
@@ -393,7 +396,7 @@ static void gput_collect(unsigned slot)
 
 static void gput_begin(VkCommandBuffer cb, unsigned slot)
 {
-    if (!g_hle_prof_on || g_gput.failed || hle_quirk(HLE_QUIRK_NO_TIMESTAMPS)) {
+    if ((!g_hle_prof_on && !hle_precision_measuring()) || g_gput.failed || hle_quirk(HLE_QUIRK_NO_TIMESTAMPS)) {
         return;
     }
     if (!g_gput.pool) {
@@ -2096,6 +2099,7 @@ static void cmd_swap_present(const HleCmdSwap *c)
      * submit each held the back end to ~850 a second, tens of seconds
      * behind, and its movies played at 5 fps meanwhile. */
     static int64_t s_written_ns;
+    hle_precision_swap();               /* the game's frames (precision.h's measure) */
     const int64_t now = hle_now_ns();
     if (now - s_written_ns < SWAP_MIN_NS && hle_ring_ahead(hle_fe_ring(), HLE_OP_SWAP, 256)) {
         static uint64_t s_superseded;

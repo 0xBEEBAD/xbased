@@ -187,7 +187,13 @@ bool cfg_shaders_migrate(Config *c)
         cfg_unset(c, "asyncpipe");
         cfg_unset(c, "prebuild");
         cfg_unset(c, "shaders");
-        cfg_set(c, "shaders.reset", "2");
+        cfg_set(c, "shaders.reset", "3");
+    } else if (atoi(reset) < 3) {
+        /* 3 (1.1.2): the cached shaders built before the game, on by default
+         * now: an earlier choice of it goes once */
+        had = cfg_get(c, "prebuild") != NULL;
+        cfg_unset(c, "prebuild");
+        cfg_set(c, "shaders.reset", "3");
     }
     /* the asynchronous shaders' switch (asyncpipe) as the mode it was: on, "async";
      * off, the default one */

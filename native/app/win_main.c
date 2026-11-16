@@ -1500,7 +1500,7 @@ static const char k_usage[] =
     "  scale=N              internal resolution (1 to 8)\n"
     "  aspect=auto|4:3|16:9|stretch\n"
     "  upscale=bilinear|fsr, fxaa=0|1, crt=N\n"
-    "  shaders=hybrid|async|sync\n"
+    "  shaders=hybrid|async|sync, precision=auto|exact|fast\n"
     "  uncap, fpscap=N      the frame rate lifted, up to N a second\n"
     "  online               online mode: the console's frame rate and speed, no mods or cheats\n"
     "  lang=N               the console's language (1 English ... 9 Portuguese)\n"

@@ -53,6 +53,9 @@ static LONG WINAPI on_crash(PEXCEPTION_POINTERS ep)
     const EXCEPTION_RECORD *er = ep->ExceptionRecord;
     HMODULE self = GetModuleHandleW(NULL);
     CONTEXT c = *ep->ContextRecord;
+    if (nc_crash_hook) {
+        nc_crash_hook();                /* a driver crash in a shader build: noted (precision.h) */
+    }
     nc_log("hakuX-native", "crash: exception %08lx at %p (exe+%llx), address %p, thread %lu",
            er->ExceptionCode, er->ExceptionAddress, (unsigned long long)((uintptr_t)er->ExceptionAddress - (uintptr_t)self),
            er->NumberParameters > 1 ? (void *)er->ExceptionInformation[1] : NULL, GetCurrentThreadId());

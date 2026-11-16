@@ -2,6 +2,8 @@
  * hakuX native core — boot and run a title.
  */
 #include "native/core/core.h"
+
+void (*nc_crash_hook)(void);
 #include "native/dev/dev.h"
 #include "native/dev/usb.h"
 #include "native/hle/hle_native.h"
