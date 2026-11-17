@@ -129,7 +129,27 @@ typedef struct HlePshKey {
     uint8_t linez;                      /* a line whose geometry stage hands over its ends'
                                            screen depths (vLineZ, psh.c nvlzd): its depth
                                            from them (in the padding too) */
+    uint8_t dither;                     /* SET_DITHER_ENABLE into a 16-bit target: the colour
+                                           dithered to its channels' steps as it is written,
+                                           1 R5G6B5, 2 X1R5G5B5 / A1R5G5B5 (vk/draw.c
+                                           dither_mode, HLE_DITHER_GLSL; in the padding, for
+                                           the fixed-function stages' keys as well) */
 } HlePshKey;
+/* The NV2A's dither into a 16-bit target, a 4x4 ordered pattern added below
+ * the channels' step before the colour is rounded to it: m the step's
+ * fraction of 1 per channel (1/31, 1/63 or 1/31). Above 1x the pattern is the
+ * scaled image's pixels', finer than the console's, as the steps it hides
+ * (without it Fable's sky had its light in rings from 2x) */
+#define HLE_DITHER_GLSL \
+    "float nvbayer() {\n" \
+    "  uvec2 q = uvec2(gl_FragCoord.xy) & 3u;\n" \
+    "  const float b[16] = float[16](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0,\n" \
+    "                                3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);\n" \
+    "  return (b[q.y * 4u + q.x] + 0.5) / 16.0;\n" \
+    "}\n" \
+    "vec3 nvdither(vec3 c, vec3 m) { return clamp(c + (nvbayer() - 0.5) * m, 0.0, 1.0); }\n"
+/* (nvdither: the GPU's own rounding to the nearest step after it; nvbayer
+ * alone: a threshold under a cut, psh.c's 16-bit blend in the shader) */
 /* SET_STIPPLE_PATTERN's 32 words, each pattern a title drew with
  * (pb/pbdraw.c adds them, the generator reads the ones keys name): a pixel is
  * drawn where bit (31 - x mod 32) ^ 24 of word 31 - (y mod 32) is set (the

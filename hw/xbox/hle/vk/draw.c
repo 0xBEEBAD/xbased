@@ -48,7 +48,7 @@
 enum {
     RS_ZFUNC = 57, RS_ALPHAFUNC = 58, RS_ALPHABLENDENABLE = 59, RS_ALPHATESTENABLE = 60,
     RS_ALPHAREF = 61, RS_SRCBLEND = 62, RS_DESTBLEND = 63, RS_ZWRITEENABLE = 64,
-    RS_SHADEMODE = 66, RS_COLORWRITEENABLE = 67, RS_STENCILZFAIL = 68,
+    RS_DITHERENABLE = 65, RS_SHADEMODE = 66, RS_COLORWRITEENABLE = 67, RS_STENCILZFAIL = 68,
     RS_STENCILPASS = 69, RS_STENCILFUNC = 70, RS_STENCILREF = 71, RS_STENCILMASK = 72,
     RS_STENCILWRITEMASK = 73, RS_BLENDOP = 74, RS_BLENDCOLOR = 75,
     RS_FOGENABLE = 92, RS_FOGTABLEMODE = 93, RS_FOGSTART = 94, RS_FOGEND = 95,
@@ -305,6 +305,7 @@ static struct {
     uint64_t ub_keys, ub_draws;         /* keys the interpreters drew, their draws */
     uint64_t signed_blends;             /* draws with a signed blend equation, in two */
     uint64_t logic_draws;               /* draws with a logic op (HLE_BLEND_LOGIC) */
+    uint64_t dither_draws;              /* draws dithered into a 16-bit target (dither_mode) */
     /* FF transformed draws by the FF features their state asks for */
     uint64_t ff3d, ff_lit, ff_fog, ff_texgen, ff_texxform, ff_blend, ff_psprite, prog_fog;
 } g_dr;
@@ -1398,6 +1399,20 @@ static unsigned a7_blend(const HleCmdState *s)
     return w16 ? 12 + cf : one ? 12 : cf == 7 ? 10 : 9;
 }
 
+/* a7_blend for a draw: the shader's own blend into a 16-bit target (13-15)
+ * reads the target as it was before the draw (an input attachment, no order
+ * among the draw's own fragments), so a draw whose triangles may lie over
+ * each other blends on the GPU instead, each over the ones before it.
+ * Fable's hair, layers of half-transparent strands in one draw, came out a
+ * single layer over the scalp: the boy bald at the crown (#338). A quad's
+ * two triangles don't overlap (nxdk_pgraph_tests' 16-bit blend pictures
+ * stay the NV2A's). */
+static unsigned a7_draw(const HleCmdState *s, const HleCmdDraw *c)
+{
+    const unsigned a7 = a7_blend(s);
+    return a7 >= 13 && c->count > 6 ? 0 : a7;
+}
+
 static bool is_colour_rt(uint32_t rt_id)
 {
     HleVkSurf *rt = hle_surf_get(rt_id);
@@ -1453,7 +1468,7 @@ unsigned hle_draw_fb_stages(const HleCmdDraw *c, uint32_t rt_id)
     if (signed_blend(&g_dr.st)) {
         return is_colour_rt(rt_id) ? 0x10 : 0;
     }
-    const unsigned a7 = a7_blend(&g_dr.st);
+    const unsigned a7 = a7_draw(&g_dr.st, c);
     if (a7 == 9 || a7 == 10 || a7 >= 12) {
         return is_colour_rt(rt_id) ? 0x10 : 0;
     }
@@ -3542,6 +3557,29 @@ static HlePbResult pipeline_build(const void *key, const uint32_t *tok, uint32_t
     return r;
 }
 
+/* A pixel shader's text with the dither (psh.h HLE_DITHER_GLSL) on its
+ * colour as main ends: the functions before main, the call before its last
+ * brace (each generator's main is the text's last function); at_cut: the
+ * shader blends a 16-bit target itself and dithers at its source's cut
+ * (psh.c sblend 13-15), the functions alone */
+static bool dither_text(char *src, size_t cap, uint8_t mode, bool at_cut)
+{
+    char *m = strstr(src, "void main()");
+    char *e = strrchr(src, '}');
+    const char *call = at_cut ? "" : mode == 1 ? "  oColor.rgb = nvdither(oColor.rgb, vec3(1.0 / 31.0, 1.0 / 63.0, 1.0 / 31.0));\n"
+                                 : "  oColor.rgb = nvdither(oColor.rgb, vec3(1.0 / 31.0));\n";
+    const size_t fl = strlen(HLE_DITHER_GLSL), cl = strlen(call), n = strlen(src);
+    if (!m || !e || e < m || n + fl + cl + 1 > cap) {
+        return false;
+    }
+    const size_t mo = (size_t)(m - src), eo = (size_t)(e - src);
+    memmove(src + eo + fl + cl, src + eo, n - eo + 1);      /* the last brace on */
+    memmove(src + mo + fl, src + mo, eo - mo);              /* main after the function */
+    memcpy(src + mo, HLE_DITHER_GLSL, fl);
+    memcpy(src + eo + fl, call, cl);
+    return true;
+}
+
 static HlePbResult pipeline_build_now(const void *key, const uint32_t *tok, uint32_t nslots,
                                       bool cache_only, VkPipeline *out)
 {
@@ -3574,6 +3612,10 @@ static HlePbResult pipeline_build_now(const void *key, const uint32_t *tok, uint
                       : !hle_ff_ps_glsl(&k->ps, fsrc, SRC_MAX)) {
         hle_log("xbased-hle-pipe", "pixel shader (%s, fvf=0x%x vsh=%016llx): translation failed",
                 k->psh ? "combiners" : "stages", k->vs.fvf, (unsigned long long)k->vsh);
+        return HLE_PB_FAILED;
+    }
+    if (!uber && k->pk.dither && !dither_text(fsrc, SRC_MAX, k->pk.dither, k->psh && k->pk.sblend >= 13)) {
+        hle_log("xbased-hle-pipe", "pixel shader: no room for the dither");
         return HLE_PB_FAILED;
     }
     if (!uber && k->psh && k->pk.sblend >= 9) {
@@ -5088,6 +5130,25 @@ static uint32_t first_vertex(uint32_t n, const uint32_t *stride, VkDeviceSize *o
  * topo_class takes it): under SET_POINT_SMOOTH_ENABLE the console textures
  * those points as sprites too (nxdk_pgraph_tests' Point_sprite PolygonMode_Point,
  * its smoothed column; lines keep their own) */
+/* The dither a draw's colour has (psh.h HlePshKey.dither): SET_DITHER_ENABLE
+ * into a 16-bit colour target, 1 for R5G6B5, 2 for the 5-5-5 ones; none
+ * where the shader blends or a logic op writes (they take the byte as is) */
+static uint8_t dither_mode(const HleCmdState *s, const HleVkSurf *rt)
+{
+    if (!rt || !s->rs[RS_DITHERENABLE] || !(rt->aspect & VK_IMAGE_ASPECT_COLOR_BIT)) {
+        return 0;
+    }
+    switch (rt->fmt) {
+    case VK_FORMAT_R5G6B5_UNORM_PACK16: case VK_FORMAT_B5G6R5_UNORM_PACK16:
+        return 1;
+    case VK_FORMAT_A1R5G5B5_UNORM_PACK16: case VK_FORMAT_R5G5B5A1_UNORM_PACK16:
+    case VK_FORMAT_B5G5R5A1_UNORM_PACK16:
+        return 2;
+    default:
+        return 0;
+    }
+}
+
 static bool point_sprites(const HleCmdState *s, const HleCmdDraw *c)
 {
     if (!s->rs[RS_POINTSPRITEENABLE]) {
@@ -5762,7 +5823,7 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         }
     }
     if (k.psh && !k.pk.sblend && rt && (rt->aspect & VK_IMAGE_ASPECT_COLOR_BIT)) {
-        const unsigned a7 = a7_blend(s);
+        const unsigned a7 = a7_draw(s, c);
         if ((a7 == 9 || a7 == 10 || a7 >= 12) && (k.blend_en & 1)) {
             k.blend_en &= ~1u;          /* (the shader blends: psh.c sblend 9, 10, 12) */
             k.pk.sblend = (uint8_t)a7;
@@ -5805,6 +5866,13 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
     }
     k.cfmt = rt ? rt->fmt : 0;
     k.dfmt = ds ? ds->fmt : 0;
+    /* (the shader's own 16-bit blend, psh.c sblend 13-15: at the source's cut) */
+    if ((!k.pk.sblend || k.pk.sblend >= 13) && !k.ps.sblend && k.blend_en != HLE_BLEND_LOGIC) {
+        k.pk.dither = dither_mode(s, rt);
+        if (k.pk.dither && !g_dr.dither_draws++) {
+            hle_log("xbased-hle-back", "dither: on, into a target of format %d", (int)rt->fmt);
+        }
+    }
     /* (6, lines with adjacency: the four vertices of a flat-shaded quad, pb/pbres.h) */
     k.topo_class = c->prim == 0 ? 0 : c->prim <= 2 ? 1 : c->prim == 6 ? 3 : 2;
     if (g_hvk.caps.discard && vpc->wmode) {

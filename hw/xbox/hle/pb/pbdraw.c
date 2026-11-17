@@ -134,8 +134,10 @@ typedef struct PbObj {
     uint32_t id;
     HleSurfDesc d;
     uint64_t bound;                     /* when last bound as a target (g_pd.binds) */
-    bool owner;                         /* a texture's image whose faces' or levels' targets are
-                                           views into it (cube_of_targets, mips_of_targets) */
+    bool owner;                         /* a texture's image of its faces' or levels' targets: views
+                                           into it (cube_of_targets) or copies (mips_of_targets) */
+    uint32_t lvl_id[16];                /* mips_of_targets: each level's target as last copied, */
+    uint64_t lvl_w[16];                 /* ... and its written then */
     uint64_t written;                   /* g_pd.wseq at its last draw, clear or copy */
     bool drawn_swz;                     /* last drawn or cleared through a swizzled binding
                                            (texture(): a linear texture reads its memory) */
@@ -2629,82 +2631,100 @@ static bool level_target(const PbObj *o, uint32_t pa, uint32_t w, uint32_t h, ui
     return oi && !(oi->flags & (HLE_FI_DEPTH | HLE_FI_DXT)) && oi->bpp / 8 == bytes;
 }
 
+/* The colour target over a level of a mipmapped 2D texture's memory (its
+ * size and bytes, l at off), the one bound last there: what that memory
+ * holds now (several can lie at the same place: memory D3D reuses) */
+static PbObj *level_target_at(uint32_t pa, uint32_t w, uint32_t h, uint32_t bytes)
+{
+    PbObj *best = NULL;
+    for (unsigned i = 0; i < g_pd.nobjs; i++) {
+        PbObj *o = &g_pd.objs[i];
+        if (level_target(o, pa, w, h, bytes) && (!best || o->bound > best->bound)) {
+            best = o;
+        }
+    }
+    return best;
+}
+
 /* A mipmapped 2D texture (format code, w x h, levels) over the memory of a
  * target for each of its first levels (two at least): an image of its own
- * with those levels, the targets its levels' views (as cube_of_targets
- * makes a cube of its faces' targets), so what the levels render is what
- * the texture samples, each level at its own distance. The levels past the
- * last such target are left out (the image's sampled levels: those
- * rendered). Made once; 0 when level 1 has no target. Halo renders its
- * water's ripples each frame into the 128, 64, 32 and 16 texel levels of a
- * texture its water then reads as the normal map of its reflection (stage
- * 0, DOT_RFLCT_SPEC); sampled as the 128 x 128 target alone, at every
- * distance the normals were one texel's, the reflection a noise of the
- * cube's colours where the sky and the ring should be. */
+ * with those levels, each the copy of its level's target as that target
+ * was last drawn (copied again when it has been drawn since, at the
+ * texture's next binding), so what the levels render is what the texture
+ * samples, each level at its own distance. The levels past the last such
+ * target are left out (the image's sampled levels: those rendered). Halo
+ * renders its water's ripples each frame into the 128, 64, 32 and 16 texel
+ * levels of a texture its water then reads as the normal map of its
+ * reflection (stage 0, DOT_RFLCT_SPEC); sampled as the 128 x 128 target
+ * alone, at every distance the normals were one texel's, the reflection a
+ * noise of the cube's colours where the sky and the ring should be.
+ *
+ * The targets stay images of their own: made views into the texture's
+ * image (as cube_of_targets' faces), a draw into one that read another of
+ * the texture's levels read and wrote the same image, which the copy made
+ * for a target its own draw samples (hle_draw_snap_needed) never covers.
+ * Fable fills a 128, 64 and 32 texel noise texture's levels each frame,
+ * each from the one before, then draws its villager's glow over the 128
+ * texel level's memory: the boy's hair came out bald at the crown, a hard
+ * white outline round whoever he could talk to and the light washed out
+ * (#338). */
 static uint32_t mips_of_targets(uint32_t pa, uint32_t code, uint32_t w, uint32_t h, uint32_t levels)
 {
-    for (unsigned i = 0; i < g_pd.nobjs; i++) {
-        const PbObj *o = &g_pd.objs[i];
-        if (o->owner && o->d.faces <= 1 && o->d.pa == pa && o->d.w == w && o->d.h == h) {
-            return o->id;
-        }
-    }
     const HleFmtInfo *fi = hle_fmt_info(code);
     const uint32_t bytes = fi ? fi->bpp / 8 : 0;
-    uint32_t n = 0, off = 0, xfmt = 0, offs[16];
-    for (; n < levels && n < 16; n++) {
-        const uint32_t lw = MAX(w >> n, 1u), lh = MAX(h >> n, 1u);
-        bool found = false;
-        for (unsigned i = 0; i < g_pd.nobjs && !found; i++) {
-            found = level_target(&g_pd.objs[i], pa + off, lw, lh, bytes);
-            if (found && !n) {
-                xfmt = g_pd.objs[i].d.xfmt;
+    PbObj *c = NULL;
+    for (unsigned i = 0; i < g_pd.nobjs && !c; i++) {
+        PbObj *o = &g_pd.objs[i];
+        if (o->owner && o->d.faces <= 1 && o->d.pa == pa && o->d.w == w && o->d.h == h) {
+            c = o;
+        }
+    }
+    uint32_t n = c ? c->d.levels : 0;
+    if (!c) {
+        uint32_t off = 0, xfmt = 0;
+        for (; n < levels && n < 16; n++) {
+            const uint32_t lw = MAX(w >> n, 1u), lh = MAX(h >> n, 1u);
+            const PbObj *t = level_target_at(pa + off, lw, lh, bytes);
+            if (!t) {
+                break;
             }
+            xfmt = n ? xfmt : t->d.xfmt;
+            off += lw * lh * bytes;
         }
-        if (!found) {
-            break;
+        if (n < 2 || g_pd.nobjs >= MAX_OBJS) {
+            return 0;
         }
-        offs[n] = off;
+        c = &g_pd.objs[g_pd.nobjs++];
+        memset(c, 0, sizeof(*c));
+        c->id = g_pd.next_id++;
+        c->owner = true;
+        c->d = (HleSurfDesc){ .id = c->id, .xfmt = xfmt, .w = w, .h = h, .pa = pa, .levels = (uint16_t)n,
+                              .faces = 1 };
+        HleCmdObj *oc = begin(HLE_OP_OBJ_CREATE, sizeof(*oc));
+        oc->s = c->d;
+        hle_fe_commit();
+        hle_log("xbased-hle-pb", "mipmaps %u: %ux%u at %08x, %u levels from their targets", c->id, w, h, pa, n);
+    }
+    /* each level's target drawn since its copy: copied into its level again */
+    uint32_t off = 0;
+    for (uint32_t l = 0; l < n && l < 16; l++) {
+        const uint32_t lw = MAX(w >> l, 1u), lh = MAX(h >> l, 1u);
+        const PbObj *t = level_target_at(pa + off, lw, lh, bytes);
         off += lw * lh * bytes;
-    }
-    if (n < 2 || g_pd.nobjs >= MAX_OBJS) {
-        return 0;
-    }
-    PbObj *c = &g_pd.objs[g_pd.nobjs++];
-    memset(c, 0, sizeof(*c));
-    c->id = g_pd.next_id++;
-    c->owner = true;
-    c->d = (HleSurfDesc){ .id = c->id, .xfmt = xfmt, .w = w, .h = h, .pa = pa, .levels = (uint16_t)n, .faces = 1 };
-    HleCmdObj *oc = begin(HLE_OP_OBJ_CREATE, sizeof(*oc));
-    oc->s = c->d;
-    hle_fe_commit();
-    for (uint32_t l = 0; l < n; l++) {
-        for (unsigned i = 0; i < g_pd.nobjs; i++) {
-            PbObj *o = &g_pd.objs[i];
-            if (!level_target(o, pa + offs[l], MAX(w >> l, 1u), MAX(h >> l, 1u), bytes)) {
-                continue;
-            }
-            /* the level's own image goes; the target is a view from now on */
-            HleCmdObjDestroy *x = begin(HLE_OP_OBJ_DESTROY, sizeof(*x));
-            x->after = 0;
-            x->id = o->id;
-            hle_fe_commit();
-            if (g_pd.rt == o->id) {
-                g_pd.rt = 0;                /* bound again at the next draw */
-                g_pd.rt_dirty = true;
-            }
-            o->id = g_pd.next_id++;
-            o->d.id = o->id;
-            o->d.parent = c->id;
-            o->d.level = (uint16_t)l;
-            o->d.levels = 1;
-            o->d.faces = 1;
-            HleCmdObj *v = begin(HLE_OP_OBJ_CREATE, sizeof(*v));
-            v->s = o->d;
-            hle_fe_commit();
+        if (!t || (c->lvl_id[l] == t->id && c->lvl_w[l] == t->written)) {
+            continue;
         }
+        c->lvl_id[l] = t->id;
+        c->lvl_w[l] = t->written;
+        HleCmdCopy *cp = begin(HLE_OP_COPY, sizeof(*cp));
+        memset(cp, 0, sizeof(*cp));
+        cp->src = t->id;
+        cp->dst = c->id;
+        cp->dst_level = l;
+        cp->nrects = 1;
+        cp->rect[0] = (HleRect){ 0, 0, (int32_t)lw, (int32_t)lh };
+        hle_fe_commit();
     }
-    hle_log("xbased-hle-pb", "mipmaps %u: %ux%u at %08x, %u levels from their targets", c->id, w, h, pa, n);
     return c->id;
 }
 

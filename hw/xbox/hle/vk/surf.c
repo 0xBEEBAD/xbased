@@ -739,6 +739,18 @@ static void general_use(VkCommandBuffer cb, HleVkSurf *s, VkImageLayout to)
     }
 }
 
+void hle_surf_level_dst(VkCommandBuffer cb, HleVkSurf *s, uint32_t level)
+{
+    hle_surf_transition(cb, s, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    if (!s->general || s->d.parent || !level || level >= s->nlevels) {
+        return;
+    }
+    /* (general_use took it as level 0's write) */
+    barrier_range(cb, s->img, s->aspect, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL, level, 1, 0, 1);
+    s->dirty |= 1ull << sub_bit(s, level, 0);
+    s->rendered_levels = MAX(s->rendered_levels, level + 1);
+}
+
 void hle_surf_written(HleVkSurf *s)
 {
     static uint64_t s_gen;

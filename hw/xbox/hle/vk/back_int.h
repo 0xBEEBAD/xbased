@@ -95,6 +95,9 @@ void hle_surf_rec_end(void);
 void hle_img_barrier(VkCommandBuffer cb, VkImage img, VkImageAspectFlags aspect,
                      VkImageLayout from, VkImageLayout to);
 void hle_surf_transition(VkCommandBuffer cb, HleVkSurf *s, VkImageLayout to);
+/* A transfer into level of s's own levels (an owner, pb/pbdraw.c mips_of_targets:
+ * a level's target copied in): that level written, sampled from then on */
+void hle_surf_level_dst(VkCommandBuffer cb, HleVkSurf *s, uint32_t level);
 /* gamma.c: the swap's copy through the gamma ramp of src's top left sw x sh
  * pixels; false = not done (blit) */
 bool hle_gamma_pass(VkCommandBuffer cb, unsigned slot, const uint8_t ramp[3][256],

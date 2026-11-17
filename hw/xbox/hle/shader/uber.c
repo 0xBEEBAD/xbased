@@ -16,6 +16,7 @@
 #include <string.h>
 #include "hw/xbox/hle/shader/ff.h"
 #include "hw/xbox/hle/shader/ffhw.h"
+#include "hw/xbox/hle/shader/psh.h"
 #include "hw/xbox/hle/shader/uber.h"
 #include "subprojects/nv2a_vsh_cpu/src/nv2a_vsh_disassembler.h"
 
@@ -119,6 +120,7 @@ void hle_uber_keys(const HleVshKey *vk, const HlePshKey *pk, uint32_t nsteps, ui
                   (uint32_t)pk->fog_abs << 8 | (uint32_t)pk->out_bgra << 9 | (uint32_t)pk->specular << 10 |
                   (uint32_t)pk->flat << 11 | (uint32_t)pk->alpha_kill << 12 | (uint32_t)pk->vol << 20;
         cfg[52] = (uint32_t)pk->shadow | (uint32_t)pk->shadow_fmt << 8;
+        cfg[53] = pk->dither;           /* (psh.h HlePshKey.dither) */
     }
 }
 
@@ -585,6 +587,7 @@ static const char k_fs_head[] =
     "layout(location = 21) flat in vec4 vBack1F;\n"
     "%s"
     "layout(location = 0) out vec4 oColor;\n"
+    HLE_DITHER_GLSL
     "uint cw(uint i) { return u[i >> 2][i & 3u]; }\n"
     "vec4 nvFC;\n"
     "float nvc8(float x) {\n"
@@ -1053,6 +1056,8 @@ static const char k_fs_main[] =
     "    if (!ok) discard;\n"
     "  }\n"
     "  oColor = (pf & 0x200u) != 0u ? outc.bgra : outc;\n"
+    "  uint dth = cw(53u);\n"
+    "  if (dth != 0u) oColor.rgb = nvdither(oColor.rgb, vec3(1.0 / 31.0, dth == 1u ? 1.0 / 63.0 : 1.0 / 31.0, 1.0 / 31.0));\n"
     "%s"
     "  if (aak) discard;\n"
     "}\n";

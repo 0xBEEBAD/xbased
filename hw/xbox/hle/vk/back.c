@@ -2383,7 +2383,7 @@ static void cmd_copy(const HleCmdCopy *c)
     VkImageBlit2 br[HLE_CMD_COPY_RECTS];
     VkImageSubresourceLayers ss = { s->aspect, s->d.parent ? s->d.level : 0,
                                     s->d.parent ? s->d.face : 0, 1 };
-    VkImageSubresourceLayers ds = { d->aspect, d->d.parent ? d->d.level : 0,
+    VkImageSubresourceLayers ds = { d->aspect, d->d.parent ? d->d.level : c->dst_level,
                                     d->d.parent ? d->d.face : 0, 1 };
     if (c->resolve) {
         /* a copy swap's downsample of the multisampled buffer into the back
@@ -2435,7 +2435,7 @@ static void cmd_copy(const HleCmdCopy *c)
     }
     VkCommandBuffer cb = cb_get();
     hle_surf_transition(cb, s, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-    hle_surf_transition(cb, d, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    hle_surf_level_dst(cb, d, d->d.parent ? 0 : c->dst_level);    /* (a level of its own: mips_of_targets) */
     hle_surf_written(d);
     if (s->fmt == d->fmt && k == kd) {
         VkCopyImageInfo2 ci = {

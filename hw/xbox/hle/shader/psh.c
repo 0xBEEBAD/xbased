@@ -2721,7 +2721,7 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
         put(&b, "  { vec4 sv = clamp(oColor, 0.0, 1.0);\n"
                 "    vec4 dv = subpassLoad(uFb);\n"
                 "    vec3 nb = vec3(31.0, %s, 31.0);\n"
-                "    vec3 s5 = floor(floor(sv.rgb * 255.0 + 0.5) * (nb + 1.0) / 256.0), d5 = floor(dv.rgb * nb + 0.5);\n"
+                "    vec3 s5 = %s, d5 = floor(dv.rgb * nb + 0.5);\n"
                 "    sv.a = floor(sv.a * 255.0 + 0.5) / 255.0;\n"
                 "#define NVBF(f) ((f) == 0u ? vec4(0.0) : (f) == 1u ? vec4(1.0) : (f) == 0x300u ? sv : "
                 "(f) == 0x301u ? 1.0 - sv : (f) == 0x302u ? sv.aaaa : (f) == 0x303u ? 1.0 - sv.aaaa : "
@@ -2734,7 +2734,12 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
                 /* (the middle of the step's bytes: the step under a conversion through
                  * bytes or straight to the target's bits alike) */
                 "    oColor = vec4((r + 0.5) * (256.0 / (nb + 1.0)) / 255.0, %s); }\n",
-            k->sblend == 15 ? "63.0" : "31.0", k->sblend == 14 ? "1.0" : "0.0");
+            k->sblend == 15 ? "63.0" : "31.0",
+            /* the source's cut, dithered (SET_DITHER_ENABLE: a threshold of the
+             * step under it, vk/draw.c dither_text) */
+            k->dither ? "min(floor((floor(sv.rgb * 255.0 + 0.5) + nvbayer() * 256.0 / (nb + 1.0)) * (nb + 1.0) / 256.0), nb)"
+                      : "floor(floor(sv.rgb * 255.0 + 0.5) * (nb + 1.0) / 256.0)",
+            k->sblend == 14 ? "1.0" : "0.0");
     } else if (k->sblend >= 11) {
         /* an X1R5G5B5_O1R5G5B5 or X8R8G8B8_O8R8G8B8 target (vk/draw.c a7_blend):
          * its alpha 1 where the draw goes; blended (12) by the factors and equation

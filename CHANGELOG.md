@@ -1,5 +1,14 @@
 # xbased changelog
 
+## 1.1.12 (2026-11)
+
+### Fixes
+- Fable: the boy's hair came out bald at the crown, a hard white halo stood
+  round whoever he could talk to and the light looked washed out, since
+  1.1.0. Both are back as 1.0.104 drew them.
+- Games that turn on dithering into a 16-bit picture (Fable's sky) no longer
+  show the light in rings at resolutions above 1x.
+
 ## 1.1.11 (2026-11)
 
 ### Interface

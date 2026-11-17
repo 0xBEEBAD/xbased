@@ -191,6 +191,8 @@ typedef struct HleCmdCopy {
     uint32_t src, dst;          /* object ids */
     uint32_t resolve;           /* 1: the whole source filtered onto the whole
                                    destination (a copy swap's downsample), no rects */
+    uint32_t dst_level;         /* the destination's level, where it has levels of its
+                                   own (pb/pbdraw.c mips_of_targets) */
     uint32_t nrects;
     HleRect rect[HLE_CMD_COPY_RECTS];
     int32_t x[HLE_CMD_COPY_RECTS], y[HLE_CMD_COPY_RECTS];
