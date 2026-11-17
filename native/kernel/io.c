@@ -581,6 +581,38 @@ static NcFile *file_other(const NcFile *nf, const char *host, bool del)
     return NULL;
 }
 
+/* A disc file's start sector, as the GDFX control block holds it (what
+ * XGetFilePhysicalSortKey returns). TOCA Race Driver 3's .big archives
+ * (BIGF) keep, at +0x20 of their header, where they sat on the pressed disc
+ * from default.xbe: the low 16 bits of the sector difference, bytes lo hi lo
+ * hi, XORed with 538F5B39. Opening one, the title compares it with the two
+ * sort keys, and on a rebuilt image (extract-xiso packs the files from
+ * sector 265 on) none matched: it dropped the special event its World Tour
+ * starts on, and entering World Tour read the empty slot (a fault at
+ * 00016E14, the black screen). Such a file gets the sector it had on the
+ * pressed disc instead: default.xbe's plus the difference. A disc laid out
+ * as pressed gives the same number as its own sector; a file whose header
+ * isn't that pattern keeps its sector. */
+static uint32_t disc_sort_key(NcKernel *k, const NcFile *nf)
+{
+    const size_t n = strlen(nf->path);
+    uint8_t h[0x24];
+    NcDiscFile xbe;
+    if (nf->is_dir || nf->disc.size < sizeof(h) || n < 4 || strcasecmp(nf->path + n - 4, ".big") ||
+        !nc_disc_read(k->disc, &nf->disc, 0, h, sizeof(h)) || memcmp(h, "BIGF", 4)) {
+        return nf->disc.sector;
+    }
+    const uint32_t e = (h[0x20] | h[0x21] << 8 | h[0x22] << 16 | (uint32_t)h[0x23] << 24) ^ 0x538F5B39u;
+    if ((e >> 16) != (e & 0xFFFF) || !nc_disc_find(k->disc, "default.xbe", &xbe)) {
+        return nf->disc.sector;
+    }
+    const uint32_t delta = (e >> 24) | ((e >> 16) & 0xFF) << 8;
+    if (((nf->disc.sector - xbe.sector) & 0xFFFF) == delta) {
+        return nf->disc.sector;
+    }
+    return xbe.sector + delta;
+}
+
 static uint32_t file_handle(NcKernel *k, NcFile *nf)
 {
     uint32_t obj = nc_ob_create(k, nf->kind == F_LINK ? NC_OB_SYMLINK : NC_OB_FILE, FILE_OBJECT_SIZE);
@@ -599,7 +631,7 @@ static uint32_t file_handle(NcKernel *k, NcFile *nf)
     const uint32_t fcb = obj + FO_FCB;
     nc_vm_wr32(k->vm, obj + FO_FSCONTEXT, fcb);
     if (nf->kind == F_DISC) {
-        nc_vm_wr32(k->vm, fcb, nf->disc.sector);
+        nc_vm_wr32(k->vm, fcb, disc_sort_key(k, nf));
     } else if (nf->kind == F_HOST && !nf->is_dir) {
         /* Host files have no clusters: the inode orders them stably. */
         struct stat st;

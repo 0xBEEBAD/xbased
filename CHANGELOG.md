@@ -1,5 +1,12 @@
 # xbased changelog
 
+## 1.1.13 (2026-11)
+
+### Fixes
+- TOCA Race Driver 3: entering World Tour no longer crashes to a black
+  screen. The game checks where its data files sit on the disc and, on
+  images where they were moved, dropped the event World Tour starts with.
+
 ## 1.1.12 (2026-11)
 
 ### Fixes
