@@ -93,8 +93,10 @@ UiTex *ui_texture_rgba(const uint8_t *rgba, int w, int h);
 UiTex *ui_texture_surface(SDL_Surface *s);
 void ui_texture_free(UiTex *t);
 void ui_texture_size(const UiTex *t, float *w, float *h);
-/* A texture over the whole window, its colour modulated by c. */
+/* A texture over the whole window (the 4:3 area's sides too), its colour
+ * modulated by c; ui_fill_grad: a gradient over it. */
 void ui_fill(UiTex *t, UiColor c);
+void ui_fill_grad(UiColor top, UiColor bottom);
 /* The game's picture under the overlay, as the window would show it, or
  * that blurred (overlay only, while covering: NULL otherwise). */
 UiTex *ui_scene(bool blurred);

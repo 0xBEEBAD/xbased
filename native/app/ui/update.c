@@ -128,9 +128,17 @@ static int check_thread(void *arg)
 
 void upd_check_start(const char *current)
 {
-    if (U.thread) {
+    /* again (About's button, #336) once the last check is done; never
+     * over an install */
+    const int st = SDL_GetAtomicInt(&U.state);
+    if (st == UPD_CHECKING || st == UPD_INSTALLING || st == UPD_INSTALLED) {
         return;
     }
+    if (U.thread) {
+        SDL_WaitThread(U.thread, NULL);
+        U.thread = NULL;
+    }
+    U.version[0] = 0;
     snprintf(U.current, sizeof(U.current), "%s", current);
     SDL_SetAtomicInt(&U.state, UPD_CHECKING);
     U.thread = SDL_CreateThread(check_thread, "update-check", NULL);

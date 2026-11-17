@@ -63,6 +63,7 @@ static struct {
     float scale;            /* pixels per 720p unit */
     int pw, ph;             /* the drawing area's (4:3: inside the window, U.ox from its left) */
     int ox;
+    int ww;                 /* the window's width (the 4:3 area's sides included) */
     bool shifted;           /* the overlay's vertices moved by ox (ui_overlay_submit) */
     uint64_t t0;
     float alpha;            /* ui_set_alpha */
@@ -316,10 +317,31 @@ UiTex *ui_scene(bool blurred)
     return t;
 }
 
+/* Drawing over the whole window, the 4:3 area's sides too (the window's
+ * picture under the in-game menu, #336: squeezed into the 4:3 area it
+ * read as the game narrowed); x0: the window's left edge in drawing
+ * pixels (the overlay's vertices move by ox later, ui_overlay_submit). */
+static float whole_begin(void)
+{
+    if (!U.ov && U.ox) {
+        SDL_SetRenderViewport(U.r, NULL);
+    }
+    return U.ov ? (float)-U.ox : 0.0f;
+}
+
+static void whole_end(void)
+{
+    if (!U.ov && U.ox) {
+        const SDL_Rect vp = {U.ox, 0, U.pw, U.ph};
+        SDL_SetRenderViewport(U.r, &vp);
+    }
+}
+
 void ui_fill(UiTex *t, UiColor c)
 {
-    const SDL_FRect d = {0, 0, (float)U.pw, (float)U.ph};
+    const SDL_FRect d = {whole_begin(), 0, (float)U.ww, (float)U.ph};
     blit(t, NULL, &d, c);
+    whole_end();
 }
 
 void ui_set_alpha(float a)
@@ -500,6 +522,7 @@ void ui_begin(void)
     /* the interface in a centered 4:3 area, the sides black (#289): a bezel
      * or a shader's frame over a 4:3 picture covers no menu */
     U.ox = 0;
+    U.ww = U.pw;
     U.shifted = false;
     if (g_frame43 && U.pw * 3 > U.ph * 4) {
         const int w43 = U.ph * 4 / 3;
@@ -794,6 +817,13 @@ void ui_rect(float x, float y, float w, float h, UiColor c)
 void ui_rect_grad(float x, float y, float w, float h, UiColor top, UiColor bottom)
 {
     quad(x, y, w, h, top, top, bottom, bottom);
+}
+
+void ui_fill_grad(UiColor top, UiColor bottom)
+{
+    const float x0 = whole_begin();
+    quad(x0 / U.scale, 0, U.ww / U.scale, U.ph / U.scale, top, top, bottom, bottom);
+    whole_end();
 }
 
 void ui_rect_hgrad(float x, float y, float w, float h, UiColor left, UiColor right)

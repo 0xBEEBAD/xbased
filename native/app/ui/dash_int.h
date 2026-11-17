@@ -104,6 +104,17 @@ bool list_row_icon(List *l, UiTex *icon, const char *label, const char *sub, con
 void list_end(List *l);
 bool list_selected(const List *l);   /* the last row is the selected one */
 
+/* The selected row's help under the list (#336): the option rows give
+ * their own (opt_*), a screen's other rows dash_help; when: in a game's
+ * menu, when the setting takes effect (said under it). dash_help_draw
+ * draws it once the list is done, then forgets it; dash_list_h: the
+ * height of a list from y in rows of row_h that ends above it. */
+enum { HELP_NOW, HELP_NEXT_START, HELP_ON_RESUME };
+void dash_help(const char *text, int when);
+void dash_help_draw(void);
+float dash_help_top(void);
+float dash_list_h(float y, float row_h);
+
 /* settings rows over D.global or (editing a game) D.game */
 void opt_choice(List *l, enum UiStr label, const char *key, const char *const *vals, const char *const *names, int n,
                 const char *def);

@@ -1,5 +1,23 @@
 # xbased changelog
 
+## 1.1.11 (2026-11)
+
+### Interface
+- Every option has a short description under the list, in all 11
+  languages. In the in-game menu it also says when a change takes effect:
+  right away, when you go back to the game, or the next time it starts.
+- Long descriptions scroll on their own instead of being cut, and they show
+  as plain text under the list, without the dark box.
+- A game's settings are in sections (video, audio, system) and have their
+  own volume, audio output, background mute, frame rate counter, V-Sync
+  and limit for unlocked games.
+- About has a Check for updates button.
+- The Remove (X) hint only shows on the game folder and file rows.
+- With the interface in 4:3, the in-game menu no longer squeezes the game's
+  picture.
+- Long option names and values get cut less, the tabs fit at 4:3 and in
+  longer languages, and Japanese and Chinese text wraps properly.
+
 ## 1.1.10 (2026-11)
 
 ### Fixes

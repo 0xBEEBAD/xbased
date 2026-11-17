@@ -26,6 +26,10 @@
 
 Dash D;
 static SDL_Window *g_win;
+/* the in-game menu's (dash_ingame): a game runs, its kernel the EEPROM's
+ * writer till it ends; the settings meet the EEPROM back in the dashboard */
+static bool g_game_running;
+static float g_help_under;  /* under the last list begun: where its help goes (dash_help_draw) */
 static void (*g_fs_hook)(void);
 
 void dash_set_fullscreen_hook(void (*toggle)(void))
@@ -149,7 +153,13 @@ static int wrap_lines(const char *s, float size, int font, float max_w, char lin
         while (s[n] && n < 511) {
             line[n] = s[n];
             line[n + 1] = 0;
+            const unsigned char *u = (const unsigned char *)s + n;
             if (s[n] == ' ') {
+                last_space = n;
+            } else if (n > 0 && u[0] >= 0xE3 && u[0] <= 0xE9 && !(u[0] == 0xE3 && u[1] == 0x80)) {
+                /* before kana and CJK ideographs too (U+3040-9FFF), as
+                 * Japanese and Chinese break lines; not before their 、。」
+                 * marks (U+3000-303F); Korean breaks at its spaces */
                 last_space = n;
             }
             if (ui_text_width(line, size, font) > max_w) {
@@ -228,9 +238,6 @@ void dash_choose(const char *q, const char *const *choices, int n, void (*on_cho
     D.on_choice = on_choice;
 }
 
-/* the in-game menu's (dash_ingame): a game runs, its kernel the EEPROM's
- * writer till it ends; the settings meet the EEPROM back in the dashboard */
-static bool g_game_running;
 
 void dash_save_cfg(void)
 {
@@ -863,6 +870,8 @@ void list_begin(List *l, float x, float y, float w, float h, float row_h)
     l->scroll = &D.scroll[dash_top()];
     l->visible = (int)(h / row_h);
     l->focused = !D.ask;
+    dash_help(NULL, HELP_NOW);  /* a list's rows give this frame's (another screen's went with it) */
+    g_help_under = y + h + 30;  /* its frame (14) and a gap */
     ui_round(x - 14, y - 14, w + 28, h + 28, 14, UI_PANEL);
     ui_round_outline(x - 14, y - 14, w + 28, h + 28, 14, 1.5f, ui_alpha(UI_GREEN, 0.35f));
     ui_clip(x - 12, y - 4, w + 24, h + 8);
@@ -914,17 +923,27 @@ bool list_row(List *l, const char *label, const char *value, int *delta)
     const int i = l->count;
     if (row_common(l, delta, &ry, &sel)) {
         const float ty = ry + (l->row_h - 26) / 2 - 2;
+        /* the label and the value share the row: each its width while
+         * they fit, else the value at least half of it, the label the rest
+         * (#336: a long label cut while a short value left room, a game's
+         * "global (...)" values cut beside short labels) */
+        const bool arrows = delta && sel;
+        const int vfont = arrows ? UI_FONT_BOLD : UI_FONT_REGULAR, lfont = sel ? UI_FONT_BOLD : UI_FONT_REGULAR;
+        const float lw = ui_text_width(label, 26, lfont), lfree = l->w - 24 - lw - (arrows ? 52 : 0) - 40;
+        const float vmax = lfree > l->w * 0.5f ? lfree : l->w * 0.5f;
+        const float vwant = value ? ui_text_width(value, 26, vfont) : 0;
+        const float vroom = value ? (vwant < vmax ? vwant : vmax) + (arrows ? 52 : 0) + 28 : 0;
         ui_text_fit(l->x + 12, ty, label, 26, sel ? UI_FONT_BOLD : UI_FONT_REGULAR, sel ? UI_WHITE : UI_GREY,
-                    UI_ALIGN_LEFT, value ? l->w * 0.55f : l->w - 24);
+                    UI_ALIGN_LEFT, l->w - 24 - vroom);
         if (value) {
             const float vx = l->w - 12;
             UiColor vc = sel ? UI_GREEN_HI : UI_GREEN;
-            if (delta && sel) {
+            if (arrows) {
                 ui_text(l->x + vx, ty, ">", 26, UI_FONT_BOLD, vc, UI_ALIGN_RIGHT);
-                const float vw = ui_text_fit(l->x + vx - 22, ty, value, 26, UI_FONT_BOLD, vc, UI_ALIGN_RIGHT, l->w * 0.4f);
+                const float vw = ui_text_fit(l->x + vx - 22, ty, value, 26, UI_FONT_BOLD, vc, UI_ALIGN_RIGHT, vmax);
                 ui_text(l->x + vx - 30 - vw, ty, "<", 26, UI_FONT_BOLD, vc, UI_ALIGN_RIGHT);
             } else {
-                ui_text_fit(l->x + vx, ty, value, 26, UI_FONT_REGULAR, vc, UI_ALIGN_RIGHT, l->w * 0.42f);
+                ui_text_fit(l->x + vx, ty, value, 26, UI_FONT_REGULAR, vc, UI_ALIGN_RIGHT, vmax);
             }
         }
         /* mouse: a click on a value's arrows changes it */
@@ -1040,7 +1059,147 @@ void list_end(List *l)
     }
 }
 
+/* ------------------------------------------------------------ the help */
+
+/* The selected row's help (dash_help), drawn under the list by
+ * dash_help_draw: plain text on the backdrop, three lines in sight; a
+ * longer one scrolls up through the rest, holds, and comes back (#336:
+ * cut at three lines, the end of the longer ones couldn't be read). */
+static const char *g_help;
+static int g_help_when;
+static uint32_t g_help_seen;    /* the text shown (a hash): a new one from its top */
+static double g_help_t0;
+
+void dash_help(const char *text, int when)
+{
+    g_help = text && text[0] ? text : NULL;
+    g_help_when = when;
+}
+
+float dash_help_top(void)
+{
+    return ui_h() - 156;
+}
+
+float dash_list_h(float y, float row_h)
+{
+    /* the list's frame (list_begin: 14 round it) and a gap over the help */
+    const int rows = (int)((dash_help_top() - 26 - y) / row_h);
+    return (rows < 3 ? 3 : rows) * row_h;
+}
+
+void dash_help_draw(void)
+{
+    const char *s = g_help;
+    const int when = g_help_when;
+    g_help = NULL;
+    if (!s || (D.toast[0] && ui_time() < D.toast_until)) {
+        return;     /* a notice in its place */
+    }
+    /* in a game's menu: when the setting takes effect */
+    const char *note = !g_game_running ? NULL
+                       : when == HELP_NEXT_START ? T(S_NEEDS_RESTART)
+                       : when == HELP_ON_RESUME ? T(S_H_APPLIES_NOW) : NULL;
+    const float W = ui_w(), x = 76, tw = W - 172, fs = 20, lh = 28;
+    const float top = g_help_under < dash_help_top() ? g_help_under : dash_help_top();
+    enum { VIS = 3, MAXL = 16 };
+    static char lines[MAXL][512];
+    const int nt = wrap_lines(s, fs, UI_FONT_REGULAR, tw, lines, MAXL - 2);
+    const int n = nt + (note ? wrap_lines(note, fs, UI_FONT_BOLD, tw, lines + nt, MAXL - nt) : 0);
+    uint32_t h = 2166136261u;
+    for (const char *c = s; *c; c++) {
+        h = (h ^ (unsigned char)*c) * 16777619u;
+    }
+    h = (h ^ (uint32_t)(note != NULL)) * 16777619u;
+    if (h != g_help_seen) {
+        g_help_seen = h;
+        g_help_t0 = ui_time();
+    }
+    /* longer than its place: held at the top, up to its end at a reading
+     * pace, held, faded back to the top */
+    float off = 0, a = 1;
+    const float travel = n > VIS ? (n - VIS) * lh : 0;
+    if (travel > 0) {
+        const double hold = 2.8, speed = 14, fade = 0.35, run = travel / speed;
+        const double t = fmod(ui_time() - g_help_t0, hold + run + hold + 2 * fade);
+        if (t < hold) {
+            off = 0;
+        } else if (t < hold + run) {
+            off = (float)((t - hold) * speed);
+        } else if (t < hold + run + hold) {
+            off = travel;
+        } else if (t < hold + run + hold + fade) {
+            off = travel;
+            a = (float)(1 - (t - hold - run - hold) / fade);
+        } else {
+            a = (float)((t - hold - run - hold - fade) / fade);
+        }
+    }
+    /* a thin green mark beside it: whose the text is */
+    ui_round(60, top + 3, 3, (n < VIS ? n : VIS) * lh - 8, 1.5f, ui_alpha(UI_GREEN, 0.55f));
+    ui_clip(x - 2, top - 2, tw + 8, VIS * lh);
+    for (int i = 0; i < n; i++) {
+        const float y = top + i * lh - off;
+        if (y < top - lh || y > top + VIS * lh) {
+            continue;
+        }
+        const bool is_note = i >= nt;
+        ui_text(x, y, lines[i], fs, is_note ? UI_FONT_BOLD : UI_FONT_REGULAR,
+                ui_alpha(is_note ? UI_GREEN_HI : UI_WHITE, a), UI_ALIGN_LEFT);
+    }
+    ui_unclip();
+    if (travel > 0) {
+        /* where in it the lines in sight are */
+        const float th = VIS * lh - 8, bh = th * VIS / n, by = top + 3 + (th - bh) * off / travel;
+        ui_round(W - 66, top + 3, 3, th, 1.5f, ui_alpha(UI_GREEN, 0.15f));
+        ui_round(W - 66, by, 3, bh, 1.5f, ui_alpha(UI_GREEN_HI, 0.8f));
+    }
+}
+
 /* ------------------------------------------------------------ option rows */
+
+/* each option's help (#336), and when it takes effect in a game's menu */
+static const struct {
+    enum UiStr label, help;
+    int when;
+} k_opt_help[] = {
+    {S_RENDER_SCALE, S_H_SCALE, HELP_NEXT_START}, {S_ASPECT, S_H_ASPECT, HELP_NOW},
+    {S_OVERSCAN, S_H_OVERSCAN, HELP_NOW}, {S_CROP_H, S_H_CROP, HELP_NOW}, {S_CROP_V, S_H_CROP, HELP_NOW},
+    {S_FXAA, S_H_FXAA, HELP_NOW}, {S_ANISO, S_H_ANISO, HELP_NEXT_START}, {S_UPSCALE, S_H_UPSCALE, HELP_NOW},
+    {S_CRT, S_H_CRT, HELP_NOW}, {S_FULLSCREEN, S_H_FULLSCREEN, HELP_NEXT_START},
+    {S_SHOW_FPS, S_H_SHOW_FPS, HELP_NOW}, {S_VSYNC, S_H_VSYNC, HELP_NOW}, {S_FSRATE, S_H_FSRATE, HELP_NEXT_START},
+    {S_MAXFPS, S_H_MAXFPS, HELP_NEXT_START}, {S_AUDIO_OUTPUT, S_H_AUDIO_OUT, HELP_NEXT_START},
+    {S_VOLUME, S_H_VOLUME, HELP_ON_RESUME}, {S_MUTE_BG, S_H_MUTE_BG, HELP_ON_RESUME},
+    {S_UI_SOUNDS, S_H_UI_SOUNDS, HELP_NOW}, {S_CONSOLE_LANG, S_H_CONSOLE_LANG, HELP_NEXT_START},
+    {S_WIDESCREEN, S_H_WIDESCREEN, HELP_NEXT_START}, {S_P480, S_H_VMODE, HELP_NEXT_START},
+    {S_P720, S_H_VMODE, HELP_NEXT_START}, {S_I1080, S_H_VMODE, HELP_NEXT_START},
+    {S_PAL_GAMES, S_H_PAL, HELP_NEXT_START}, {S_RAM_SIZE, S_H_RAM, HELP_NEXT_START},
+    {S_AVPACK, S_H_AVPACK, HELP_NEXT_START}, {S_DISC_SPEED, S_H_DISC, HELP_NEXT_START},
+    {S_SHADERS_MODE, S_H_SHADERS, HELP_NEXT_START}, {S_PREBUILD, S_H_PREBUILD, HELP_NEXT_START},
+    {S_UI_LANG, S_H_UI_LANG, HELP_NOW}, {S_COVERS_ONLINE, S_H_COVERS, HELP_NOW},
+    {S_ANIMATED_BG, S_H_ANIM_BG, HELP_NOW}, {S_TRANSITIONS, S_H_TRANSITIONS, HELP_NOW},
+    {S_UI_43, S_H_UI43, HELP_NOW}, {S_CHECK_UPDATES, S_H_CHECK_UPDATES, HELP_NOW},
+    {S_SHOW_HIDDEN, S_H_SHOW_HIDDEN, HELP_NOW}, {S_CLOCK_12H, S_H_CLOCK12, HELP_NOW},
+    {S_FAV_FIRST, S_H_FAV_FIRST, HELP_NOW}, {S_LAST_FIRST, S_H_LAST_FIRST, HELP_NOW},
+    {S_DEADZONE, S_H_DEADZONE, HELP_ON_RESUME}, {S_INVERT_RSTICK, S_H_INVERT, HELP_ON_RESUME},
+    {S_INVERT_LSTICK, S_H_INVERT, HELP_ON_RESUME}, {S_RUMBLE, S_H_RUMBLE, HELP_ON_RESUME},
+};
+
+/* the option's help when its row is the selected one */
+static void opt_help(const List *l, enum UiStr label)
+{
+    if (!list_selected(l)) {
+        return;
+    }
+    for (size_t i = 0; i < sizeof(k_opt_help) / sizeof(k_opt_help[0]); i++) {
+        if (k_opt_help[i].label == label) {
+            /* a game's volume: its own, over the others' */
+            const enum UiStr h = label == S_VOLUME && D.editing_game ? S_H_GAME_VOLUME : k_opt_help[i].help;
+            dash_help(T(h), k_opt_help[i].when);
+            return;
+        }
+    }
+}
 
 static Config *edited(void)
 {
@@ -1090,6 +1249,7 @@ void opt_choice(List *l, enum UiStr label, const char *key, const char *const *v
     value_text(D.editing_game ? v : (v ? v : def), gv ? gv : def, choice_name, &ctx, text, sizeof(text));
     int delta = 0;
     const bool chosen = list_row(l, T(label), text, &delta);
+    opt_help(l, label);
     if (chosen) {
         delta = 1;
     }
@@ -1138,7 +1298,9 @@ void opt_bool(List *l, enum UiStr label, const char *key, bool def, bool flag_st
     value_text(D.editing_game ? v : (v ? v : def ? "1" : "0"), gv ? gv : def ? "1" : "0", bool_name, NULL, text,
                sizeof(text));
     int delta = 0;
-    if (list_row(l, T(label), text, &delta)) {
+    const bool chosen = list_row(l, T(label), text, &delta);
+    opt_help(l, label);
+    if (chosen) {
         delta = 1;
     } else if (D.in.repeat) {
         /* an on/off row steps once a press: a held direction's repeat went on
@@ -1190,11 +1352,17 @@ void opt_int(List *l, enum UiStr label, const char *key, int lo, int hi, int ste
     value_text(D.editing_game ? v : (v ? v : dv), gv ? gv : dv, int_name, &ctx, text, sizeof(text));
     int delta = 0;
     list_row(l, T(label), text, &delta);
+    opt_help(l, label);
     if (delta) {
-        int x = v ? atoi(v) : gv ? atoi(gv) : def;
+        const int g = gv ? atoi(gv) : def;
+        int x = v ? atoi(v) : g;
         x += delta * step;
         x = x < lo ? lo : x > hi ? hi : x;
-        cfg_set_int(c, key, x);
+        if (D.editing_game && x == g) {
+            cfg_unset(c, key);      /* a game's back at the global value: the global setting again */
+        } else {
+            cfg_set_int(c, key, x);
+        }
     }
 }
 
@@ -1212,7 +1380,9 @@ void opt_videoflag(List *l, enum UiStr label, unsigned bit)
         snprintf(text, sizeof(text), "%s", flags & bit ? T(S_ON) : T(S_OFF));
     }
     int delta = 0;
-    if (list_row(l, T(label), text, &delta)) {
+    const bool chosen = list_row(l, T(label), text, &delta);
+    opt_help(l, label);
+    if (chosen) {
         delta = 1;
     }
     if (delta) {
@@ -2269,23 +2439,78 @@ static void scr_game(void)
     draw_hints(T(S_SELECT), T(S_BACK), NULL, NULL);
 }
 
+static void update_chosen(Dash *d, int choice);
+static bool g_upd_asked;    /* the newer release asked about (update_ask) */
+static bool g_upd_manual;   /* About's check asked for: its answer shown there */
+
+/* a newer release: update now, not now, or no more checks */
+static void update_ask(void)
+{
+    g_upd_asked = true;
+    char msg[256];
+    snprintf(msg, sizeof(msg), T(S_UPDATE_AVAILABLE), upd_version(), XBASED_VERSION);
+    const char *choices[3] = {T(S_UPDATE_NOW), T(S_NOT_NOW), T(S_DONT_ASK)};
+    dash_choose(msg, choices, 3, update_chosen);
+}
+
 static void scr_about(void)
 {
     const float W = ui_w(), H = ui_h();
     draw_header(T(S_ABOUT), NULL);
-    ui_orb(W / 2, H * 0.36f, 60, 0);
+    ui_orb(W / 2, H * 0.30f, 48, 0);
     char v[96];
     snprintf(v, sizeof(v), "%s %s", T(S_VERSION), XBASED_VERSION);
-    ui_text(W / 2, H * 0.52f, "xbased", 54, UI_FONT_BOLD, UI_GREEN_HI, UI_ALIGN_CENTER);
-    ui_text(W / 2, H * 0.62f, v, 22, UI_FONT_REGULAR, UI_WHITE, UI_ALIGN_CENTER);
-    ui_text_fit(W / 2, H * 0.67f, T(S_BASED_ON), 20, UI_FONT_REGULAR, UI_GREY, UI_ALIGN_CENTER, W - 80);
-    ui_text(W / 2, H * 0.715f, "github.com/crazyriddler/xbased", 20, UI_FONT_REGULAR, UI_GREY, UI_ALIGN_CENTER);
-    ui_text(W / 2, H * 0.77f, "Fonts: Play (SIL OFL). Box art: libretro-thumbnails.", 18, UI_FONT_REGULAR, UI_GREY,
-            UI_ALIGN_CENTER);
-    if (D.in.back || D.in.ok) {
+    ui_text(W / 2, H * 0.44f, "xbased", 54, UI_FONT_BOLD, UI_GREEN_HI, UI_ALIGN_CENTER);
+    ui_text(W / 2, H * 0.535f, v, 22, UI_FONT_REGULAR, UI_WHITE, UI_ALIGN_CENTER);
+    ui_text_fit(W / 2, H * 0.585f, T(S_BASED_ON), 20, UI_FONT_REGULAR, UI_GREY, UI_ALIGN_CENTER, W - 80);
+    ui_text(W / 2, H * 0.63f, "github.com/crazyriddler/xbased", 20, UI_FONT_REGULAR, UI_GREY, UI_ALIGN_CENTER);
+    ui_text_fit(W / 2, H * 0.675f, "Fonts: Play (SIL OFL). Box art: libretro-thumbnails.", 18, UI_FONT_REGULAR,
+                UI_GREY, UI_ALIGN_CENTER, W - 80);
+    /* the update check (#336): its button, chosen with A, a click or X;
+     * its answer under it */
+    const UpdState st = upd_state();
+    const bool busy = st == UPD_CHECKING || st == UPD_INSTALLING || st == UPD_INSTALLED;
+    const char *bl = T(S_CHECK_NOW);
+    const float tw = ui_text_width(bl, 24, UI_FONT_BOLD);
+    const float bw = tw + 96 > 340 ? tw + 96 : 340, bh = 52, bx = (W - bw) / 2, by = H * 0.735f;
+    const bool over = D.in.mx >= bx && D.in.mx < bx + bw && D.in.my >= by && D.in.my < by + bh;
+    const float pulse = 0.75f + 0.25f * sinf((float)ui_time() * 4);
+    ui_glow(W / 2, by + bh / 2, bw * 0.6f, ui_alpha(UI_GREEN, (busy ? 0.10f : 0.22f) * pulse));
+    ui_round(bx, by, bw, bh, bh / 2, busy ? (UiColor){0x14, 0x3A, 0x08, 0xFF} : (UiColor){0x3C, 0x9A, 0x12, 0xFF});
+    ui_round_outline(bx, by, bw, bh, bh / 2, 2, ui_alpha(busy ? UI_GREEN_DIM : UI_GREEN_HI, busy ? 1 : pulse));
+    float lx = W / 2;
+    if (st == UPD_CHECKING) {
+        /* working: an orbit turning beside the words */
+        ui_ring(bx + bw / 2 - tw / 2 - 6, by + bh / 2, 10, 4, (float)ui_time() * 4.0f, 2, UI_GREEN_HI);
+        lx += 14;
+    }
+    ui_text(lx, by + 12, bl, 24, UI_FONT_BOLD, busy ? UI_GREY : UI_WHITE, UI_ALIGN_CENTER);
+    if (!busy && (D.in.ok || D.in.x || (over && D.in.click))) {
+        g_upd_manual = true;
+        g_upd_asked = false;
+        upd_check_start(XBASED_VERSION);
+    }
+    char ans[160] = "";
+    UiColor ac = UI_GREY;
+    if (st == UPD_AVAILABLE) {
+        snprintf(ans, sizeof(ans), T(S_UPD_FOUND), upd_version());
+        ac = UI_GREEN_HI;
+        if (g_upd_manual && !g_upd_asked && !D.ask) {
+            update_ask();
+        }
+    } else if (g_upd_manual && st == UPD_CHECKING) {
+        snprintf(ans, sizeof(ans), "%s", T(S_UPD_CHECKING));
+    } else if (g_upd_manual && st == UPD_IDLE) {
+        snprintf(ans, sizeof(ans), "%s", T(upd_version()[0] ? S_UPD_LATEST : S_UPD_NO_ANSWER));
+        ac = upd_version()[0] ? UI_GREEN : UI_GREY;
+    }
+    if (ans[0]) {
+        ui_text_fit(W / 2, by + bh + 16, ans, 20, UI_FONT_REGULAR, ac, UI_ALIGN_CENTER, W - 80);
+    }
+    if (D.in.back) {
         dash_pop();
     }
-    draw_hints(NULL, T(S_BACK), NULL, NULL);
+    draw_hints(T(S_CHECK_NOW), T(S_BACK), NULL, NULL);
 }
 
 /* ------------------------------------------------------------ the question */
@@ -2381,15 +2606,12 @@ static void update_chosen(Dash *d, int choice)
  * its install's progress, and the new version started in this one's place. */
 static void update_poll(void)
 {
-    static bool asked, failed;
+    static bool failed;
     char msg[256];
     switch (upd_state()) {
     case UPD_AVAILABLE:
-        if (!asked && !D.ask && dash_top() == SCR_MAIN) {
-            asked = true;
-            snprintf(msg, sizeof(msg), T(S_UPDATE_AVAILABLE), upd_version(), XBASED_VERSION);
-            const char *choices[3] = {T(S_UPDATE_NOW), T(S_NOT_NOW), T(S_DONT_ASK)};
-            dash_choose(msg, choices, 3, update_chosen);
+        if (!g_upd_asked && !D.ask && dash_top() == SCR_MAIN) {
+            update_ask();
         }
         break;
     case UPD_INSTALLING:
@@ -2883,7 +3105,7 @@ int dash_ingame(SDL_Window *win, const char *key, const char *title, const char 
         } else if (frame) {
             ui_fill(frame, UI_WHITE);
         }
-        ui_rect_grad(0, 0, ui_w(), ui_h(), (UiColor){0, 12, 0, ov ? 150 : 200}, (UiColor){0, 24, 0, ov ? 190 : 225});
+        ui_fill_grad((UiColor){0, 12, 0, ov ? 150 : 200}, (UiColor){0, 24, 0, ov ? 190 : 225});
         ui_glow(ui_w() / 2, ui_h() / 2, ui_h() * 0.8f, ui_alpha(UI_GREEN, 0.10f));
         switch (dash_top()) {
         case SCR_INGAME: scr_ingame(); break;
