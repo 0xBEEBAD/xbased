@@ -1,5 +1,13 @@
 # xbased changelog
 
+## 1.1.14 (2026-11)
+
+### Fixes
+- Forza Motorsport: the sky no longer smears into white streaks in a corner
+  of the screen, since 1.1.0.
+- Fable: the pond's water is smooth again, without the fine bright lines
+  or the grid of squares it showed since 1.1.0.
+
 ## 1.1.13 (2026-11)
 
 ### Fixes

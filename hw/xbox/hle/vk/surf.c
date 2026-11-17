@@ -81,7 +81,11 @@ static bool owner_kind(const HleSurfDesc *d)
  * corner of it, and the shadow on the floor was the map's square. */
 static uint32_t surf_scale(const HleSurfDesc *d)
 {
-    bool small = !d->role && !d->pitch && !d->parent && d->levels <= 1 && d->faces <= 1 &&
+    /* (a mipmapped texture's image over its levels' targets too, pb/pbdraw.c
+     * mips_of_targets: its levels are copies of those targets, at their scale.
+     * Scaled, each of Fable's 128 x 128 ripple map's texels took a 4 x 4 block
+     * of the image, its pond a grid of squares) */
+    bool small = !d->role && !d->pitch && !d->parent && d->faces <= 1 &&
                  MAX(d->w, d->h) <= SURF_UNSCALED_MAX;
     if (small) {
         return 1;

@@ -752,8 +752,9 @@ static void tail(Buf *bp, const HleVshKey *k, bool fogw, bool ff)
     if (!k->wbuf && !k->zfree) {
         put(&b, HLE_ZNORM_GLSL("oPos.z", "zN"));
     }
-    /* A corner whose w is past 2^32 or under 2^-32 (either sign): the rasterizer's
-     * point (x w, y w, z w, w) over its largest component of x, y and w, the
+    /* A corner whose w is held at 2^64 (an infinite one) or under 2^-32 (either
+     * sign): the rasterizer's point (x w, y w, z w, w) over its largest component
+     * of x, y and w, the
      * coverage the same (a positive scale: the homogeneous triangle's w > 0 side)
      * and the GPU's clip in floats well conditioned where w runs from 2^-64 to
      * 2^64 (nxdk_pgraph_tests' W_param: the console fills the external triangles
@@ -763,10 +764,16 @@ static void tail(Buf *bp, const HleVshKey *k, bool fogw, bool ff)
      * ordinary w, or a far corner at w 1 (W_param's rcc pictures), keeps its clip
      * as it was. A program's alone (oPos the screen position as it left it): the
      * fixed-function stage's divide has its own cases still to fit (its w -0 and
-     * infinite screen corners: W_param's ff_w_zero_inf, pgraph/RESULTS.md). */
+     * infinite screen corners: W_param's ff_w_zero_inf, pgraph/RESULTS.md).
+     * Not a large w short of that: Forza's sky dome, w 1e8 .. 1e10 under
+     * W-buffering and behind the eye too, has triangles with corners on both
+     * sides of 2^32. Scaled from 2^32 on, the GPU's perspective weights were off
+     * between the scaled corners and the others, and the sky's texture smeared
+     * into white streaks at the screen's edge; the clip is well conditioned
+     * there as it is. W_param's corners are ordinary, tiny or held at 2^64. */
     put(&b, "  vec4 gp = vec4(ndc * w, %s, w);\n", k->wbuf || k->zfree ? "0.0" : "zN * w");
     put(&b, "  float gsc = 1.0;\n");
-    put(&b, "  if (abs(w) < uintBitsToFloat(0x2F800000u) || abs(w) > uintBitsToFloat(0x4F800000u)) {\n");
+    put(&b, "  if (abs(w) < uintBitsToFloat(0x2F800000u) || abs(w) >= uintBitsToFloat(0x5F800000u)) {\n");
     if (ff) {
         /* (the fixed-function stage's clip-space point, its screen position times w
          * made with no divide: the divide's corner overflows where w is out at its

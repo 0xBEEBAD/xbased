@@ -740,6 +740,20 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
                 "  int t = (c.w * (256 - q.x) + c.z * q.x + 128) >> 8;\n"
                 "  int b = (c.x * (256 - q.x) + c.y * q.x + 128) >> 8;\n"
                 "  return max(float((t * (256 - q.y) + b * q.y + 128) >> 8) / 127.5, -1.0); }\n"
+                /* (the same at level l of a target's mipmapped image: its four texels read at
+                 * their centres through the stage's sampler, its addressing with them) */
+                "vec4 sbilod(uint ti, uint si, vec2 uv, int l) {\n"
+                "  vec2 sz = vec2(textureSize(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[0]), l));\n"
+                "  vec2 p = uv * sz - 0.5, i = floor(p);\n"
+                "  ivec2 q = ivec2(floor((p - i) * 256.0 + 1.0 / 1024.0));\n"
+                "  float lv = float(l);\n"
+                "  vec4 t00 = textureLod(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), (i + vec2(0.5, 0.5)) / sz, lv);\n"
+                "  vec4 t10 = textureLod(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), (i + vec2(1.5, 0.5)) / sz, lv);\n"
+                "  vec4 t01 = textureLod(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), (i + vec2(0.5, 1.5)) / sz, lv);\n"
+                "  vec4 t11 = textureLod(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), (i + vec2(1.5, 1.5)) / sz, lv);\n"
+                "  mat4 c = transpose(mat4(t01, t11, t10, t00));\n"
+                "  return vec4(ibil(sbi(c[0], false), q), ibil(sbi(c[1], false), q), ibil(sbi(c[2], false), q), ibil(sbi(c[3], false), q));\n"
+                "}\n"
                 "vec4 samps(uint s, vec2 uv, vec4 f, bvec4 m, bool pt, bool fl) {\n"
                 "  uint ti = pc.tex[s] & 0xFFFFu, si = (pc.tex[s] >> 16) & 0x1FFu;\n"
                 "%s"
@@ -747,8 +761,24 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
                 "    uv /= vec2(textureSize(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[0]), 0)) /\n"
                 "          ((pc.flags & (256u << s)) != 0u ? float(pc.flags >> 24) : 1.0);\n"
                 "  uv = nvcte2i(pc.tex[s], uv, ti, dFdxCoarse(uv), dFdyCoarse(uv));\n"
-                "  if (pt || textureQueryLevels(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)])) > 1)\n"
+                "  int nl = textureQueryLevels(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]));\n"
+                "  if (pt || (fl && nl > 1))\n"
                 "    return mix(f, fl ? clamp((f * 255.0 - 128.0) / 127.5, -1.0, 1.0) : sgn4(f), m);\n"
+                /* (a target's image with levels, its texture's levels' targets (pb/pbdraw.c
+                 * mips_of_targets): the sampler's own filter blends its bytes unsigned, and
+                 * where a channel crosses 0 (0x7F to 0x80) that is its far end read signed.
+                 * Fable's pond reads its ripple map so, all four channels signed: as the
+                 * sampler's texel, fine bright lines along every crossing. Each level the
+                 * sampler would take, its bytes blended signed, then the two levels by the
+                 * sampler's level of detail) */
+                "  if (nl > 1) {\n"
+                "    float lx = textureQueryLod(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), uv).x;\n"
+                "    int l0 = min(int(floor(lx)), nl - 1);\n"
+                "    float lf = lx - float(l0);\n"
+                "    vec4 v = sbilod(ti, si, uv, l0);\n"
+                "    if (lf > 0.0 && l0 + 1 < nl) v = mix(v, sbilod(ti, si, uv, l0 + 1), lf);\n"
+                "    return mix(f, v, m);\n"
+                "  }\n"
                 "  vec2 w = fract(uv * vec2(textureSize(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[0]), 0)) - 0.5);\n"
                 /* (a weight on a whole 256th is that one: the interpolation here lands a hair
                  * under it, nxdk_pgraph_tests' Bump_env_lum's columns at 32, 96 and 224 256ths;
@@ -1096,12 +1126,12 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
                  * interpolation here gave 127; WallQuad's s at 119.999997 is 120). */
                 "vec3 nvUV[4] = vec3[4](vec3(0.0), vec3(0.0), vec3(0.0), vec3(0.0));\n"
                 "float nvFogPix = 0.0; bool nvFogOk = false;\n"
-                /* (a corner whose w is past 2^32 or under 2^-32: the vertex stage scaled
+                /* (a corner whose w is held at 2^64 or under 2^-32: the vertex stage scaled
                  * its clip-space point, vsh.c tail, and the GPU's perspective weights
                  * are not the corners' there, so every 2D stage takes its coordinate
                  * from the corners, not only the point-sampled ones) */
                 "#define NVWX (any(lessThan(abs(vec3(vScrV[0].z, vScrV[1].z, vScrV[2].z)), vec3(uintBitsToFloat(0x2F800000u)))) || "
-                "any(greaterThan(abs(vec3(vScrV[0].z, vScrV[1].z, vScrV[2].z)), vec3(uintBitsToFloat(0x4F800000u)))))\n"
+                "any(greaterThanEqual(abs(vec3(vScrV[0].z, vScrV[1].z, vScrV[2].z)), vec3(uintBitsToFloat(0x5F800000u)))))\n"
                 "#define NVTIEP_NEED(s) (((pc.flags & (16u << s)) != 0u || NVWX) && (pc.flags & (256u << s)) == 0u && (pc.tex[s] & 0xFFFFu) != 0u && NVTIE_2D(s))\n"
                 "#define NVSQ1(P, c) (double(P[0].c) * double(P[1].w) == double(P[1].c) * double(P[0].w) && "
                 "double(P[0].c) * double(P[2].w) == double(P[2].c) * double(P[0].w))\n"
