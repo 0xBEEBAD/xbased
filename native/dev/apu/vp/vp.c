@@ -2847,6 +2847,23 @@ static void voice_work_finalize(MCPXAPUState *d)
     vwd->workers = NULL;
 }
 
+/* Voice v on one of the SE's lists now (their links as the guest's methods
+ * left them) */
+static bool voice_listed(MCPXAPUState *d, uint16_t v)
+{
+    for (int l = 0; l < 3; l++) {
+        uint32_t h = d->regs[voice_list_regs[l].top];
+        for (int s = 0; s < MCPX_HW_MAX_VOICES && h < MCPX_HW_MAX_VOICES; s++) {
+            if (h == v) {
+                return true;
+            }
+            h = voice_get_mask(d, h, NV_PAVS_VOICE_TAR_PITCH_LINK,
+                               NV_PAVS_VOICE_TAR_PITCH_LINK_NEXT_VOICE_HANDLE);
+        }
+    }
+    return false;
+}
+
 /* The SE reports the idle voices on its lists to the FE, one trap at a time:
  * on the hardware a pass reports each of them, in list order, and the guest
  * releases those it wants gone. Here a frame reports one, the next after the
@@ -2874,6 +2891,21 @@ static void idle_report(MCPXAPUState *d, const uint16_t *idle, unsigned n)
      * the guest's methods run on its CPU meanwhile); only tried: the walk
      * holds the voice locks of its batch, which a guest write may be waiting
      * on (a voice not reported now is in a later frame: it stays listed) */
+    /* (and only a voice still on a list and still idle: the walk read the
+     * lists earlier in the frame, and the guest's methods may have taken one
+     * off since, under this lock now. The hardware reports the voices it finds
+     * there. DirectSound's handler of a voice it has already released reads
+     * its voice from a slot now empty: TOCA Race Driver 3 died mid race, a
+     * read of 0x64 at 002ABCD3, #344) */
+    for (unsigned t = 0; t < n && (!voice_listed(d, idle[k]) ||
+                                   voice_get_mask(d, idle[k], NV_PAVS_VOICE_PAR_STATE,
+                                                  NV_PAVS_VOICE_PAR_STATE_ACTIVE_VOICE)); t++) {
+        k = k + 1 < n ? k + 1 : 0;
+        if (t + 1 == n) {
+            apu_spin_unlock(&d->vp.fe_spin);
+            return;
+        }
+    }
     if ((d->regs[NV_PAPU_FECTL] & NV_PAPU_FECTL_FEMETHMODE) != NV_PAPU_FECTL_FEMETHMODE_TRAPPED) {
         fe_method(d, SE2FE_IDLE_VOICE, idle[k]);
         off_notify_now(d, idle[k]);     /* its VOICE_OFF's, with the trap (voice_off) */

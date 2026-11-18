@@ -1,5 +1,13 @@
 # xbased changelog
 
+## 1.1.15 (2026-11)
+
+### Fixes
+- TOCA Race Driver 3 (and other games with DirectSound): no more random
+  crashes to the menu in the middle of a race. A sound that had just
+  finished could be reported to the game once more after it had let go of
+  it.
+
 ## 1.1.14 (2026-11)
 
 ### Fixes
