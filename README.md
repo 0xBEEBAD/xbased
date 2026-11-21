@@ -9,6 +9,12 @@
 </p>
 
 <p align="center">
+  <b>New:</b> the official website, <a href="https://xbased-emu.com"><b>xbased-emu.com</b></a>, with the downloads, the
+  compatibility list and your own game reports (<a href="https://github.com/crazyriddler/xbased/issues/369">announcement</a>).
+</p>
+
+<p align="center">
+  <a href="https://xbased-emu.com"><img src="https://img.shields.io/badge/website-xbased--emu.com-6fd12a?style=for-the-badge&labelColor=0b1a06" alt="Website"></a>
   <a href="https://github.com/crazyriddler/xbased/releases/latest"><img src="https://img.shields.io/github/v/release/crazyriddler/xbased?style=for-the-badge&color=6fd12a&labelColor=0b1a06&label=download" alt="Download"></a>
   <img src="https://img.shields.io/badge/Windows-x64-6fd12a?style=for-the-badge&labelColor=0b1a06&logo=windows&logoColor=white" alt="Windows x64">
   <img src="https://img.shields.io/badge/Linux-AppImage-6fd12a?style=for-the-badge&labelColor=0b1a06&logo=linux&logoColor=white" alt="Linux AppImage">
