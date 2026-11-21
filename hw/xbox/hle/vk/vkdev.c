@@ -674,12 +674,16 @@ int hle_vk_init(void)
         .pipelineCreationCacheControl = c->cache_control,
         /* SPIR-V 1.6: glslang makes a discard a demote */
         .shaderDemoteToHelperInvocation = q13.shaderDemoteToHelperInvocation };
+    /* the descriptor indexing parts only for the bindless set, as below 1.3
+     * (f_di): a 1.3 driver without them refused the device otherwise
+     * (VK_ERROR_FEATURE_NOT_PRESENT), and the draws' own sets need none of
+     * them (Mesa's hasvk on Broadwell's HD 5500, #378) */
     VkPhysicalDeviceVulkan12Features f12 = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, .pNext = &f13,
         .timelineSemaphore = VK_TRUE, .bufferDeviceAddress = c->bda,
-        .runtimeDescriptorArray = VK_TRUE, .descriptorBindingPartiallyBound = VK_TRUE,
-        .descriptorBindingSampledImageUpdateAfterBind = VK_TRUE,
-        .shaderSampledImageArrayNonUniformIndexing = VK_TRUE,
+        .runtimeDescriptorArray = c->bindless, .descriptorBindingPartiallyBound = c->bindless,
+        .descriptorBindingSampledImageUpdateAfterBind = c->bindless,
+        .shaderSampledImageArrayNonUniformIndexing = c->bindless,
         .hostQueryReset = c->host_query_reset };
     VkPhysicalDeviceFeatures2 f = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = v13 ? &f12 : NULL };

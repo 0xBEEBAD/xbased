@@ -1,5 +1,18 @@
 # xbased changelog
 
+## 1.2.3 (2026-11)
+
+### Fixes
+- Pirates: The Legend of Black Kat: the sea shows its reflections again,
+  without the white edges and the colour that changed as the camera moved.
+  The NV2A's offset textures (bump environment maps) read the coordinates
+  as they come, without dividing them by q, and xbased divided them.
+- Graphics cards whose Vulkan 1.3 driver lacks descriptor indexing (Intel
+  HD Graphics 5500 on Linux's Mesa hasvk) can start games (#378): xbased
+  asked for it even where it draws without it. When a game can't start for
+  the graphics driver, it now stops while the message shows, instead of
+  playing on with its sound.
+
 ## 1.2.2 (2026-11)
 
 ### New

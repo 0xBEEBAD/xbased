@@ -2367,6 +2367,8 @@ int main(int argc, char *argv[])
          * window, the reason only in the log */
         if (!told && nc_hle_fatal_kind() == NC_FATAL_DRIVER) {
             told = true;
+            pause_core(true);           /* (its sound went on under the box, #378) */
+            nc_audio_set_paused(true);
             fatal_box("xbased", nc_hle_fatal());
             break;
         }

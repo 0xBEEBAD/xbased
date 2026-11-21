@@ -776,7 +776,8 @@ static const char k_fs_main[] =
     "      vec2 bi = mi == 12u ? ti.bg : sgn8(tri.bg);\n"
     "      uvec2 mt = s == 1u ? pc.bump.xy : s == 2u ? pc.bump.zw : pc.bump3;\n"
     "      vec2 d = mat2(unpackHalf2x16(mt.x), unpackHalf2x16(mt.y)) * bi;\n"
-    "      t = vol ? samp3(s, vec3(nvproj(tc).xy + d, tc.z)) : samp(s, nvproj(tc).xy + d);\n"
+    /* ((s, t) not divided by q: psh.c's offset texture) */
+    "      t = vol ? samp3(s, vec3(tc.xy + d, tc.z)) : samp(s, tc.xy + d);\n"
     "      if (m == 7u) {\n"
     "        vec2 l = unpackHalf2x16(pc.bumpl[s - 1u]);\n"
     "        t.rgb *= clamp(l.x * tri.r + l.y, 0.0, 1.0);\n"

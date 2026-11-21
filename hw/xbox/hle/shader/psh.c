@@ -656,12 +656,20 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             put(&b, "  vec4 t%u;\n"
                     "  { vec2 d = mat2(unpackHalf2x16(%s), unpackHalf2x16(%s)) * "
                     "%s;\n", s, mat[s][0], mat[s][1], bump_in(k, in, tn));
+            /* (s, t) as they come, not divided by q: the NV2A's offset texture
+             * isn't projective (NV_texture_shader's OFFSET_TEXTURE_2D, whose
+             * projective form only NV_texture_shader3 added; xemu the same).
+             * Pirates: The Legend of Black Kat's sea reads its 256 x 256
+             * reflection at screen coordinates with q = 1/w: divided, they
+             * were the screen's times w, past the texture's edge, and the sea
+             * showed its white border colour and the edge's texels, changing
+             * as the camera moved */
             if ((k->vol >> s) & 1) {            /* a volume: r passes through (Conker's
                                                  * electricity, animated along r) */
-                put(&b, "    t%u = samp3(%uu, vec3(nvproj(vTex%u).xy + d, vTex%u.z));\n",
+                put(&b, "    t%u = samp3(%uu, vec3(vTex%u.xy + d, vTex%u.z));\n",
                     s, s, s, s);
             } else {
-                put(&b, "    t%u = samp(%uu, nvproj(vTex%u).xy + d);\n", s, s, s);
+                put(&b, "    t%u = samp(%uu, vTex%u.xy + d);\n", s, s, s);
             }
             if (m == HLE_PST_BUMPENVMAP_LUM) {
                 put(&b, "    vec2 l = unpackHalf2x16(pc.bumpl[%u]);\n"
