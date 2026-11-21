@@ -269,45 +269,6 @@ static void cache_rows(List *l)
     }
 }
 
-/* The GPU precision (precision=, hw/xbox/hle/vk/precision.h): automatic,
- * exact or fast; selected, its help with the last game's verdict (the
- * HLE's last_precision.txt beside the hard disk). */
-static void precision_row(List *l, bool game)
-{
-    static const char *const pv[] = {"auto", "exact", "fast"};
-    const char *pn[] = {T(S_PREC_AUTO), T(S_PREC_EXACT), T(S_PREC_FAST)};
-    opt_choice(l, S_PRECISION, "precision", pv, pn, 3, "auto");
-    if (!list_selected(l)) {
-        return;
-    }
-    (void)game;
-    static char help[1400];
-    const char *hdd = cfg_get(&D.global, "hdd");
-    char path[1200], verdict[16] = "", why[400] = "";
-    if (hdd && hdd[0]) {
-        snprintf(path, sizeof(path), "%s/../hle/last_precision.txt", hdd);
-    } else {
-        snprintf(path, sizeof(path), "%shdd/../hle/last_precision.txt", cfg_data_dir());
-    }
-    FILE *f = fopen(path, "r");
-    if (f) {
-        if (fgets(verdict, sizeof(verdict), f) && fgets(why, sizeof(why), f)) {
-            verdict[strcspn(verdict, "\r\n")] = 0;
-            why[strcspn(why, "\r\n")] = 0;
-        } else {
-            verdict[0] = 0;
-        }
-        fclose(f);
-    }
-    if (verdict[0]) {
-        snprintf(help, sizeof(help), "%s %s %s (%s).", T(S_PREC_HELP), T(S_PREC_LAST),
-                 T(strcmp(verdict, "fast") ? S_PREC_EXACT : S_PREC_FAST), why);
-    } else {
-        snprintf(help, sizeof(help), "%s", T(S_PREC_HELP));
-    }
-    dash_help(help, HELP_NEXT_START);
-}
-
 void scr_settings(void)
 {
     const float W = ui_w(), H = ui_h();
@@ -334,9 +295,10 @@ void scr_settings(void)
             static const char *const fv[] = {"desktop", "60"};
             const char *fn[] = {T(S_FSRATE_DESKTOP), T(S_FSRATE_60)};
             opt_choice(&l, S_FSRATE, "fsrate", fv, fn, 2, "desktop");
-            static const char *const mv[] = {"refresh", "60", "120", "144", "240", "0"};
-            const char *mn[] = {T(S_MAXFPS_REFRESH), "60 fps", "120 fps", "144 fps", "240 fps", T(S_MAXFPS_NONE)};
-            opt_choice(&l, S_MAXFPS, "maxfps", mv, mn, 6, "refresh");
+            static const char *const mv[] = {"refresh", "60", "90", "120", "144", "240", "0"};
+            const char *mn[] = {T(S_MAXFPS_REFRESH), "60 fps", "90 fps", "120 fps", "144 fps", "240 fps",
+                                T(S_MAXFPS_NONE)};
+            opt_choice(&l, S_MAXFPS, "maxfps", mv, mn, 7, "refresh");
         }
         break;
     case 1: {
@@ -378,7 +340,6 @@ void scr_settings(void)
             opt_choice(&l, S_SHADERS_MODE, "shaders", sv, sn, 3, "hybrid");
         }
         opt_bool(&l, S_PREBUILD, "prebuild", true, false);
-        precision_row(&l, false);
         cache_rows(&l);
         break;
     }
@@ -513,6 +474,22 @@ void scr_settings(void)
             }
         }
         opt_bool(&l, S_RUMBLE, "rumble", true, false);
+        {
+            /* the face buttons as the controller prints them: a Nintendo
+             * layout's A on the right (#337) */
+            static const char *const fv[] = {"xbox", "nintendo"};
+            const char *fn[] = {T(S_FACE_XBOX), T(S_FACE_NINTENDO)};
+            opt_choice(&l, S_FACE_LAYOUT, "pad.face", fv, fn, 2, "xbox");
+        }
+        {
+            /* player 1's mouse moving a stick (#255) and how fast */
+            static const char *const mv[] = {"off", "right", "left"};
+            const char *mn[] = {T(S_OFF), T(S_IN_RSTICK), T(S_IN_LSTICK)};
+            opt_choice(&l, S_MOUSE_STICK, "mouse.stick", mv, mn, 3, "off");
+            opt_int(&l, S_MOUSE_SENS, "mouse.sens", 10, 400, 10, 100, "%");
+            /* the Communicator in player 1's controller (#254: voice=, the core's) */
+            opt_bool(&l, S_COMMUNICATOR, "voice", false, false);
+        }
         break;
     case 5:
         /* the keyboard's (a key, Ctrl/Alt/Shift with it if held), then the
@@ -610,9 +587,10 @@ void scr_game_settings(void)
     opt_bool(&l, S_VSYNC, "vsync", true, false);
     {
         /* the limit when this game's frame rate is unlocked (Mods & patches) */
-        static const char *const mv[] = {"refresh", "60", "120", "144", "240", "0"};
-        const char *mn[] = {T(S_MAXFPS_REFRESH), "60 fps", "120 fps", "144 fps", "240 fps", T(S_MAXFPS_NONE)};
-        opt_choice(&l, S_MAXFPS, "maxfps", mv, mn, 6, "refresh");
+        static const char *const mv[] = {"refresh", "60", "90", "120", "144", "240", "0"};
+        const char *mn[] = {T(S_MAXFPS_REFRESH), "60 fps", "90 fps", "120 fps", "144 fps", "240 fps",
+                            T(S_MAXFPS_NONE)};
+        opt_choice(&l, S_MAXFPS, "maxfps", mv, mn, 7, "refresh");
     }
     /* the sound: a game mixed louder or quieter than the others has its own
      * volume (#336) */
@@ -642,7 +620,6 @@ void scr_game_settings(void)
         const char *sn[] = {T(S_SHADERS_HYBRID), T(S_SHADERS_ASYNC), T(S_SHADERS_SYNC)};
         opt_choice(&l, S_SHADERS_MODE, "shaders", sv, sn, 3, "hybrid");
     }
-    precision_row(&l, true);
     cache_rows(&l);
     if (list_row(&l, T(S_RESET_GAME), NULL, NULL)) {
         dash_ask(T(S_RESET_GAME), reset_game);
@@ -670,7 +647,7 @@ static ModItem g_mods[96];
 static int g_nmods;
 static char g_mods_key[24];
 
-/* The Xbox scene's cheat files for the title (cheats/<TITLE ID>/*.etm,
+/* The Xbox scene's cheat files for the title (cheats/<TITLE ID>/<name>.etm,
  * .xbtf: core/xcheat.h), an entry an option, kept in the game's settings
  * as xcheat=cheats/<TITLE ID>/<file>|<its options' states, 1 on>. */
 typedef struct {
@@ -985,9 +962,12 @@ void scr_mods(void)
     (void)H;
     const ModItem *shown = NULL;
     /* the frame rate, this game's choice: the console's pace (Original), or
-     * lifted ("uncap") up to 60 or 120 frames a second ("fpscap") or
-     * without a limit; a game that breaks lifted (native/dev/nv2a.c's list)
-     * shows it locked at Original, and why */
+     * lifted ("uncap") up to 30, 60 or 120 frames a second ("fpscap") or
+     * without a limit (the global one); a game that breaks lifted
+     * (native/dev/nv2a.c's list) shows it locked at Original, and why. Up
+     * to 30 (#351): a game that swaps without waiting for a vblank (D3D's
+     * IMMEDIATE presents) was made for a console that drew it at 30 or so,
+     * and some run too fast at 60 */
     const char *help = NULL;
     /* online mode (#278): the game as the console runs it, the frame rate,
      * patches, mods and cheats left as they are but not used */
@@ -1016,11 +996,11 @@ void scr_mods(void)
             help = T(S_FR_LOCKED_HELP);
         }
     } else {
-        static const enum UiStr k_names[4] = { S_FR_CAPPED, S_FR_60, S_FR_120, S_FR_UNCAPPED };
-        static const char *const k_caps[4] = { NULL, "60", "120", NULL };
+        static const enum UiStr k_names[5] = { S_FR_CAPPED, S_FR_30, S_FR_60, S_FR_120, S_FR_UNCAPPED };
+        static const char *const k_caps[5] = { NULL, "30", "60", "120", NULL };
         const char *cap = cfg_get(&D.game, "fpscap");
         const int cur = !cfg_bool(&D.game, "uncap", false) ? 0
-                        : cap && atoi(cap) == 60 ? 1 : cap && atoi(cap) == 120 ? 2 : 3;
+                        : cap && atoi(cap) == 30 ? 1 : cap && atoi(cap) == 60 ? 2 : cap && atoi(cap) == 120 ? 3 : 4;
         int delta = 0;
         if (list_row(&l, T(S_FRAMERATE), T(k_names[cur]), &delta)) {
             delta = 1;
@@ -1028,7 +1008,7 @@ void scr_mods(void)
             delta = 0;                      /* a step a press */
         }
         if (delta) {
-            const int to = (cur + (delta > 0 ? 1 : 3)) % 4;
+            const int to = (cur + (delta > 0 ? 1 : 4)) % 5;
             if (to == 0) {
                 cfg_unset(&D.game, "uncap");
             } else {
@@ -1279,6 +1259,16 @@ void scr_controls(void)
             dash_push(SCR_STICKS);
         }
         invert_rows(&l);
+        {
+            /* player 1's mouse moving a stick (#255) and how fast */
+            static const char *const mv[] = {"off", "right", "left"};
+            const char *mn[] = {T(S_OFF), T(S_IN_RSTICK), T(S_IN_LSTICK)};
+            opt_choice(&l, S_MOUSE_STICK, "mouse.stick", mv, mn, 3, "off");
+            opt_int(&l, S_MOUSE_SENS, "mouse.sens", 10, 400, 10, 100, "%");
+            /* the Communicator in player 1's controller (#254: voice=, the core's) */
+            opt_bool(&l, S_COMMUNICATOR, "voice", false, false);
+        }
+
         const Config *tc = cfg_get(&D.game, "trigger.deadzone") ? &D.game : &D.global;
         const Config *fc = cfg_get(&D.game, "trigger.full") ? &D.game : &D.global;
         const bool town = cfg_get(&D.game, "trigger.deadzone") || cfg_get(&D.game, "trigger.full");
@@ -1686,6 +1676,10 @@ void scr_remap(void)
         done = true;
     } else if (!hotkey && D.in.pad_button >= 0) {
         im_bind_button(c, D.player, D.remap_target, D.in.pad_button);
+        done = true;
+    } else if (!hotkey && D.in.mouse_button >= SDL_BUTTON_LEFT && D.in.mouse_button <= SDL_BUTTON_X2) {
+        /* a mouse button, in the key's place (#255) */
+        im_bind_key(c, D.player, D.remap_target, (SDL_Keycode)(IM_KEY_MOUSE | (unsigned)D.in.mouse_button));
         done = true;
     } else if (!hotkey && D.in.pad_axis) {
         im_bind_axis(c, D.player, D.remap_target, D.in.pad_axis);

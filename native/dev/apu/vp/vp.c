@@ -1428,8 +1428,6 @@ static int voice_get_samples(MCPXAPUState *d, uint8_t *c, uint32_t v,
     int count = 0;
     int seg_len = 0;
     int seg_cs = 0;
-    int seg_spb = 0;
-    int seg_s = 0;
     uint64_t segment_offset = 0;
     uint32_t segment_length = 0;
     size_t block_size;
@@ -1509,11 +1507,7 @@ static int voice_get_samples(MCPXAPUState *d, uint8_t *c, uint32_t v,
         assert(segment_length != 0);
         seg_len = (segment_length >> 0) & 0xffff;
         seg_cs = (segment_length >> 16) & 3;
-        seg_spb = (segment_length >> 18) & 0x1f;
-        seg_s = (segment_length >> 23) & 1;
         assert(seg_cs == container_size_index);
-        assert((seg_spb + 1) == samples_per_block);
-        assert(seg_s == stereo);
         container_size_index = seg_cs;
         if (seg_cs == NV_PAVS_VOICE_CFG_FMT_CONTAINER_SIZE_ADPCM) {
             sample_size = NV_PAVS_VOICE_CFG_FMT_SAMPLE_SIZE_S24;
@@ -1529,8 +1523,6 @@ static int voice_get_samples(MCPXAPUState *d, uint8_t *c, uint32_t v,
         DPRINTF("Segment length: %x\n", segment_length);
         DPRINTF("...len = 0x%x\n", seg_len);
         DPRINTF("...cs  = %d (%s)\n", seg_cs, container_size_str[seg_cs]);
-        DPRINTF("...spb = %d\n", seg_spb);
-        DPRINTF("...s   = %d (%s)\n", seg_s, seg_s ? "stereo" : "mono");
     } else {
         DPRINTF("**** BUFFER (%d) ****\n", v);
     }

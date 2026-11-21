@@ -60,6 +60,9 @@ const char *hle_present_remote_why(void);
  * events since *at (HleShareMouse each, n at most) */
 void hle_present_remote_size(uint32_t *w, uint32_t *h);
 void hle_present_remote_cursor(bool shown);
+/* the run holds the mouse (the frame hides it, keeps it in the window and
+ * sends its moves raw), or lets it go */
+void hle_present_remote_grab(bool on);
 uint32_t hle_present_remote_mouse(void *out, uint32_t n, int64_t *at);
 /* The picture's pass cut to its middle cx by cy (clip space half sizes, 1:
  * the whole window): the frame grown past its place shows no more of it. */

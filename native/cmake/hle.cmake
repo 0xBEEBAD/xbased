@@ -61,18 +61,13 @@ add_library(xbased_hle STATIC
   ${NC_HLE}/pb/pusher.c
   ${NC_HLE}/pb/vimm.c
   ${NC_HLE}/pb/kvfmt.c
-  ${NC_HLE}/pb/kvdma.c
   ${NC_HLE}/shader/ff_gen.c
   ${NC_HLE}/shader/ffhw.c
   ${NC_HLE}/shader/glsl_compile.c
   ${NC_HLE}/shader/psh.c
   ${NC_HLE}/shader/uber.c
   ${NC_HLE}/shader/vsh.c
-  ${NC_HLE}/shader/xfcpu.c
-  ${NC_HLE}/fixes/fixes.c
-  ${NC_HLE}/fixes/fixes_rt.c
   ${NC_HLE}/tex/xdk_res.c
-  ${NC_HLE}/tex/zpack.c
   ${NC_HLE}/tex/xg_swizzle.c
   ${NC_HLE}/uma/uma.c
   ${NC_HLE}/util/thread.c
@@ -82,9 +77,9 @@ add_library(xbased_hle STATIC
   ${NC_HLE}/vk/batch.c
   ${NC_HLE}/vk/compat.c
   ${NC_HLE}/vk/draw.c
+  ${NC_HLE}/vk/drvcrash.c
   ${NC_HLE}/vk/gpl.c
   ${NC_HLE}/vk/quirks.c
-  ${NC_HLE}/vk/precision.c
   ${NC_HLE}/vk/retire.c
   ${NC_HLE}/vk/gamma.c
   ${NC_HLE}/vk/guest_ram.c

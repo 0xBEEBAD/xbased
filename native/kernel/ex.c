@@ -1339,6 +1339,30 @@ void nc_kernel_set_hd_key(NcKernel *k)
     if (vm) {
         nc_vm_wr32(k->vm, vm, av_pack_smc());
     }
+    /* The hard disk's model and serial number (STRINGs, as its IDENTIFY
+     * data has them: 40 and 20 characters, blank-padded), the serial made
+     * from the console's so it stays the same on every run. Left empty,
+     * their buffer was 0: Xbox Music Mixer copies the serial's 20 bytes as
+     * it starts and faulted at address 0. */
+    static const struct { const char *name; unsigned len; } k_disk[2] = {
+        {"HalDiskModelNumber", 40}, {"HalDiskSerialNumber", 20}};
+    for (unsigned i = 0; i < 2; i++) {
+        const uint32_t s = data_va(k, k_disk[i].name);
+        if (!s) {
+            continue;
+        }
+        char text[48];
+        if (i == 0) {
+            snprintf(text, sizeof(text), "%-40s", "XBASED HDD");
+        } else {
+            snprintf(text, sizeof(text), "XB%.12s      ", (const char *)eeprom(k) + 0x34);
+        }
+        uint8_t *p = nc_vm_host(k->vm, s);
+        nc_wr16(p, (uint16_t)k_disk[i].len);
+        nc_wr16(p + 2, (uint16_t)k_disk[i].len);
+        nc_wr32(p + 4, s + 8);
+        memcpy(p + 8, text, k_disk[i].len);
+    }
 }
 
 void nc_ex_register(NcKernel *k)

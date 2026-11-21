@@ -47,6 +47,7 @@
 #include <sys/wait.h>
 #endif
 #include "native/app/win_auto.h"
+#include "native/app/win_devctl.h"
 #include "native/app/win_mods.h"
 #include "native/core/cheats.h"
 #include "native/core/core.h"
@@ -333,6 +334,9 @@ static void give_foreground(bool to_dash)
  * A code with bit 30 is a run started again (run_again): no dashboard. */
 static void *g_frame;   /* the session's frame (win_frame.h), NULL: the run's window on its own */
 static bool g_frame_hidden;     /* the run's window out of sight in it: the frame presents the pictures */
+static bool g_mgrab;            /* the mouse held for a game's stick (mouse_hold) */
+static uint32_t g_mbuttons;     /* ... its buttons down (SDL_BUTTON_MASK) */
+static SDL_Window *g_mgrab_win;
 static bool g_frame_keep;   /* this run ends for another (run_again): the frame stays */
 
 static _Noreturn void exit_now(int code)
@@ -613,7 +617,7 @@ static bool pad_in_shortcut(SDL_Gamepad *pad)
     }
     if (pad == g_back_pad) {
         if (SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_BACK) ||
-            SDL_GetGamepadButton(pad, (SDL_GamepadButton)g_back_btn)) {
+            SDL_GetGamepadButton(pad, (SDL_GamepadButton)im_face(g_back_btn))) {
             return true;
         }
         g_back_pad = NULL;
@@ -647,7 +651,9 @@ static void update_pads(bool focused)
         /* the keyboard: player 1 on auto, any player set to it */
         const bool kb = focused && (g_map.device[i] == -1 || (i == 0 && g_map.device[i] == 0));
         ImPad m;
-        im_read(&g_map, (int)i, kb ? keys : NULL, pad_in_shortcut(pad) ? NULL : pad, &m);
+        im_mouse_buttons(g_mbuttons, g_mgrab);
+        im_read_mouse(&g_map, (int)i, kb ? keys : NULL, pad_in_shortcut(pad) ? NULL : pad, kb && i == 0 && g_mgrab,
+                      &m);
         s.buttons = m.buttons;
         memcpy(s.analog, m.analog, sizeof(s.analog));
         s.lx = m.lx;
@@ -889,6 +895,41 @@ static bool frame_pointer(float *x, float *y)
     return true;
 }
 
+/* The mouse held for a game's stick (#255, mouse.stick): a click in the
+ * window takes it (the click isn't the game's), Esc, the in-game menu or
+ * another window in front let it go. Held, the pointer is hidden and kept
+ * in the window and its moves are raw: the frame's (hle_present_remote_grab,
+ * its moves as type 5 events) or, a window of its own, SDL's relative mode.
+ * The moves and buttons go to player 1's pad (im_read_mouse). */
+static void mouse_hold(bool on)
+{
+    if (on == g_mgrab) {
+        return;
+    }
+    g_mgrab = on;
+    g_mbuttons = 0;
+    im_mouse_buttons(0, on);
+    if (g_frame && g_frame_hidden && hle_present_remote()) {
+        hle_present_remote_grab(on);
+    } else if (g_mgrab_win) {
+        SDL_SetWindowRelativeMouseMode(g_mgrab_win, on);
+    }
+    nc_log("xbased-app", "mouse %s", on ? "held for the game's stick (Esc lets it go)" : "let go");
+}
+
+#ifdef XBASED_DEVCTL
+/* (dev control) the mouse as held, without the real one taken (win_devctl.h) */
+void nc_win_dev_mouse(float dx, float dy, uint32_t buttons, int held)
+{
+    if (held >= 0) {
+        g_mgrab = held != 0;
+        im_mouse_buttons(0, g_mgrab);
+    }
+    g_mbuttons = g_mgrab ? buttons : 0;
+    im_mouse_move(dx, dy);
+}
+#endif
+
 /* The frame's mouse, as this window's events (the in-game menu's and the
  * game's pointer), and whether the pointer is wanted told back. From the
  * main loop and the in-game menu's (dash_set_pump_hook): the menu's loop
@@ -907,6 +948,12 @@ static void frame_mouse_pump(void)
     for (uint32_t k = 0; k < n; k++) {
         SDL_Event e;
         SDL_zero(e);
+        if (ms[k].type == 5) {
+            if (g_mgrab) {
+                im_mouse_move((float)ms[k].x, (float)ms[k].y);     /* a held mouse's raw move */
+            }
+            continue;
+        }
         if (ms[k].type == 1) {
             e.type = SDL_EVENT_MOUSE_MOTION;
             e.motion.windowID = SDL_GetWindowID(g_pump_win);
@@ -941,6 +988,9 @@ static float g_play_moved;
 
 static void play_pointer(float moved)
 {
+    if (g_mgrab) {
+        return;         /* the mouse held for the game: no pointer */
+    }
     g_play_moved += moved;
     if (g_play_moved < 2) {
         return;
@@ -1244,6 +1294,7 @@ static void ingame_menu(SDL_Window *win, bool *paused, bool minimized)
     }
     nc_kernel_set_paused(&g_core.kernel, true);
     nc_audio_set_paused(true);
+    mouse_hold(false);      /* the menu's pointer */
     int slot = 0;
     const char *title = strrchr(g_disc, '\\');
     if (ov_ok()) {
@@ -1577,7 +1628,7 @@ static const char k_usage[] =
     "  scale=N              internal resolution (1 to 8)\n"
     "  aspect=auto|4:3|16:9|stretch\n"
     "  upscale=bilinear|fsr, fxaa=0|1, crt=N\n"
-    "  shaders=hybrid|async|sync, precision=auto|exact|fast\n"
+    "  shaders=hybrid|async|sync\n"
     "  uncap, fpscap=N      the frame rate lifted, up to N a second\n"
     "  online               online mode: the console's frame rate and speed, no mods or cheats\n"
     "  lang=N               the console's language (1 English ... 9 Portuguese)\n"
@@ -2073,6 +2124,9 @@ int main(int argc, char *argv[])
     }
     nc_vsync_start();
     nc_auto_init(g_data_dir, save_state, load_state);
+#ifdef XBASED_DEVCTL
+    nc_devctl_init(g_data_dir, &g_core);   /* (dev builds: win_devctl.h) */
+#endif
     nc_core_fault_install(&g_core);
     pads_changed();
 
@@ -2094,6 +2148,10 @@ int main(int argc, char *argv[])
                 break;
             case SDL_EVENT_KEY_DOWN: {
                 if (ev.key.repeat) {
+                    break;
+                }
+                if (ev.key.key == SDLK_ESCAPE && g_mgrab) {
+                    mouse_hold(false);
                     break;
                 }
                 /* the shortcuts (Settings > Shortcuts): the key with the
@@ -2130,7 +2188,7 @@ int main(int argc, char *argv[])
                  * touchpad, Share, Back with a button; and the menu with
                  * Back and Start */
                 SDL_Gamepad *gp = SDL_GetGamepadFromID(ev.gbutton.which);
-                const int b = ev.gbutton.button;
+                const int b = im_face(ev.gbutton.button);   /* as its label says (pad.face) */
                 int code = IM_HKP_NONE;
                 if (b == SDL_GAMEPAD_BUTTON_GUIDE) {
                     g_guide_alone = true;
@@ -2162,7 +2220,7 @@ int main(int argc, char *argv[])
                 break;
             }
             case SDL_EVENT_GAMEPAD_BUTTON_UP: {
-                const int b = ev.gbutton.button;
+                const int b = im_face(ev.gbutton.button);
                 if (b == SDL_GAMEPAD_BUTTON_GUIDE && g_guide_alone) {
                     g_guide_alone = false;
                     for (int h = 0; h < IM_HOTKEYS; h++) {
@@ -2211,16 +2269,30 @@ int main(int argc, char *argv[])
                 break;
             case SDL_EVENT_WINDOW_FOCUS_LOST:
                 focused = false;
+                mouse_hold(false);
                 mods_released();
                 if (g_mute_bg) {
                     nc_audio_set_volume(0);
                 }
                 break;
             case SDL_EVENT_MOUSE_MOTION:
+                if (g_mgrab && SDL_GetWindowRelativeMouseMode(win)) {
+                    im_mouse_move(ev.motion.xrel, ev.motion.yrel);  /* its own window's relative mode */
+                }
                 play_pointer(fabsf(ev.motion.xrel) + fabsf(ev.motion.yrel));
                 break;
             case SDL_EVENT_MOUSE_BUTTON_DOWN:
+                if (g_mgrab) {
+                    g_mbuttons |= SDL_BUTTON_MASK(ev.button.button);
+                } else if (g_map.mouse_stick && focused && !paused) {
+                    g_mgrab_win = win;
+                    mouse_hold(true);       /* the click that takes it isn't the game's */
+                    break;
+                }
                 play_pointer(2);
+                break;
+            case SDL_EVENT_MOUSE_BUTTON_UP:
+                g_mbuttons &= ~SDL_BUTTON_MASK(ev.button.button);
                 break;
             default:
                 break;
@@ -2228,6 +2300,9 @@ int main(int argc, char *argv[])
         }
         play_pointer_tick();
         nc_auto_tick();
+#ifdef XBASED_DEVCTL
+        nc_devctl_tick(&paused, minimized);
+#endif
         if (nc_auto_take_menu()) {
             ingame_menu(win, &paused, minimized);
         }

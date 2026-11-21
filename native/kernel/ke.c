@@ -1261,11 +1261,15 @@ static uint64_t KeDelayExecutionThread(NcKernel *k, NcFrame *f, const uint32_t *
     return st;
 }
 
-/* NtYieldExecution() */
+/* NtYieldExecution(): to any ready thread, a lower priority one too, or
+ * STATUS_NO_YIELD_PERFORMED with none ready (SwitchToThread's FALSE). Nightmare
+ * Before Christmas: Oogie's Revenge polls its loader's event while
+ * SwitchToThread finds another thread to run, until its stream worker has
+ * suspended itself; told a yield was done every time, its boot looped on
+ * "Now Loading" for good whenever the event wasn't set before (1 boot in 8). */
 static uint64_t NtYieldExecution(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
-    nc_ps_yield(k);         /* to any ready thread, a lower priority one too */
-    return NC_STATUS_SUCCESS;
+    return nc_ps_yield(k) ? NC_STATUS_SUCCESS : 0x40000024u;
 }
 
 /* ----------------------------------------------------- critical sections */

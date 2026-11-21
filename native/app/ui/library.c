@@ -1054,6 +1054,20 @@ void lib_show_hidden(bool show)
     g_show_hidden = show;
 }
 
+int lib_hidden_count(void)
+{
+    if (!L.mu) {
+        return 0;
+    }
+    SDL_LockMutex(L.mu);
+    int k = 0;
+    for (int i = 0; i < L.n; i++) {
+        k += !L.games[i]->gone && !L.games[i]->dup && L.games[i]->hidden;
+    }
+    SDL_UnlockMutex(L.mu);
+    return k;
+}
+
 bool lib_set_cover_file(LibGame *g, const char *path)
 {
     int w, h, c;

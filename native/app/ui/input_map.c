@@ -71,6 +71,28 @@ enum UiStr im_hotkey_label(int h)
     return k_hk_label[h];
 }
 
+static const char *const k_mouse_name[6] = {NULL, "Mouse Left", "Mouse Middle", "Mouse Right", "Mouse X1",
+                                             "Mouse X2"};
+
+static const char *key_name(SDL_Keycode k)
+{
+    if (k & IM_KEY_MOUSE) {
+        const unsigned b = k & 7u;
+        return b >= 1 && b <= 5 ? k_mouse_name[b] : "Mouse";
+    }
+    return SDL_GetKeyName(k);
+}
+
+static SDL_Keycode key_from_name(const char *n)
+{
+    for (unsigned b = 1; b <= 5; b++) {
+        if (!SDL_strcasecmp(n, k_mouse_name[b])) {
+            return IM_KEY_MOUSE | b;
+        }
+    }
+    return SDL_GetKeyFromName(n);
+}
+
 static void map_key(int player, int input, char *out, size_t n)
 {
     snprintf(out, n, "map.p%d.%s", player + 1, k_name[input]);
@@ -90,7 +112,7 @@ static void parse(const Config *c, int player, int input, SDL_Keycode *key, int 
     char kb[64];
     const char *bar = strchr(v, '|');
     snprintf(kb, sizeof(kb), "%.*s", bar ? (int)(bar - v) : (int)strlen(v), v);
-    *key = kb[0] ? SDL_GetKeyFromName(kb) : SDLK_UNKNOWN;
+    *key = kb[0] ? key_from_name(kb) : SDLK_UNKNOWN;
     const char *p = bar ? bar + 1 : "";
     if (p[0] == 'b') {
         *pad = 1 + atoi(p + 1);
@@ -111,7 +133,7 @@ static void store(Config *c, int player, int input, SDL_Keycode key, int pad)
     } else if (pad > 0) {
         snprintf(pe, sizeof(pe), "b%d", pad - 1);
     }
-    snprintf(v, sizeof(v), "%s|%s", key ? SDL_GetKeyName(key) : "", pe);
+    snprintf(v, sizeof(v), "%s|%s", key ? key_name(key) : "", pe);
     cfg_set(c, k, v);
 }
 
@@ -141,7 +163,7 @@ void im_binding_name(const Config *c, int player, int input, char *out, size_t n
     parse(c, player, input, &k, &p);
     char pn[48];
     pad_name(p, pn, sizeof(pn));
-    snprintf(out, n, "%s  /  %s", k ? SDL_GetKeyName(k) : "-", pn);
+    snprintf(out, n, "%s  /  %s", k ? key_name(k) : "-", pn);
 }
 
 void im_bind_key(Config *c, int player, int input, SDL_Keycode key)
@@ -401,6 +423,34 @@ void im_resolve(ImMap *m, const Config *global, const Config *game)
     const Config *tf = game && cfg_get(game, "trigger.full") ? game : global;
     m->trigger_full = cfg_int(tf, "trigger.full", 100) / 100.0f;
     m->rumble = cfg_bool(global, "rumble", true);
+    im_set_face(global);
+    const Config *ms = game && cfg_get(game, "mouse.stick") ? game : global;
+    const char *stick = cfg_get(ms, "mouse.stick");
+    m->mouse_stick = !stick ? 0 : !strcmp(stick, "left") ? 1 : !strcmp(stick, "right") ? 2 : 0;
+    const Config *mv = game && cfg_get(game, "mouse.sens") ? game : global;
+    m->mouse_sens = cfg_int(mv, "mouse.sens", 100) / 100.0f;
+}
+
+static bool g_face_swap;
+
+void im_set_face(const Config *global)
+{
+    const char *v = cfg_get(global, "pad.face");
+    g_face_swap = v && !strcmp(v, "nintendo");
+}
+
+int im_face(int b)
+{
+    if (!g_face_swap) {
+        return b;
+    }
+    switch (b) {
+    case SDL_GAMEPAD_BUTTON_SOUTH: return SDL_GAMEPAD_BUTTON_EAST;
+    case SDL_GAMEPAD_BUTTON_EAST: return SDL_GAMEPAD_BUTTON_SOUTH;
+    case SDL_GAMEPAD_BUTTON_WEST: return SDL_GAMEPAD_BUTTON_NORTH;
+    case SDL_GAMEPAD_BUTTON_NORTH: return SDL_GAMEPAD_BUTTON_WEST;
+    default: return b;
+    }
 }
 
 static float pad_value(SDL_Gamepad *g, int pad)
@@ -409,7 +459,7 @@ static float pad_value(SDL_Gamepad *g, int pad)
         return 0;
     }
     if (pad < 1000) {
-        return SDL_GetGamepadButton(g, (SDL_GamepadButton)(pad - 1)) ? 1.0f : 0.0f;
+        return SDL_GetGamepadButton(g, (SDL_GamepadButton)im_face(pad - 1)) ? 1.0f : 0.0f;
     }
     const float v = SDL_GetGamepadAxis(g, (SDL_GamepadAxis)((pad - 1000) / 2)) / 32767.0f;
     return (pad & 1) ? (v < 0 ? -v : 0) : (v > 0 ? v : 0);
@@ -493,13 +543,82 @@ static void stick(const ImMap *m, float xpos, float xneg, float ypos, float yneg
     *oy = (int16_t)((inv & 2 ? -y : y) * 32767);
 }
 
+/* The mouse (im_mouse_move, im_mouse_buttons): the moves since the last
+ * read, and the buttons down; the window's thread only. */
+static struct {
+    float dx, dy;                   /* moved since the last read */
+    float sx, sy;                   /* the speed, smoothed (pixels a second) */
+    uint32_t buttons;
+    bool held;
+    uint64_t last_ns;
+} g_mouse;
+
+void im_mouse_move(float dx, float dy)
+{
+    if (g_mouse.held) {
+        g_mouse.dx += dx;
+        g_mouse.dy += dy;
+    }
+}
+
+void im_mouse_buttons(uint32_t mask, bool held)
+{
+    g_mouse.held = held;
+    g_mouse.buttons = held ? mask : 0;
+    if (!held) {
+        g_mouse.dx = g_mouse.dy = g_mouse.sx = g_mouse.sy = 0;
+    }
+}
+
+/* The mouse as a stick (#255). A stick tells a game where it is, a mouse
+ * how far it moved: the moves since the last read over the time since are
+ * its speed, smoothed over ~30 ms (reads come at the window's pace, the
+ * moves in bursts), and the stick is pushed in proportion, full at 2000
+ * pixels a second at 100% (a brisk turn), back at the centre as it stops.
+ * The anti dead zone and the range then apply as to a stick: games turn
+ * the stick with dead zones and curves of their own, which the anti dead
+ * zone crosses. */
+#define MOUSE_FULL_PPS 2000.0f
+#define MOUSE_TAU_S 0.03f
+
+static bool mouse_stick(const ImMap *m, float *ox, float *oy)
+{
+    const uint64_t now = SDL_GetTicksNS();
+    float dt = g_mouse.last_ns ? (float)((now - g_mouse.last_ns) / 1e9) : 0.016f;
+    g_mouse.last_ns = now;
+    dt = dt < 0.001f ? 0.001f : dt > 0.1f ? 0.1f : dt;
+    const float k = 1.0f - expf(-dt / MOUSE_TAU_S);
+    g_mouse.sx += (g_mouse.dx / dt - g_mouse.sx) * k;
+    g_mouse.sy += (g_mouse.dy / dt - g_mouse.sy) * k;
+    g_mouse.dx = g_mouse.dy = 0;
+    const float full = MOUSE_FULL_PPS / (m->mouse_sens > 0.05f ? m->mouse_sens : 0.05f);
+    float x = g_mouse.sx / full, y = -g_mouse.sy / full;   /* the screen's down, the stick's up */
+    const float r = sqrtf(x * x + y * y);
+    if (r < 0.01f) {
+        return false;
+    }
+    if (r > 1) {
+        x /= r;
+        y /= r;
+    }
+    im_stick(x, y, 0, m->stick_antidz, m->stick_range, m->stick_round, ox, oy);
+    return true;
+}
+
 void im_read(const ImMap *m, int p, const bool *keys, SDL_Gamepad *pad, ImPad *out)
+{
+    im_read_mouse(m, p, keys, pad, false, out);
+}
+
+void im_read_mouse(const ImMap *m, int p, const bool *keys, SDL_Gamepad *pad, bool mouse, ImPad *out)
 {
     float v[IM_INPUTS];
     for (int i = 0; i < IM_INPUTS; i++) {
         const SDL_Keycode k = m->key[p][i];
         float kv = 0;
-        if (keys && k) {
+        if (k & IM_KEY_MOUSE) {
+            kv = mouse && (g_mouse.buttons & SDL_BUTTON_MASK(k & 7u)) ? 1.0f : 0.0f;
+        } else if (keys && k) {
             const SDL_Scancode sc = SDL_GetScancodeFromKey(k, NULL);
             kv = keys[sc] ? 1.0f : 0.0f;
         }
@@ -527,4 +646,12 @@ void im_read(const ImMap *m, int p, const bool *keys, SDL_Gamepad *pad, ImPad *o
     }
     stick(m, v[IM_LRIGHT], v[IM_LLEFT], v[IM_LUP], v[IM_LDOWN], m->linvert, &out->lx, &out->ly);
     stick(m, v[IM_RRIGHT], v[IM_RLEFT], v[IM_RUP], v[IM_RDOWN], m->rinvert, &out->rx, &out->ry);
+    float mx, my;
+    if (mouse && m->mouse_stick && mouse_stick(m, &mx, &my)) {
+        /* the mouse moving: its stick, the axes turned over as the stick's */
+        const uint8_t inv = m->mouse_stick == 1 ? m->linvert : m->rinvert;
+        int16_t *sx = m->mouse_stick == 1 ? &out->lx : &out->rx, *sy = m->mouse_stick == 1 ? &out->ly : &out->ry;
+        *sx = (int16_t)((inv & 1 ? -mx : mx) * 32767);
+        *sy = (int16_t)((inv & 2 ? -my : my) * 32767);
+    }
 }

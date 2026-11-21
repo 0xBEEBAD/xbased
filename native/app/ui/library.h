@@ -75,6 +75,8 @@ UiTex *lib_load_png(const char *path);
 void lib_set_name(LibGame *g, const char *name);
 void lib_set_hidden(LibGame *g, bool hidden);
 void lib_show_hidden(bool show);
+/* The games hidden (the copies left out as lib_count leaves them out). */
+int lib_hidden_count(void);
 /* A favorite or not; played now (launched). Kept in custom.txt too. */
 void lib_set_favorite(LibGame *g, bool fav);
 void lib_set_played(LibGame *g);

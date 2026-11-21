@@ -202,6 +202,7 @@ void *hle_host_vk_loader(void)
     if (g_custom_gipa) {
         return (void *)g_custom_gipa;
     }
+#ifdef __ANDROID__
     if (!gipa) {
         void *lib = dlopen("libvulkan.so", RTLD_NOW | RTLD_LOCAL);
         gipa = lib ? (PFN_vkGetInstanceProcAddr)dlsym(lib, "vkGetInstanceProcAddr") : NULL;
@@ -209,6 +210,8 @@ void *hle_host_vk_loader(void)
             nc_log("xbased-native-hle", "no Vulkan loader: %s", dlerror());
         }
     }
+#endif
+    /* (desktop: none here, volk finds the system's loader, vulkan-1.dll or libvulkan.so.1) */
     return (void *)gipa;
 }
 

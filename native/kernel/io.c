@@ -330,6 +330,23 @@ static bool canon(const char *in, char *out, size_t cap)
         char joined[512];
         snprintf(joined, sizeof(joined), "%s\\%s", g_links[l].target, tmp + 6);
         snprintf(tmp, sizeof(tmp), "%s", joined);
+    } else if (prefix_ci(tmp, "\\??\\")) {
+        /* a longer link's name, any case, as the object manager takes it:
+         * \??\CdRom0: (XAPI's own), which Xbox Music Mixer probes as
+         * \??\CDROM0:\default.xbe, track01.cda and the like to see what disc
+         * is in the drive; unresolved it found none and asked again */
+        const char *comp = tmp + 4, *end = strchr(comp, '\\');
+        const size_t n = end ? (size_t)(end - comp) : strlen(comp);
+        char name[64];
+        if (n && n < sizeof(name) - 4) {
+            snprintf(name, sizeof(name), "\\??\\%.*s", (int)n, comp);
+            const int l = link_find(name);
+            if (l >= 0) {
+                char joined[512];
+                snprintf(joined, sizeof(joined), "%s%s", g_links[l].target, end ? end : "");
+                snprintf(tmp, sizeof(tmp), "%s", joined);
+            }
+        }
     }
     /* Fold components. */
     char *parts[64], *save = NULL;
@@ -2920,25 +2937,42 @@ typedef struct DirEntry {
     uint64_t size;
     bool dir;
 } DirEntry;
-/* a listing's entries at most (a folder with more shows its first ones) */
-#define LISTING_MAX 2048u
+/* a listing's entries at most: a folder's whole listing (a disc folder up to
+ * NC_DISC_DIR_MAX holds fewer); it grows as it's read. At 2048, Super Monkey
+ * Ball Deluxe's media\stage_eu (2538 files) lost its last ones and the game's
+ * FindFirstFile("STAGE398.lz") found nothing: GCDVDEmu.cpp's Fatal Error. */
+#define LISTING_MAX (1u << 20)
+
+typedef struct DirList {
+    DirEntry *e;
+    unsigned n, cap;
+} DirList;
+
+static DirEntry *dir_add(DirList *l)
+{
+    if (l->n == l->cap) {
+        const unsigned c = l->cap >= LISTING_MAX / 2 ? LISTING_MAX : l->cap ? l->cap * 2 : 64;
+        DirEntry *e = c > l->cap ? realloc(l->e, c * sizeof(DirEntry)) : NULL;
+        if (!e) {
+            return NULL;
+        }
+        l->e = e;
+        l->cap = c;
+    }
+    return &l->e[l->n++];
+}
 
 /* A disc directory's entries (nc_disc_dir_each: its tree in order, then what
  * the tree doesn't reach) */
-typedef struct DiscList {
-    DirEntry *out;
-    unsigned *n, cap;
-} DiscList;
-
 static bool disc_list_entry(void *ctx, const uint8_t *e)
 {
-    DiscList *l = ctx;
-    if (*l->n >= l->cap) {
-        return true;
-    }
+    DirList *l = ctx;
     const uint8_t nlen = e[13];
-    if (nlen < sizeof(l->out->name)) {
-        DirEntry *d = &l->out[(*l->n)++];
+    if (nlen < sizeof(l->e->name)) {
+        DirEntry *d = dir_add(l);
+        if (!d) {
+            return true;
+        }
         memcpy(d->name, e + 14, nlen);
         d->name[nlen] = 0;
         d->size = nc_rd32(e + 8);
@@ -2949,60 +2983,56 @@ static bool disc_list_entry(void *ctx, const uint8_t *e)
 
 /* A mod's file or folder in a disc folder's listing (nc_disc_overlay_list):
  * a replaced file with its new size, an added one at the end. */
-typedef struct OvList {
-    DirEntry *out;
-    unsigned *n, cap;
-} OvList;
-
 static void ov_entry(void *ctx, const char *name, uint32_t size, bool is_dir)
 {
-    OvList *l = ctx;
-    for (unsigned i = 0; i < *l->n; i++) {
-        if (!strcasecmp(l->out[i].name, name)) {
-            l->out[i].size = size;
-            l->out[i].dir = is_dir;
+    DirList *l = ctx;
+    for (unsigned i = 0; i < l->n; i++) {
+        if (!strcasecmp(l->e[i].name, name)) {
+            l->e[i].size = size;
+            l->e[i].dir = is_dir;
             return;
         }
     }
-    if (*l->n < l->cap && strlen(name) < sizeof(l->out->name)) {
-        DirEntry *e = &l->out[(*l->n)++];
+    DirEntry *e = strlen(name) < sizeof(l->e->name) ? dir_add(l) : NULL;
+    if (e) {
         snprintf(e->name, sizeof(e->name), "%s", name);
         e->size = size;
         e->dir = is_dir;
     }
 }
 
-static unsigned list_dir(NcKernel *k, const NcFile *nf, DirEntry *out, unsigned cap)
+/* the folder's entries into l (l->e: the caller's to free) */
+static void list_dir(NcKernel *k, const NcFile *nf, DirList *l)
 {
-    unsigned n = 0;
     if (nf->kind != F_HOST) {
         if (nf->disc.size && nf->disc.size <= NC_DISC_DIR_MAX && nf->disc.sector < NC_DISC_OVERLAY) {
             uint8_t *dir = malloc(nf->disc.size);
             if (dir && nc_disc_read(k->disc, &nf->disc, 0, dir, nf->disc.size)) {
-                DiscList l = {out, &n, cap};
-                nc_disc_dir_each(dir, nf->disc.size, disc_list_entry, &l);
+                nc_disc_dir_each(dir, nf->disc.size, disc_list_entry, l);
             }
             free(dir);
         }
         const char *rel;
         if (k->disc->ov && device_of(nf->path, &rel) == -1) {
-            OvList l = {out, &n, cap};
-            nc_disc_overlay_list(k->disc, rel, ov_entry, &l);
+            nc_disc_overlay_list(k->disc, rel, ov_entry, l);
         }
-        return n;
+        return;
     }
     DIR *d = opendir(nf->host);
     struct dirent *de;
-    while (d && n < cap && (de = readdir(d))) {
+    while (d && (de = readdir(d))) {
         char guest[512];
         name_from_host(de->d_name, guest, sizeof(guest));
-        if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, "..") || strlen(guest) >= sizeof(out->name)) {
+        if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, "..") || strlen(guest) >= sizeof(l->e->name)) {
             continue;
         }
         char p[600];
         struct stat st;
         snprintf(p, sizeof(p), "%s/%s", nf->host, de->d_name);
-        DirEntry *e = &out[n++];
+        DirEntry *e = dir_add(l);
+        if (!e) {
+            break;
+        }
         snprintf(e->name, sizeof(e->name), "%s", guest);
         e->dir = stat(p, &st) == 0 && S_ISDIR(st.st_mode);
         e->size = e->dir ? 0 : (uint64_t)st.st_size;
@@ -3010,7 +3040,6 @@ static unsigned list_dir(NcKernel *k, const NcFile *nf, DirEntry *out, unsigned 
     if (d) {
         closedir(d);
     }
-    return n;
 }
 
 /* NtQueryDirectoryFile(FileHandle, Event, ApcRoutine, ApcContext, IoStatusBlock, FileInformation,
@@ -3044,16 +3073,13 @@ static uint64_t NtQueryDirectoryFile(NcKernel *k, NcFrame *f, const uint32_t *a)
     }
     if ((a[9] & 0xff) || strcmp(mask, nf->mask) != 0 || !nf->listing) {
         /* A new enumeration lists the directory once (NcFile.listing). */
-        static DirEntry scratch[LISTING_MAX];
         nf->dir_next = 0;
         snprintf(nf->mask, sizeof(nf->mask), "%s", mask);
-        const unsigned count = list_dir(k, nf, scratch, LISTING_MAX);
+        DirList l = {NULL, 0, 0};
+        list_dir(k, nf, &l);
         free(nf->listing);
-        nf->listing = malloc((count ? count : 1) * sizeof(DirEntry));
-        nf->nlisting = nf->listing ? count : 0;
-        if (nf->listing) {
-            memcpy(nf->listing, scratch, count * sizeof(DirEntry));
-        }
+        nf->listing = l.e ? l.e : malloc(sizeof(DirEntry));
+        nf->nlisting = nf->listing ? l.n : 0;
     }
     const DirEntry *entries = nf->listing;
     const unsigned n = nf->nlisting;

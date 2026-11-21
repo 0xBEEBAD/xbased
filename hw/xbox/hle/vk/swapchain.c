@@ -1142,6 +1142,13 @@ void hle_present_remote_cursor(bool shown)
     }
 }
 
+void hle_present_remote_grab(bool on)
+{
+    if (g_rm.sh) {
+        g_rm.sh->grab = on ? 1 : 0;
+    }
+}
+
 /* the frame's mouse events since the last call (n at most), the next read's place in *at */
 uint32_t hle_present_remote_mouse(void *out, uint32_t n, int64_t *at)
 {
@@ -1520,6 +1527,11 @@ void hle_present_remote_size(uint32_t *w, uint32_t *h)
 void hle_present_remote_cursor(bool shown)
 {
     (void)shown;
+}
+
+void hle_present_remote_grab(bool on)
+{
+    (void)on;
 }
 
 uint32_t hle_present_remote_mouse(void *out, uint32_t n, int64_t *at)

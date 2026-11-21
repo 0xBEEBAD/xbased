@@ -20,6 +20,8 @@
  *   prebuild=0|1     the cached shaders built before the game (on)
  *   pads=MASK        the players with a controller plugged in (hex, bit n
  *                    player n + 1; default player 1)
+ *   voice=0|1        the Xbox Communicator in player 1's controller, the
+ *                    system's microphone and speakers (#254)
  *   video=FLAGS      the console's video settings (XC_VIDEO_FLAGS, hex)
  *   avpack=hdtv|standard|svideo|scart|vga   its AV cable
  *   pal60=0|1        PAL titles at 60 Hz (1, the default: PAL-60 on) or 50

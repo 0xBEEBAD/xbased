@@ -1,5 +1,74 @@
 # xbased changelog
 
+## 1.2.0 (2026-11)
+
+### The GPU layer
+- xbased draws with 1.0.94's GPU layer again, the last before the exact
+  NV2A work of 1.0.95 to 1.1.15, with every game fix and improvement made
+  since kept on it and the hybrid shaders' interpreters built for it. Games
+  run 9 to 21% faster than in 1.1.15 (Vice City, The Two Thrones, Burnout 3,
+  Conker, Dead or Alive 3, Driv3r, Fable, Prince of Persia) (#309).
+- With fresh caches the hybrid mode builds new shaders without holding the
+  game: a few milliseconds in all where 1.1.15 spent seconds (Forza, Conker,
+  Halo 2, The Two Thrones, Dead or Alive 3).
+- This update sets the shader mode back to Hybrid once, and the GPU
+  precision setting is gone: this layer has one.
+
+### New
+- Frame rate: games without a frame cap of their own (Total Immersion
+  Racing, Star Wars Republic Commando and others) keep the console's pace at
+  Original instead of running at hundreds of frames a second, and the
+  limits apply to them too (#351). Up to 30 fps per game, and 90 fps for the
+  global limit.
+- Controls: Face buttons, Xbox or Nintendo, for controllers with A on the
+  right; it applies to the menus and the games (#337).
+- Controls: the mouse can move player 1's left or right stick, with its own
+  sensitivity, and its buttons can be assigned like keys (#255).
+- Controls: Xbox Communicator, a voice headset in player 1's controller
+  that uses your PC's microphone and speakers (#254).
+
+### Fixes
+- Super Monkey Ball Deluxe: no more Fatal Error as it starts (a folder of
+  more than 2048 files).
+- StarCraft: Ghost (the v1.256 build): its first mission loads; builds for
+  the debug kit get its 128 MB.
+- The Nightmare Before Christmas: Oogie's Revenge no longer stays on Now
+  Loading now and then.
+- Fable: the ripples on rivers and puddles no longer draw over the people
+  and things in front of them.
+- Ninja Gaiden Black: Ryu's shadow no longer comes and goes (hanging from a
+  ledge, on the wall below him).
+- Spider-Man 2: the night sky is dark with its stars again, not white
+  between the clouds (games that draw in points or lines get them).
+- Xbox Music Mixer: no more black screen as it starts; it reaches its menus.
+  It runs part of itself in ring 3 and reads the GDT, the page tables and
+  the hard disk's serial number, which the emulated console now has (#361).
+- Lines keep their width at higher internal resolutions, as points already
+  did; before, they stayed one pixel wide and looked thinner at each step up.
+  Metal Gear Solid 2: Substance: Otacon's glasses in the codec are drawn as
+  on the console again at 2x and above, not as a lattice of thin lines, and
+  Ninja Gaiden Black's sparks keep their size (#350).
+- Cold Fear: things a few metres from the hero cast their own shadows
+  instead of black blocks that moved as he walked (#241).
+- Tomb Raider: Legend: the water's reflections follow the scene again;
+  after the PDA or walking about they could stick on an old frame (a white
+  screen, a blurred Lara) (#185).
+- Tomb Raider: Legend: no more crashes a little way into a level. The game
+  loads code over its own as it goes, and the emulated CPU now notices.
+- Prince of Persia: Warrior Within: the screen no longer turns white and
+  stays that way after a bright flash. The game builds its glow out of
+  pieces of one image, and each piece is now read from where it was drawn
+  last.
+- Armed and Dangerous: the second level loads instead of a dirty disc error
+  after a long loading screen (#245). The kernel's memory pool now gives back
+  pages with nothing in them when a game asks for a large block and finds no
+  room.
+- Games: hidden games can be shown again from Search (Show hidden games, as
+  in Settings > Interface); hiding one says so, and the Games screen counts
+  them.
+- The main menu no longer comes back cut off after hiding a game (its logo's
+  left half and the buttons' hints gone).
+
 ## 1.1.15 (2026-11)
 
 ### Fixes

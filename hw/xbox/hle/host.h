@@ -106,6 +106,11 @@ uint64_t hle_host_vblank_ns(void);
  * vCPU thread, in its DMA_PUT); and a flip came (any thread). */
 void hle_host_frame_wait(void);
 void hle_host_frame_flipped(void);
+/* The least time between two flips a trap's handler does (D3D's IMMEDIATE
+ * presents: the guest waits for no vblank), as the options have it: the
+ * console's vblank at the original frame rate, the limit when it is lifted,
+ * 0 for none. Any thread. */
+int64_t hle_host_flip_min_ns(void);
 /* The display's vsyncs as the window's presenter has them from the driver
  * (the last one's instant, CLOCK_MONOTONIC ns, and the refresh period), and
  * the lead its presents keep after a frame's vblank (0: they are not timed).
@@ -122,15 +127,6 @@ bool hle_host_vblank_timed(void);
  * GPU makes one (the value only). Any thread. */
 uint32_t hle_host_gpu_reg(uint32_t off);
 void hle_host_gpu_reg_set(uint32_t off, uint32_t v);
-/* PTIMER's time now, both words as the guest reads them: a finished
- * visibility test's time stamp (the XDK's GetVisibilityTestResult: the GPU's
- * nanosecond count at completion, for timing the work between two tests;
- * xemu's constant 0x0011223344556677 read as no time passing). Any thread. */
-uint64_t hle_host_ptimer(void);
-/* The word of a plain register (not PTIMER's time), to be read atomically
- * where a call per read costs (the decoder's per-method test); NULL with no
- * registers. */
-const uint32_t *hle_host_gpu_reg_ptr(uint32_t off);
 /* The bits of mask set to bits', atomically (fields the guest's writes
  * change too: PGRAPH_SURFACE's flip counters). */
 void hle_host_gpu_reg_mask(uint32_t off, uint32_t mask, uint32_t bits);

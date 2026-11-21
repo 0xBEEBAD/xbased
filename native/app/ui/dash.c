@@ -6,6 +6,7 @@
 #include "native/app/ui/dash.h"
 #include "native/app/ui/console_cfg.h"
 #include "native/app/ui/dash_int.h"
+#include "native/app/ui/input_map.h"
 #include "native/app/ui/pointer.h"
 #include "native/app/ui/shortcut.h"
 #include "native/app/ui/sound.h"
@@ -307,6 +308,8 @@ static void poll_input(void)
     memset(in, 0, sizeof(*in));
     in->pad = pad;
     in->pad_button = -1;
+    in->mouse_button = 0;
+    im_set_face(&D.global);
     if (g_pump_hook) {
         g_pump_hook();  /* the session frame's mouse, as this window's events (win_main.c) */
     }
@@ -406,6 +409,7 @@ static void poll_input(void)
             in->pad = false;
             cursor(true);
             in->any = true;
+            in->mouse_button = e.button.button;
             if (e.button.button == SDL_BUTTON_LEFT) {
                 in->click = true;
             } else if (e.button.button == SDL_BUTTON_RIGHT) {
@@ -438,14 +442,15 @@ static void poll_input(void)
         case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
         case SDL_EVENT_GAMEPAD_BUTTON_UP: {
             const bool down = e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN;
+            const int button = im_face(e.gbutton.button);   /* as its label says (pad.face) */
             g_last_pad = e.gbutton.which;
             in->pad = true;
             cursor(false);
             if (down) {
-                in->pad_button = e.gbutton.button;
+                in->pad_button = button;
                 in->any = true;
             }
-            switch (e.gbutton.button) {
+            switch (button) {
             case SDL_GAMEPAD_BUTTON_DPAD_UP: held(1, down); if (down) press(1); break;
             case SDL_GAMEPAD_BUTTON_DPAD_DOWN: held(2, down); if (down) press(2); break;
             case SDL_GAMEPAD_BUTTON_DPAD_LEFT: held(3, down); if (down) press(3); break;
@@ -1183,6 +1188,8 @@ static const struct {
     {S_FAV_FIRST, S_H_FAV_FIRST, HELP_NOW}, {S_LAST_FIRST, S_H_LAST_FIRST, HELP_NOW},
     {S_DEADZONE, S_H_DEADZONE, HELP_ON_RESUME}, {S_INVERT_RSTICK, S_H_INVERT, HELP_ON_RESUME},
     {S_INVERT_LSTICK, S_H_INVERT, HELP_ON_RESUME}, {S_RUMBLE, S_H_RUMBLE, HELP_ON_RESUME},
+    {S_FACE_LAYOUT, S_H_FACE, HELP_ON_RESUME}, {S_MOUSE_STICK, S_H_MOUSE, HELP_ON_RESUME},
+    {S_MOUSE_SENS, S_H_MOUSE_SENS, HELP_ON_RESUME}, {S_COMMUNICATOR, S_H_COMMUNICATOR, HELP_NEXT_START},
 };
 
 /* the option's help when its row is the selected one */
@@ -2003,6 +2010,14 @@ static void scr_games(void)
     } else {
         snprintf(sub, sizeof(sub), "%d", total);
     }
+    /* the games hidden and left out: how many (Search shows them again) */
+    const int nhid = cfg_bool(&D.global, "ui.showhidden", false) ? 0 : lib_hidden_count();
+    if (nhid) {
+        char hid[64];
+        snprintf(hid, sizeof(hid), T(S_N_HIDDEN), nhid);
+        const size_t sl = strlen(sub);
+        snprintf(sub + sl, sizeof(sub) - sl, "    %s", hid);
+    }
     draw_header(T(S_GAMES), sub);
     if (D.in.y || D.in.find) {
         dash_find_open(true);   /* the search, the keyboard up */
@@ -2012,12 +2027,13 @@ static void scr_games(void)
         dash_find_next_view();
     }
     if (!total) {
-        ui_text(W / 2, H * 0.45f, lib_scanning() ? T(S_SCANNING) : T(S_NO_GAMES), 26, UI_FONT_REGULAR, UI_WHITE,
-                UI_ALIGN_CENTER);
+        /* (every game hidden: not "no games yet", Search shows them) */
+        ui_text(W / 2, H * 0.45f, lib_scanning() ? T(S_SCANNING) : nhid ? T(S_ALL_HIDDEN) : T(S_NO_GAMES), 26,
+                UI_FONT_REGULAR, UI_WHITE, UI_ALIGN_CENTER);
         if (D.in.back) {
             dash_pop();
         }
-        draw_hints(T(S_ADD_GAMES), T(S_BACK), NULL, NULL);    /* while it scans too */
+        draw_hints(T(S_ADD_GAMES), T(S_BACK), NULL, nhid ? T(S_FIND) : NULL);    /* while it scans too */
         if (D.in.ok || D.in.click) {
             dash_browse_games();
         }
@@ -2416,7 +2432,9 @@ static void scr_game(void)
     }
     if (list_row(&l, T(g->hidden ? S_UNHIDE_GAME : S_HIDE_GAME), NULL, NULL)) {
         lib_set_hidden(g, !g->hidden);
+        dash_toast(T(g->hidden ? S_GAME_HIDDEN : S_GAME_SHOWN));    /* and where to see it again */
         if (g->hidden && !cfg_bool(&D.global, "ui.showhidden", false)) {
+            ui_unclip();    /* (the list's, list_end left out) */
             dash_pop();     /* gone from the Games screen */
             return;
         }

@@ -152,6 +152,19 @@ static void act(const char *a, const char *label)
     nc_log("xbased-auto", "unknown action \"%s\"", a);
 }
 
+#ifdef XBASED_DEVCTL
+/* (dev control, win_devctl.c) one action now, as a command line's: the
+ * scripted inputs on from then */
+void nc_auto_act(const char *a)
+{
+    if (!g_auto.on) {
+        g_auto.on = true;
+        g_auto.t0 = now_s();
+    }
+    act(a, "dev");
+}
+#endif
+
 static int by_time(const void *x, const void *y)
 {
     const double a = ((const AutoEvent *)x)->at, b = ((const AutoEvent *)y)->at;
@@ -162,12 +175,21 @@ void nc_auto_init(const char *exe_dir, void (*save)(int slot), void (*load)(int 
 {
     const char *script = getenv("XBASED_AUTO");
     const char *cmd = getenv("XBASED_AUTO_CMD");
+#ifdef XBASED_DEVCTL
+    g_auto.save = save;             /* (the dev control's actions too: win_devctl.c) */
+    g_auto.load = load;
+    if (!script && !cmd) {
+        snprintf(g_auto.dir, sizeof(g_auto.dir), "%sshots", exe_dir);
+        return;
+    }
+#else
     if (!script && !cmd) {
         return;
     }
-    g_auto.on = true;
     g_auto.save = save;
     g_auto.load = load;
+#endif
+    g_auto.on = true;
     const char *t0 = getenv("XBASED_AUTO_T0");
     g_auto.t0 = t0 ? atof(t0) : now_s();
     if (!t0) {

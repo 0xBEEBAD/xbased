@@ -85,8 +85,7 @@ bool nc_option(NcOptions *o, const char *arg)
             o->shaders = NC_SHADERS_ASYNC;  /* (0: the mode as it is) */
         }
     } else if ((v = value(arg, "precision="))) {
-        /* the GPU's precision (hw/xbox/hle/vk/precision.h): auto, exact or fast */
-        nc_hle_set_precision(!strcmp(v, "exact") ? 1 : !strcmp(v, "fast") ? 2 : 0);
+        (void)v;                        /* (taken and left: the GPU has one form here) */
     } else if ((v = value(arg, "prebuild="))) {
         o->prebuild = atoi(v) != 0;
     } else if ((v = value(arg, "devtime="))) {
@@ -94,6 +93,13 @@ bool nc_option(NcOptions *o, const char *arg)
                                                  * (1, a quarter of it, gone in 1.0.80: the drive's) */
     } else if ((v = value(arg, "pads="))) {
         setenv("NC_PAD_MASK", v, 1);            /* read by the USB at boot (ohci.c) */
+    } else if ((v = value(arg, "voice="))) {
+        /* the Communicator in player 1's controller (dev/communicator.c), read at boot */
+        if (atoi(v) != 0) {
+            setenv("NC_VOICE", "1", 1);
+        } else {
+            unsetenv("NC_VOICE");
+        }
     } else if ((v = value(arg, "video="))) {
         o->video = (int64_t)strtoul(v, NULL, 16);
     } else if ((v = value(arg, "avpack="))) {

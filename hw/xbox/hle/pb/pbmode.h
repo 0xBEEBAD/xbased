@@ -65,6 +65,9 @@ void hle_pb_subroutine_written(uint32_t v);
  * / B planes): the display's gamma ramp (any thread; the decode thread
  * applies it). */
 void hle_pb_gamma(const uint8_t rgb[3][256]);
+/* The guest counted a flip read (PGRAPH's INCREMENT: a vblank's or a trap
+ * handler's flip, any thread). */
+void hle_pb_flip_read(void);
 /* PGRAPH waits in FLIP_STALL for a flip (any thread). */
 bool hle_pb_flip_waiting(void);
 /* the FLIP_STALLs that waited so far (one a frame, uncapped) */
