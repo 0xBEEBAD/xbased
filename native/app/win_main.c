@@ -1800,7 +1800,7 @@ int main(int argc, char *argv[])
     if (again) {
         nc_log("xbased-app", "---- started again (%s)", opt_flag("relaunch") ? "the title's relaunch" : "a state loaded");
     }
-    nc_log("xbased-app", "xbased " XBASED_VERSION " (an original Xbox emulator by crazyriddler, based on hakuX), " NC_PLATFORM_NAME);
+    nc_log("xbased-app", "xbased " XBASED_VERSION " (an original Xbox emulator by crazyriddler), " NC_PLATFORM_NAME);
     nc_win_mods_cleanup(g_exe_dir);     /* what an update took away (win_mods.h) */
 
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");

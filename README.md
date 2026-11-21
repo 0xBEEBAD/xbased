@@ -5,7 +5,7 @@
 <p align="center">
   <b>The original Xbox, on your PC.</b><br>
   xbased is an original Xbox emulator for Windows and Linux.<br>
-  Free and open source, with a console-style dashboard. Based on <a href="https://github.com/rfandango/hakuX">hakuX</a>.
+  Free and open source, with a console-style dashboard.
 </p>
 
 <p align="center">
@@ -356,8 +356,8 @@ More options (link-time optimization, the dependencies' location) are in
   BloodRayne 2, NFL Fever 2004, Panzer Dragoon Orta and more), internal
   resolution up to 8x, 5.1 audio, the automatic updates and every release
   ([CHANGELOG.md](CHANGELOG.md)).
-- Based on **[hakuX](https://github.com/rfandango/hakuX)**. Its README and
-  changelog are in [docs/hakuX](docs/hakuX/).
+- **[hakuX](https://github.com/rfandango/hakuX)**, the emulator xbased started from. Its
+  README and changelog are in [docs/hakuX](docs/hakuX/).
 - Box art from the [libretro-thumbnails](https://github.com/libretro-thumbnails)
   project. Interface font: Play (SIL Open Font License).
 - SDL3, Zydis, libslirp, libchdr, xxHash, volk, Vulkan Memory Allocator, glslang,

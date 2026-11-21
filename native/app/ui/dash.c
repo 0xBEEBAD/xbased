@@ -2480,8 +2480,9 @@ static void scr_about(void)
     snprintf(v, sizeof(v), "%s %s", T(S_VERSION), XBASED_VERSION);
     ui_text(W / 2, H * 0.44f, "xbased", 54, UI_FONT_BOLD, UI_GREEN_HI, UI_ALIGN_CENTER);
     ui_text(W / 2, H * 0.535f, v, 22, UI_FONT_REGULAR, UI_WHITE, UI_ALIGN_CENTER);
-    ui_text_fit(W / 2, H * 0.585f, T(S_BASED_ON), 20, UI_FONT_REGULAR, UI_GREY, UI_ALIGN_CENTER, W - 80);
-    ui_text(W / 2, H * 0.63f, "github.com/crazyriddler/xbased", 20, UI_FONT_REGULAR, UI_GREY, UI_ALIGN_CENTER);
+    ui_text_fit(W / 2, H * 0.585f, T(S_ABOUT_LINE), 20, UI_FONT_REGULAR, UI_GREY, UI_ALIGN_CENTER, W - 80);
+    ui_text_fit(W / 2, H * 0.63f, "xbased-emu.com  ·  github.com/crazyriddler/xbased", 20, UI_FONT_REGULAR, UI_GREY,
+                UI_ALIGN_CENTER, W - 80);
     ui_text_fit(W / 2, H * 0.675f, "Fonts: Play (SIL OFL). Box art: libretro-thumbnails.", 18, UI_FONT_REGULAR,
                 UI_GREY, UI_ALIGN_CENTER, W - 80);
     /* the update check (#336): its button, chosen with A, a click or X;
