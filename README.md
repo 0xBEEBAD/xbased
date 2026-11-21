@@ -4,7 +4,7 @@
 
 <p align="center">
   <b>The original Xbox, on your PC.</b><br>
-  xbased is an original Xbox emulator for Windows and Linux, developed by <b>crazyriddler</b>.<br>
+  xbased is an original Xbox emulator for Windows and Linux.<br>
   Free and open source, with a console-style dashboard. Based on <a href="https://github.com/rfandango/hakuX">hakuX</a>.
 </p>
 
