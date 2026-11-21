@@ -308,6 +308,7 @@ void scr_settings(void)
         const char *an[] = {T(S_STEREO), T(S_SURROUND51)};
         opt_choice(&l, S_AUDIO_OUTPUT, "audio", av, an, 2, "stereo");
         opt_int(&l, S_VOLUME, "volume", 0, 100, 5, 100, "%");
+        opt_bool(&l, S_HRTF, "hrtf", true, false);
         opt_bool(&l, S_MUTE_BG, "mutebg", true, false);
         opt_bool(&l, S_UI_SOUNDS, "ui.sounds", true, false);
         break;
@@ -601,6 +602,7 @@ void scr_game_settings(void)
         opt_choice(&l, S_AUDIO_OUTPUT, "audio", av, an, 2, "stereo");
     }
     opt_int(&l, S_VOLUME, "volume", 0, 100, 5, 100, "%");
+    opt_bool(&l, S_HRTF, "hrtf", true, false);
     opt_bool(&l, S_MUTE_BG, "mutebg", true, false);
     list_heading(&l, T(S_SYSTEM));
     rows_language(&l);

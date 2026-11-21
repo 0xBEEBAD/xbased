@@ -101,6 +101,9 @@ int64_t hle_host_vblank_period_ns(void);
 /* The time the last vblank was due (CLOCK_MONOTONIC, ns): the timer's own
  * instant, a period after the one before, not when its interrupt was taken. */
 uint64_t hle_host_vblank_ns(void);
+/* A flip's vblank, for when its frame is due on screen: the last one's, or
+ * the next one's for a flip in the last quarter of a frame. */
+uint64_t hle_host_flip_vblank_ns(void);
 /* Frame latency (pb/pbmode.c): the guest thread that pushed a finished
  * frame waits, from its next instruction, until the next flip (the guest's
  * vCPU thread, in its DMA_PUT); and a flip came (any thread). */
@@ -111,6 +114,10 @@ void hle_host_frame_flipped(void);
  * console's vblank at the original frame rate, the limit when it is lifted,
  * 0 for none. Any thread. */
 int64_t hle_host_flip_min_ns(void);
+/* A flip a trap's handler does, its slot `want` on the display's vsyncs
+ * when `every` is whole refreshes of them: the vsync's place nearest it;
+ * else `want` (native/dev/nv2a.c). */
+int64_t hle_host_flip_slot(int64_t want, int64_t every);
 /* The display's vsyncs as the window's presenter has them from the driver
  * (the last one's instant, CLOCK_MONOTONIC ns, and the refresh period), and
  * the lead its presents keep after a frame's vblank (0: they are not timed).

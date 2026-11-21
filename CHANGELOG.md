@@ -1,5 +1,72 @@
 # xbased changelog
 
+## 1.2.2 (2026-11)
+
+### New
+- Audio: HRTF filtering (3D sound) can be turned off, globally or per game
+  (#374). It's the console's filter for the sounds a game places around you;
+  on by default, as before.
+- Library: a game folder kept as on a modded Xbox, the game's image with an
+  ISO attacher's default.xbe beside it, is added and played as that image
+  (#367). Before, xbased ran the attacher, which can't load here.
+- Time played leaves out the time a game is paused: the pause key, the
+  in-game menu, its window minimized (#379).
+
+### Fixes
+- Frame rate: a game no longer runs too fast for a moment after a stutter,
+  and its frame rate no longer drops when the PC is busy. The emulated
+  console's vblank, its clock, could fall behind on a loaded PC or a laptop
+  saving power, then caught up in a burst (#370). Its thread now runs at a
+  high priority, it never catches up in a burst, and xbased stays out of
+  Windows' power throttling, which on laptops moves programs to the slower
+  cores and delays their timers.
+- Frame rate limits that are a whole number of the display's refreshes (Up
+  to 30 or 60 on a 60 Hz display, Unlocked at the display's refresh rate)
+  show every frame for the same time. Before, some frames were shown a
+  refresh early or late (Otogi at Up to 30, Crash Bandicoot at Up to 60
+  without V-Sync).
+- Games that present without waiting for the vblank (Total Immersion Racing
+  and others) are shown evenly too: before, about one frame a second was
+  shown twice and the next skipped at 60 Hz.
+- 50 Hz games (European discs) at Up to 30 or Up to 60 with V-Sync no
+  longer get stuck behind after a stutter: once one frame missed its
+  refresh, every frame after it was shown a refresh late for the rest of the
+  session, almost three times the delay from the game to the screen (Crash
+  Bandicoot at Up to 60: 37 ms instead of 13).
+- Up to 120 on a 60 Hz display with V-Sync shows each frame 14 ms after the
+  game made it instead of 34, and its frames are more even.
+- The emulated vblank no longer drifts off the display when Windows' frame
+  statistics miss a refresh, which happens now and then: frames were then
+  shown a refresh late for a moment.
+- Games that present without waiting for the vblank are timed like the
+  others: their frames went to the screen as they came, and when they came
+  close to the display's refresh some were never shown (Total Immersion
+  Racing: 19 in 12 s in one run, none now).
+- 50 Hz games run at their real speed on 144 Hz and 240 Hz displays. Their
+  vblank kept to the display's refreshes when it shouldn't have, and they
+  ran at 48 fps, 4 % slow.
+- 120 Hz displays show every frame for the same time: some frames were
+  shown a refresh late (Otogi at Up to 30: 19 in 12 s, Crash Bandicoot at
+  Up to 30: 4; none now).
+- High frame rates are all shown: at Unlocked on a 280 Hz display, Crash
+  Bandicoot made 253 frames a second and only 113 reached the screen; now
+  208 of its 220.
+- With G-Sync or FreeSync, frames under a frame rate limit reach the screen
+  at exactly even times. Before, they were up to almost a millisecond off.
+- Tomb Raider: Legend no longer crashes on its first screen (#376). It
+  happened on the boot that sets up its cache partition on the hard disk (the
+  first after playing other games): xbased wrote rows of the picture the
+  game never draws over the memory right after its frame buffer, where the
+  game keeps its heap.
+- Dead or Alive 2 Ultimate: the palace stage's floor no longer shows white
+  and blue specks along its step edges (#42). The NV2A's signed blend
+  equations are now done as the console does them, with any blend factors.
+- Psychonauts no longer stands on its logo on the first boot (#360). That
+  boot unpacks its data to the hard disk's cache, and when the PC read the
+  disc image slower than it wrote the hard disk, the copy stopped just short
+  of its end. Disc and hard disk requests now complete in the order the game
+  asked for them, as on the console, where both drives share one channel.
+
 ## 1.2.1 (2026-11)
 
 - The About screen includes a link to the website, xbased-emu.com.

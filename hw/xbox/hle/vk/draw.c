@@ -1228,13 +1228,17 @@ static unsigned shadow_fmt(uint32_t id)
 }
 
 /* The draw blends with a signed equation the shader does (sblend): 1
- * ADDSIGNED, 2 REVSUBTRACTSIGNED; 0 none (or factors other than ONE / ONE,
- * drawn unsigned). */
+ * ADDSIGNED, 2 REVSUBTRACTSIGNED, whatever the factors, as the console's
+ * (nxdk_pgraph_tests' Blend_tests spot pictures: the target's byte plus or
+ * minus the output's as a two's-complement one, from 0 to 255, the same with
+ * every source and destination factor); 0 none. Both as signed bytes and the
+ * result's bits stored, the target's bright texels read as negative and
+ * came out as garbage: Dead or Alive 2 Ultimate's palace floor, whose step
+ * edges it draws with REVSUBTRACTSIGNED ONE / ONE, white and blue specks. */
 static unsigned signed_blend(const HleCmdState *s)
 {
     uint32_t op = s->rs[RS_BLENDOP];
-    if (!g_hvk.caps.fbfetch || !s->rs[RS_ALPHABLENDENABLE] || (op != 0xF005 && op != 0xF006) ||
-        s->rs[RS_SRCBLEND] != 1 || s->rs[RS_DESTBLEND] != 1) {
+    if (!g_hvk.caps.fbfetch || !s->rs[RS_ALPHABLENDENABLE] || (op != 0xF005 && op != 0xF006)) {
         return 0;
     }
     return op == 0xF006 ? 1 : 2;
@@ -5417,8 +5421,8 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
      * saturating: Midnight Club 3 counts its headlight volumes' front and back
      * faces into the alpha of a cleared light mask, so the faces in front of
      * the road cancel to 0 (an unsigned subtract clamps at 0 and the add then
-     * lights everything in front of the volume). With ONE / ONE the shader
-     * does the equation on the target's pixel (fbfetch), the blend is off. */
+     * lights everything in front of the volume). The shader does the
+     * equation on the target's pixel (fbfetch), the blend is off. */
     if (k.blend_en && (k.op == 0xF005 || k.op == 0xF006)) {
         unsigned sb = signed_blend(s);
         if (sb && rt && (rt->aspect & VK_IMAGE_ASPECT_COLOR_BIT)) {

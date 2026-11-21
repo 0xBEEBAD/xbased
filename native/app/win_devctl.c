@@ -260,6 +260,10 @@ static void cmd_threads(Out *o)
         for (int g = 0; g < 8; g++) {
             out(o, ",\"%s\":\"%08x\"", k_greg[g], r[g]);
         }
+        /* its APCs: queued, one running (and how deep), the wait alertable */
+        out(o, ",\"apcs\":%u,\"in_apc\":%s,\"apc_nest\":%u,\"alertable\":%s", t->napcs,
+            t->apc.in_apc ? "true" : "false", t->apc_nest,
+            t->state == NC_T_WAITING && t->wait.alertable ? "true" : "false");
         /* the EBP chain: return addresses */
         out(o, ",\"frames\":[");
         uint32_t bp = r[5];

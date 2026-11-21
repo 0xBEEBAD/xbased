@@ -796,11 +796,12 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
                       k->debug == 24 ? "sampc(2u, vec3(0.3, 0.5, 0.8))" : "outc";
     put(&b, "  oColor = %s;\n%s", dbg, k->out_bgra ? "  oColor = oColor.bgra;\n" : "");
     if (k->sblend) {
-        put(&b, "  { ivec4 sv = ivec4(floor(clamp(%s, 0.0, 1.0) * 255.0 + 0.5));\n"
+        /* the NV2A's (draw.c signed_blend): the target's byte as it is, the
+         * output's two's complement, from 0 to 255 */
+        put(&b, "  { ivec4 sv = ivec4(floor(clamp(oColor, 0.0, 1.0) * 255.0 + 0.5));\n"
         "    ivec4 dv = ivec4(floor(clamp(subpassLoad(uFb), 0.0, 1.0) * 255.0 + 0.5));\n"
-        "    sv -= 256 * (sv >> 7); dv -= 256 * (dv >> 7);\n"
-        "    ivec4 r = clamp(dv %s sv, ivec4(-128), ivec4(127));\n"
-        "    oColor = vec4(r & 255) / 255.0; }\n", "oColor", k->sblend == 1 ? "+" : "-");
+        "    sv -= 256 * (sv >> 7);\n"
+        "    oColor = vec4(clamp(dv %s sv, ivec4(0), ivec4(255))) / 255.0; }\n", k->sblend == 1 ? "+" : "-");
     }
     put(&b, "%s}\n", k->wbuf ? HLE_WBUF_STORE_GLSL :
         k->vol & HLE_PSH_ZCUT ? "  { float zo = uintBitsToFloat(pc.psc[18]) + uintBitsToFloat(pc.psc[19]) *\n"

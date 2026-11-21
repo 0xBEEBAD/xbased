@@ -139,6 +139,8 @@ typedef struct PbObj {
     uint64_t synced;                    /* written when the two last matched */
     CohSnap snap;                       /* its memory's write counts then */
     uint64_t land_v, land_w;            /* its image's landing asked for: value, written then */
+    uint32_t gpu_rows;                  /* rows from its start the GPU drew, cleared or copied into (land_rows);
+                                           0: none that way */
     uint64_t land_last;                 /* its latest landing's value (in flight till completed) */
     uint64_t shown_seq;                 /* g_coh.shows when it or a frame over it was last shown */
     uint64_t absorb_swap;               /* when a neighbour's writes on its edge pages were last
@@ -950,6 +952,42 @@ static void obj_landing_queued(const PbObj *o)
     }
 }
 
+/* The GPU wrote o's rows up to end (from its start): a draw or clear within
+ * the surface clip, a copy's rectangle. */
+static void obj_gpu_rows(PbObj *o, uint64_t end)
+{
+    const uint32_t r = (uint32_t)MIN(end, (uint64_t)o->d.h);
+    o->gpu_rows = MAX(o->gpu_rows, r);
+}
+
+/* The bound colour target's rows a draw or clear can reach: the surface
+ * clip's (the NV2A writes nothing past it) from where the view starts in
+ * the object, which a display-wide surface makes as tall as the display
+ * (linear_size) */
+static void rt_gpu_rows(PbObj *o)
+{
+    if (!o->d.pitch) {
+        o->gpu_rows = o->d.h;           /* (swizzled: the whole) */
+        return;
+    }
+    const uint32_t cpa = R(NV097_SET_SURFACE_COLOR_OFFSET) & 0x0FFFFFFFu, v = R(NV097_SET_SURFACE_CLIP_VERTICAL);
+    const uint64_t at = cpa >= o->d.pa ? (cpa - o->d.pa) / o->d.pitch : 0;
+    obj_gpu_rows(o, at + ((uint64_t)(v & 0xFFFF) + (v >> 16)) * g_pd.aa_y);
+}
+
+/* The bytes of o's image a writeback lands: the rows the GPU wrote, not
+ * the rows the object has. Tomb Raider: Legend's front buffer is 640 x 448
+ * (its surface clip and clears), a 640 x 480 object as wide as the display,
+ * its heap right after the 448 rows: the image's 32 rows past them, never
+ * drawn, landed over the heap at the CPU's first write to the front buffer,
+ * a free block's links zeroed, and its allocator followed a NULL link (on
+ * the boot that formats its cache partition, #376). None known (written
+ * only by uploads of its memory): all of them, as before. */
+static uint32_t land_rows(const PbObj *o)
+{
+    return o->gpu_rows ? MIN(o->gpu_rows, o->d.h) : o->d.h;
+}
+
 /* debug: XBASED_HLE_PB_RTLOG=1 logs the CPU's writes into targets, with the
  * swaps and display starts around them */
 static bool rtlog_on(void)
@@ -1072,7 +1110,7 @@ static void writeback(uint32_t id)
      * frame either (Haunted Mansion copies each Bink frame into a frame
      * buffer and draws it from there: its cutscenes were black) */
     rt_cpu_upload(id, false);
-    const uint32_t len = d->pitch * d->h;
+    const uint32_t len = d->pitch * (o ? land_rows(o) : d->h);
     const uint32_t fb = hle_res_rb_fb(len);
     if (!fb) {
         coh_pend_wait_inplace(d->pa, len);
@@ -1446,6 +1484,7 @@ static void clear(uint32_t flags)
     hle_fe_commit();
     if (g_pd.rt_obj && (c->flags & HLE_CLEAR_TARGET)) {
         g_pd.rt_obj->written = ++g_pd.wseq;
+        rt_gpu_rows(g_pd.rt_obj);
         coh_drawn(g_pd.rt_obj);
     }
     if (c->flags & (HLE_CLEAR_ZBUFFER | HLE_CLEAR_STENCIL)) {
@@ -1781,7 +1820,7 @@ static bool present_flipped(void)
     __atomic_store_n(&g_pd.shown_ns, hle_now_ns(), __ATOMIC_RELAXED);
     hle_pb_frame_flipped();
     hle_hitch_frame(id, HLE_FR_FLIP);
-    hle_disp_present_at(id, hle_host_vblank_ns());  /* this vblank's scanout shows it: due then, as a flip's */
+    hle_disp_present_at(id, hle_host_flip_vblank_ns());  /* this vblank's scanout shows it: due then, as a flip's */
     fps_log();
     if (g_pd.flipped_presents++ < 4) {
         hle_log("xbased-hle-pb", "scanout: swap %u, flipped before it came, had no flip since: shown "
@@ -2045,7 +2084,7 @@ void hle_pb_flipped(uint32_t start)
     hle_hitch_frame(id, HLE_FR_FLIP);
     /* due at the vblank this flip came in: the console's display changes
      * there, whenever the handler got to run */
-    hle_disp_present_at(id, hle_host_vblank_ns());
+    hle_disp_present_at(id, hle_host_flip_vblank_ns());
     fps_log();
     g_pd.shown++;
 }
@@ -2581,6 +2620,7 @@ bool hle_pbd_blit_images(uint32_t sbase, uint32_t sp, uint32_t dbase, uint32_t d
     c->y[0] = (int32_t)oy;
     hle_fe_commit();
     dd->written = ++g_pd.wseq;
+    obj_gpu_rows(dd, (uint64_t)oy + h);
     coh_drawn(dd);
     return true;
 }
@@ -3017,6 +3057,7 @@ static uint32_t target_part(uint32_t pa, uint32_t code, const HleFmtInfo *fi, ui
     if (whole) {
         dst->written = ++g_pd.wseq;
     }
+    obj_gpu_rows(dst, (uint64_t)y + h);
     coh_drawn(dst);
     return dst->id;
 }
@@ -3481,6 +3522,7 @@ static unsigned writeback_range(uint32_t pa, uint32_t end, bool gpu_newer, const
             kept++;
             continue;
         }
+        len = next->d.pitch * land_rows(next);   /* (the rows the GPU wrote) */
         const uint32_t fb = hle_res_rb_fb(len);
         if (!fb) {
             coh_pend_wait_inplace(next->d.pa, len);
@@ -3736,6 +3778,7 @@ static void emit(HleCmdDraw *d)
     rt_first_write(false);
     if (g_pd.rt_obj) {
         g_pd.rt_obj->written = ++g_pd.wseq;
+        rt_gpu_rows(g_pd.rt_obj);
         coh_drawn(g_pd.rt_obj);
     }
     if (g_pd.ds && ((R(0x030C) && R(0x035C)) || (R(0x032C) && (R(0x0360) & 0xFF)))) {

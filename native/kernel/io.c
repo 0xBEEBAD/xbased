@@ -1062,6 +1062,7 @@ typedef struct DiscJob {
     uint32_t thread_id;      /* its id then: the slot may hold another thread by the end */
     bool sync;               /* a synchronous handle's: the thread waits for it (nc_ke_block) */
     bool write;              /* a hard disk file's write from the buffer (write_data), not a read */
+    uint64_t seq;            /* an overlapped one's place among them all (io_complete_done), 0: a synchronous one */
     unsigned slot;           /* its file's slot (g_files), counted in g_file_jobs till it completes */
     bool ok;
     int err;
@@ -1086,6 +1087,7 @@ typedef struct Reader {
 static Reader g_readers[2] = {{PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER},
                               {PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER}};
 static unsigned g_file_jobs[MAX_FILES];    /* each file's jobs queued and not yet completed (the guest CPU's) */
+static uint64_t g_async_seq, g_async_done; /* overlapped jobs queued, and completed in that order (the guest CPU's) */
 static bool g_io_hurry;      /* a savestate's drain: no drive time left to wait (atomic) */
 
 static uint64_t mono_ns(void)
@@ -1255,6 +1257,7 @@ static bool disc_read_later(NcKernel *k, const NcFile *nf, const uint32_t *a, co
     if (queued) {
         g_file_jobs[j.slot]++;
         pin_buffer(k, &j, 1);
+        j.seq = sync ? 0 : ++g_async_seq;
         r->q[(r->head + r->n++) % DISC_JOBS] = j;
         r->busy++;
         pthread_cond_signal(&r->cv);
@@ -1314,9 +1317,29 @@ static void disc_read_done(NcKernel *k, const DiscJob *j)
 }
 
 /* The jobs the drives finished, completed: their IoStatusBlocks, events,
- * APCs, waiting threads. done: room for DISC_JOBS. */
+ * APCs, waiting threads. done: room for DISC_JOBS.
+ *
+ * Overlapped ones complete in the order they were asked for, the two
+ * drives' together: the console's DVD drive and hard disk share one IDE
+ * channel, which serves one request at a time, in turn. Here each drive
+ * has its own thread, and a request one finishes waits (held) for those
+ * asked before it on the other. Psychonauts' first boot unpacks its data
+ * to the cache drive on a worker that waits (alertably, with no timeout)
+ * for its reads' and writes' completion routines, and steps the copy at
+ * each one: it reads ahead from the disc and writes its last blocks after
+ * the last read, whose completion the console's channel delivers before
+ * theirs. With the hard disk on its own, a disc slower than the PC's
+ * writes (a slow drive under the image, or console timing at 2.5 MB/s
+ * here) had those writes done first; the last read's routine was then the
+ * last one, the step it woke left the last block's write for a later
+ * step, and nothing woke the worker again: the title stood on its logo
+ * with the copy 112640 bytes short (#360; 0 of 3 boots got past it at
+ * 2.5 MB/s, 3 of 3 in order). */
 static void io_complete_done(NcKernel *k, DiscJob *done)
 {
+    static DiscJob held[2 * DISC_JOBS];     /* the guest CPU's thread only */
+    static unsigned nheld;
+    bool more = false;
     for (unsigned d = 0; d < 2; d++) {
         Reader *const r = &g_readers[d];
         pthread_mutex_lock(&r->mu);
@@ -1326,7 +1349,27 @@ static void io_complete_done(NcKernel *k, DiscJob *done)
         r->busy -= n;
         pthread_mutex_unlock(&r->mu);
         for (unsigned i = 0; i < n; i++) {
-            disc_read_done(k, &done[i]);
+            if (!done[i].seq) {
+                disc_read_done(k, &done[i]);
+            } else if (nheld < sizeof(held) / sizeof(held[0])) {
+                held[nheld++] = done[i];
+                more = true;
+            } else {
+                disc_read_done(k, &done[i]);    /* (can't be: a drive holds DISC_JOBS at most) */
+            }
+        }
+    }
+    while (more) {
+        more = false;
+        for (unsigned i = 0; i < nheld; i++) {
+            if (held[i].seq <= g_async_done + 1) {
+                const DiscJob j = held[i];
+                held[i] = held[--nheld];
+                g_async_done = j.seq > g_async_done ? j.seq : g_async_done;
+                disc_read_done(k, &j);
+                more = true;
+                break;
+            }
         }
     }
 }
@@ -2365,8 +2408,8 @@ static uint64_t write_data(NcKernel *k, const uint32_t *a, const uint8_t *src, u
             nf->wrote = true;
             io_moved(k, nf, a[7], off + len);
             if (g_trace_io) {
-                nc_log("xbased-native-io", "write %s +%llx %u from %08x %s", nf->path, (unsigned long long)off, len, va,
-                       nf->async ? "pending" : "waited for");
+                nc_log("xbased-native-io", "write %s +%llx %u from %08x %s%s%s", nf->path, (unsigned long long)off, len,
+                       va, nf->async ? "pending" : "waited for", a[1] ? " event" : "", a[2] ? " apc" : "");
             }
             if (!nf->async) {
                 nc_ke_block(k);         /* the write's status replaces this when it completes */

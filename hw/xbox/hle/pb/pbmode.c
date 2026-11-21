@@ -967,7 +967,7 @@ static void pace_flip(void)
         return;
     }
     const int64_t next = g_pb.pace_slot + every;
-    g_pb.pace_slot = g_pb.pace_slot && now < next ? next : now;
+    g_pb.pace_slot = hle_host_flip_slot(g_pb.pace_slot && now < next ? next : now, every);
     /* (a flip less than an eighth of that early holds nothing: one on a
      * vblank of its own, a little before the grid's, loses no time) */
     if (g_pb.pace_slot - now > every / 8) {

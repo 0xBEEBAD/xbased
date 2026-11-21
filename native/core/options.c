@@ -16,6 +16,7 @@
 #include <string.h>
 
 void nc_audio_set_channels(int n);  /* dev/apu/out.c */
+void nc_apu_set_hrtf(bool on);      /* dev/apu/apu.c */
 
 void nc_options_init(NcOptions *o)
 {
@@ -115,6 +116,9 @@ bool nc_option(NcOptions *o, const char *arg)
         nc_kernel_set_audio(surround);
         nc_audio_set_channels(surround ? 6 : 2);
         nc_log("xbased-app", "audio %s", surround ? "5.1 (Dolby Digital)" : "stereo");
+    } else if ((v = value(arg, "hrtf="))) {
+        nc_apu_set_hrtf(atoi(v) != 0);          /* the 3D voices' HRTF filters (on by default) */
+        nc_log("xbased-app", "HRTF filtering %s", atoi(v) ? "on" : "off");
     } else if ((v = value(arg, "pal60="))) {
         nc_kernel_set_pal60(atoi(v) != 0);      /* PAL titles at 60 Hz (default) or 50 */
     } else if ((v = value(arg, "lang="))) {

@@ -2224,7 +2224,7 @@ static void voice_process(MCPXAPUState *d, uint8_t *c,
      * frame. */
     float ears[NUM_SAMPLES_PER_FRAME][2];
     if (spatial) {
-        if (g_apu_config.hrtf && APU_CHECK(hrtf_handle < HRTF_ENTRY_COUNT)) {
+        if (__atomic_load_n(&g_apu_config.hrtf, __ATOMIC_RELAXED) && APU_CHECK(hrtf_handle < HRTF_ENTRY_COUNT)) {
             hrtf_filter_set_target_params(&vf->hrtf,
                                           d->vp.hrtf.entries[hrtf_handle].hrir,
                                           d->vp.hrtf.entries[hrtf_handle].itd);

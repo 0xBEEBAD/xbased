@@ -10,6 +10,7 @@
 #include "native/app/ui/library.h"
 #include "native/app/ui/config.h"
 #include "native/app/ui/ui.h"
+#include "native/core/fold_image.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -699,7 +700,13 @@ static void scan_dir(const char *dir, int depth)
         if (!SDL_GetPathInfo(p, &pi)) {
             continue;
         }
-        if (pi.type == SDL_PATHTYPE_DIRECTORY && is_game_folder(p) && strlen(p) < sizeof(((XdGame *)0)->path) - 1) {
+        char img[1200];
+        SDL_PathInfo ii;
+        if (pi.type == SDL_PATHTYPE_DIRECTORY && is_game_folder(p) && nc_fold_attached_image(p, img, sizeof(img)) &&
+            SDL_GetPathInfo(img, &ii) && strlen(img) < sizeof(((XdGame *)0)->path) - 1) {
+            add_game(img, &ii);     /* an attacher's folder (#367): the image is the disc */
+        } else if (pi.type == SDL_PATHTYPE_DIRECTORY && is_game_folder(p) &&
+                   strlen(p) < sizeof(((XdGame *)0)->path) - 1) {
             add_game(p, &pi);       /* an extracted game: the folder is the disc */
         } else if (pi.type == SDL_PATHTYPE_DIRECTORY) {
             scan_dir(p, depth + 1);

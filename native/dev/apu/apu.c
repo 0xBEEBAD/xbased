@@ -710,6 +710,13 @@ static void *mcpx_apu_frame_thread(void *arg)
     return NULL;
 }
 
+/* The 3D voices' HRTF filters on or off (the hrtf= option, the audio
+ * settings): the voices read it every frame, so it applies at once (#374). */
+void nc_apu_set_hrtf(bool on)
+{
+    __atomic_store_n(&g_apu_config.hrtf, on, __ATOMIC_RELAXED);
+}
+
 /* The app's audio settings: the defaults above; NC_APU_DSP=1 runs the GP and
  * EP frames to completion, NC_APU_HRTF=0 turns the 3D voices' filters off,
  * NC_APU_WORKERS=n sets the voice workers (0: by the CPU count),

@@ -1174,7 +1174,7 @@ static const struct {
     {S_CRT, S_H_CRT, HELP_NOW}, {S_FULLSCREEN, S_H_FULLSCREEN, HELP_NEXT_START},
     {S_SHOW_FPS, S_H_SHOW_FPS, HELP_NOW}, {S_VSYNC, S_H_VSYNC, HELP_NOW}, {S_FSRATE, S_H_FSRATE, HELP_NEXT_START},
     {S_MAXFPS, S_H_MAXFPS, HELP_NEXT_START}, {S_AUDIO_OUTPUT, S_H_AUDIO_OUT, HELP_NEXT_START},
-    {S_VOLUME, S_H_VOLUME, HELP_ON_RESUME}, {S_MUTE_BG, S_H_MUTE_BG, HELP_ON_RESUME},
+    {S_VOLUME, S_H_VOLUME, HELP_ON_RESUME}, {S_HRTF, S_H_HRTF, HELP_ON_RESUME}, {S_MUTE_BG, S_H_MUTE_BG, HELP_ON_RESUME},
     {S_UI_SOUNDS, S_H_UI_SOUNDS, HELP_NOW}, {S_CONSOLE_LANG, S_H_CONSOLE_LANG, HELP_NEXT_START},
     {S_WIDESCREEN, S_H_WIDESCREEN, HELP_NEXT_START}, {S_P480, S_H_VMODE, HELP_NEXT_START},
     {S_P720, S_H_VMODE, HELP_NEXT_START}, {S_I1080, S_H_VMODE, HELP_NEXT_START},
@@ -1464,8 +1464,44 @@ static size_t quote_arg(char *cmd, size_t n, size_t size, const char *s)
 }
 #endif
 
+/* The file a game's processes note their time paused in (win_main.c
+ * paused_note: a line of milliseconds each, a restart's run its own), for
+ * the session the dashboard starts (#379) */
+static void paused_file(char *out, size_t n)
+{
+    snprintf(out, n, "%ssession_paused.txt", cfg_data_dir());
+}
+
+/* the session's time paused, its file gone after */
+static uint64_t session_paused_ms(void)
+{
+    char p[1200];
+    paused_file(p, sizeof(p));
+    uint64_t sum = 0;
+    FILE *f = fopen(p, "r");
+    if (f) {
+        unsigned long long v;
+        while (fscanf(f, "%llu", &v) == 1) {
+            sum += v;
+        }
+        fclose(f);
+    }
+    remove(p);
+    return sum;
+}
+
 static void go_spawn(void)
 {
+    {
+        char p[1200];
+        paused_file(p, sizeof(p));
+        remove(p);      /* (one an earlier session's crash left) */
+#ifdef _WIN32
+        SetEnvironmentVariableA("XBASED_PAUSED_FILE", p);
+#else
+        setenv("XBASED_PAUSED_FILE", p, 1);
+#endif
+    }
 #ifdef _WIN32
     {   /* the game gives this window the foreground as it quits (win_main.c give_foreground) */
         char hv[32];
@@ -1622,12 +1658,14 @@ static void wait_child(void)
     }
     if (g_go.t_start && g_go.game[0]) {
         /* the session's over (its restarts and loaded states the same one):
-         * the game's time played grows by it (#188) */
+         * the game's time played grows by it (#188), its time paused left
+         * out (#379) */
+        const uint64_t ms = SDL_GetTicks() - g_go.t_start, paused = session_paused_ms();
         const int n = lib_count();
         for (int i = 0; i < n; i++) {
             LibGame *g = lib_get(i);
             if (g && !strcmp(g->g.path, g_go.game)) {
-                lib_add_playtime(g, (int64_t)((SDL_GetTicks() - g_go.t_start) / 1000));
+                lib_add_playtime(g, (int64_t)((ms > paused ? ms - paused : 0) / 1000));
                 break;
             }
         }

@@ -80,6 +80,7 @@
 /* native/dev/apu/out.c */
 void nc_audio_set_paused(bool on);
 void nc_audio_set_volume(float v);
+void nc_apu_set_hrtf(bool on);      /* dev/apu/apu.c */
 /* native/dev/ohci.c */
 void nc_dev_ohci_set_pads(unsigned mask);
 /* hw/xbox/hle/pb/pbmode.h */
@@ -88,6 +89,8 @@ bool hle_pb_active(void);
 #define MAX_ARGS 512
 
 static NcCore g_core;
+
+static void pause_core(bool on);
 static int g_disc_fd = -1;
 static SDL_AtomicInt g_core_state; /* 0 booting, 1 running, -1 failed or stopped */
 static struct ANativeWindow g_nw;
@@ -339,8 +342,46 @@ static uint32_t g_mbuttons;     /* ... its buttons down (SDL_BUTTON_MASK) */
 static SDL_Window *g_mgrab_win;
 static bool g_frame_keep;   /* this run ends for another (run_again): the frame stays */
 
+/* The run's time paused (the pause hotkey, the in-game menu, the window
+ * minimized, a restart's handover), in SDL_GetTicks milliseconds: as the
+ * process ends its total goes on a line of the dashboard's file for the
+ * session (XBASED_PAUSED_FILE, dash.c), and the game's time played leaves
+ * it out (#379). */
+static struct {
+    bool on;
+    uint64_t since, total;
+} g_paused_ms;
+
+static void paused_note(void)
+{
+    const char *p = getenv("XBASED_PAUSED_FILE");
+    if (!p || !*p) {
+        return;
+    }
+    const uint64_t t = g_paused_ms.total + (g_paused_ms.on ? SDL_GetTicks() - g_paused_ms.since : 0);
+    FILE *f = fopen(p, "a");
+    if (f) {
+        fprintf(f, "%llu\n", (unsigned long long)t);
+        fclose(f);
+    }
+}
+
+/* The emulation paused or let go, its time paused counted (g_paused_ms) */
+static void pause_core(bool on)
+{
+    nc_kernel_set_paused(&g_core.kernel, on);
+    const uint64_t now = SDL_GetTicks();
+    if (on && !g_paused_ms.on) {
+        g_paused_ms.since = now;
+    } else if (!on && g_paused_ms.on) {
+        g_paused_ms.total += now - g_paused_ms.since;
+    }
+    g_paused_ms.on = on;
+}
+
 static _Noreturn void exit_now(int code)
 {
+    paused_note();
     const bool closing = g_frame && !(code & 0x40000000) && !g_frame_keep;
     if (closing) {
         nc_frame_close(g_frame);    /* the session's end: the frame hands the screen back to the dashboard */
@@ -372,7 +413,7 @@ static void wait_next_run(void *ev, void *proc);
  * the keyboard, between the two. */
 static void run_again(const char *extra, bool hold)
 {
-    nc_kernel_set_paused(&g_core.kernel, true);    /* the picture held is the last one */
+    pause_core(true);    /* the picture held is the last one */
     nc_audio_set_paused(true);
     char hold_path[MAX_PATH + 32] = "";
     if (hold) {
@@ -1258,6 +1299,9 @@ static void apply_cfg(const Config *global, const Config *game, bool sound)
         if ((v = cfg_get(c, "mutebg"))) {
             g_mute_bg = atoi(v) != 0;
         }
+        if ((v = cfg_get(c, "hrtf"))) {
+            nc_apu_set_hrtf(atoi(v) != 0);
+        }
     }
     nc_present_set_crop(crop_h, crop_v);
     g_fx = cfg_bool(global, "ui.fx", true);
@@ -1292,7 +1336,7 @@ static void ingame_menu(SDL_Window *win, bool *paused, bool minimized)
     if (SDL_GetAtomicInt(&g_core_state) != 1) {
         return;
     }
-    nc_kernel_set_paused(&g_core.kernel, true);
+    pause_core(true);
     nc_audio_set_paused(true);
     mouse_hold(false);      /* the menu's pointer */
     int slot = 0;
@@ -1314,7 +1358,7 @@ static void ingame_menu(SDL_Window *win, bool *paused, bool minimized)
         }
         ui_overlay_off();
         g_ov_up = false;
-        nc_kernel_set_paused(&g_core.kernel, *paused || minimized);
+        pause_core(*paused || minimized);
         nc_audio_set_paused(*paused || minimized);
         char path[MAX_PATH + 64];
         snprintf(path, sizeof(path), "%s", cfg_global_path());
@@ -1351,7 +1395,7 @@ static void ingame_menu(SDL_Window *win, bool *paused, bool minimized)
     /* the presenter back on the window before anything is shown or saved */
     SDL_Delay(50);
     nc_present_frame(&g_nw);
-    nc_kernel_set_paused(&g_core.kernel, *paused || minimized);
+    pause_core(*paused || minimized);
     nc_audio_set_paused(*paused || minimized);
     char path[MAX_PATH + 64];
     snprintf(path, sizeof(path), "%s", cfg_global_path());
@@ -1577,7 +1621,7 @@ static void hotkey_do(SDL_Window *win, int h, bool down, int slot, bool *paused,
         break;
     case IM_HK_PAUSE:
         *paused = !*paused;
-        nc_kernel_set_paused(&g_core.kernel, *paused || minimized);
+        pause_core(*paused || minimized);
         nc_audio_set_paused(*paused || minimized);
         nc_log("xbased-app", "%s", *paused ? "paused" : "resumed");
         break;
@@ -1862,6 +1906,15 @@ int main(int argc, char *argv[])
     }
     if (!xbox_dash) {
         snprintf(g_disc, sizeof(g_disc), "%s", disc);
+        {
+            /* a folder with an ISO attacher's default.xbe beside the game's
+             * image, as a modded Xbox keeps them: the image (#367) */
+            char img[MAX_PATH * 2];
+            if (nc_fold_attached_image(g_disc, img, sizeof(img))) {
+                nc_log("xbased-app", "%s: an attacher's folder, its image %s", g_disc, img);
+                snprintf(g_disc, sizeof(g_disc), "%s", img);
+            }
+        }
         game_options(g_disc);
         /* an extracted game: its folder (or default.xbe) read as the disc it makes */
         char xbe[MAX_PATH * 2];
@@ -2259,7 +2312,7 @@ int main(int argc, char *argv[])
             case SDL_EVENT_WINDOW_MINIMIZED:
             case SDL_EVENT_WINDOW_RESTORED:
                 minimized = ev.type == SDL_EVENT_WINDOW_MINIMIZED;
-                nc_kernel_set_paused(&g_core.kernel, paused || minimized);
+                pause_core(paused || minimized);
                 nc_audio_set_paused(paused || minimized);
                 break;
             case SDL_EVENT_WINDOW_FOCUS_GAINED:
@@ -2370,7 +2423,7 @@ int main(int argc, char *argv[])
             const bool m = nc_frame_minimized(g_frame);
             if (m != minimized) {
                 minimized = m;      /* a child window hears nothing of its frame's minimizing */
-                nc_kernel_set_paused(&g_core.kernel, paused || minimized);
+                pause_core(paused || minimized);
                 nc_audio_set_paused(paused || minimized);
             }
         }
