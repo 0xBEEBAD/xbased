@@ -1,5 +1,9 @@
 # xbased changelog
 
+## 1.2.1 (2026-11)
+
+- The About screen includes a link to the website, xbased-emu.com.
+
 ## 1.2.0 (2026-11)
 
 ### The GPU layer
