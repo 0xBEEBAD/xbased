@@ -8,6 +8,7 @@
 #include "native/app/ui/cheat_text.h"
 #include "native/app/ui/input_map.h"
 #include "native/app/mod_fit.h"
+#include "native/app/mod_jmp.h"
 #include "native/app/win_mods.h"
 #include "native/core/xcheat.h"
 /* (a state's JPEG thumbnail, load_thumb) */
@@ -641,7 +642,7 @@ void scr_game_settings(void)
 /* ------------------------------------------------------------ mods and cheats */
 
 typedef struct {
-    char id[64], name[128], desc[512];
+    char id[160], name[160], desc[512];
     bool cheat;
 } ModItem;
 
@@ -804,6 +805,28 @@ static void xcheat_toggle(const XOpt *e)
     }
 }
 
+/* A .jmp patch (Jay's Magic Patcher's, #391) listed when it is for the
+ * disc's executable (its game, its build's CRC-32, every record's bytes
+ * there: mod_jmp.h); its name the file's, its notes said with it */
+static void jmp_item(int disc_fd, const char *path, const char *id)
+{
+    JmpInfo info;
+    char why[200] = "";
+    if (!nc_win_mods_jmp_fits(disc_fd, path, &info, why, sizeof(why))) {
+        nc_log("xbased-app", "mods: %s: not for this executable (%s)", path, why);
+        return;
+    }
+    ModItem *m = &g_mods[g_nmods++];
+    memset(m, 0, sizeof(*m));
+    snprintf(m->id, sizeof(m->id), "%s", id);
+    snprintf(m->name, sizeof(m->name), "%s", id);
+    if (info.notes[0]) {
+        snprintf(m->desc, sizeof(m->desc), "%s %s", T(S_JMP_PATCH), info.notes);
+    } else {
+        snprintf(m->desc, sizeof(m->desc), "%s", T(S_JMP_PATCH));
+    }
+}
+
 static void mods_load(void)
 {
     if (!strcmp(g_mods_key, D.cur->g.key)) {
@@ -829,8 +852,9 @@ static void mods_load(void)
         char p[1400];
         const size_t nl = strlen(names[i]);
         const bool ips = nl > 4 && !SDL_strcasecmp(names[i] + nl - 4, ".ips");
-        char id[64];
-        snprintf(id, sizeof(id), "%.*s", (int)(ips ? nl - 4 : nl), names[i]);
+        const bool jmp = nc_jmp_name(names[i]);
+        char id[160];
+        snprintf(id, sizeof(id), "%.*s", (int)(ips || jmp ? nl - 4 : nl), names[i]);
         bool dup = false;
         for (int k = 0; k < g_nmods; k++) {
             dup |= !SDL_strcasecmp(g_mods[k].id, id);
@@ -841,6 +865,11 @@ static void mods_load(void)
         char why[160] = "";
         if (ips && !nc_win_mods_ips_fits(cfg_exe_dir(), disc_fd, dirs[di], id, why, sizeof(why))) {
             continue;       /* made for another release's executable */
+        }
+        if (jmp) {
+            snprintf(p, sizeof(p), "%s/%s", dirs[di], names[i]);
+            jmp_item(disc_fd, p, id);
+            continue;
         }
         if (ips) {
             /* an IPS patch: its name the file's, underscores as spaces */
@@ -881,6 +910,30 @@ static void mods_load(void)
         SDL_free(t);
     }
     SDL_free(names);
+    }
+    /* .jmp patches in mods/ itself: the ones that name this title */
+    const char *roots[2] = {cfg_data_dir(), cfg_exe_dir()};
+    for (int r = 0; r < (strcmp(roots[0], roots[1]) ? 2 : 1); r++) {
+        char rd[1200];
+        snprintf(rd, sizeof(rd), "%smods", roots[r]);
+        int n = 0;
+        char **names = SDL_GlobDirectory(rd, "*.jmp", SDL_GLOB_CASEINSENSITIVE, &n);
+        for (int i = 0; names && i < n && g_nmods < 96; i++) {
+            char p[1400], id[160];
+            snprintf(p, sizeof(p), "%s/%s", rd, names[i]);
+            if (strchr(names[i], '/') || nc_jmp_title(p) != D.cur->g.title_id) {
+                continue;
+            }
+            snprintf(id, sizeof(id), "%.*s", (int)(strlen(names[i]) - 4), names[i]);
+            bool dup = false;
+            for (int k = 0; k < g_nmods; k++) {
+                dup |= !SDL_strcasecmp(g_mods[k].id, id);
+            }
+            if (!dup) {
+                jmp_item(disc_fd, p, id);
+            }
+        }
+        SDL_free(names);
     }
     if (disc_fd >= 0) {
         close(disc_fd);
@@ -942,7 +995,7 @@ static const ModItem *fps_patch(void)
 {
     for (int i = 0; i < g_nmods; i++) {
         const ModItem *m = &g_mods[i];
-        char s[200];
+        char s[sizeof(m->id) + sizeof(m->name) + 2];
         snprintf(s, sizeof(s), "%s %s", m->id, m->name);
         for (char *c = s; *c; c++) {
             *c = (char)tolower((unsigned char)*c);

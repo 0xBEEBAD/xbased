@@ -959,6 +959,16 @@ static bool dma_object(uint32_t *base, uint32_t *limit, uint32_t *inst)
  * the limit when lifted), on a grid of it while frames keep up, as a GPU
  * that slow would: the guest's D3D waits on it as on the console's. A flip
  * that comes later than that (a frame that took longer) holds nothing. */
+/* A flip later than its slot keeps the grid: it is on the slot it came in
+ * (its picture due there, the presenter's lead covering the rest) when that
+ * is less than half the pace behind it, else on the next. From where it came
+ * instead, the grid moved, and the next flip, on time, fell on the old one:
+ * two pictures in one period. Republic Commando (#395) flips as soon as each
+ * frame is drawn and now and then took 19 ms over one: due 16.7, then 11.6,
+ * then 5.1 ms apart, about once a second at Original, Up to 60 and Up to 30
+ * alike. The grid starts over after a long stop (a load). */
+#define PACE_RESTART 8
+
 static void pace_flip(void)
 {
     const int64_t every = hle_host_flip_min_ns(), now = hle_now_ns();
@@ -967,7 +977,16 @@ static void pace_flip(void)
         return;
     }
     const int64_t next = g_pb.pace_slot + every;
-    g_pb.pace_slot = hle_host_flip_slot(g_pb.pace_slot && now < next ? next : now, every);
+    int64_t want = now;
+    if (g_pb.pace_slot && now < next) {
+        want = next;
+    } else if (g_pb.pace_slot && now - next < PACE_RESTART * every) {
+        want = next + (now - next) / every * every;
+        if (now - want > every / 2) {
+            want += every;
+        }
+    }
+    g_pb.pace_slot = hle_host_flip_slot(want, every);
     /* (a flip less than an eighth of that early holds nothing: one on a
      * vblank of its own, a little before the grid's, loses no time) */
     if (g_pb.pace_slot - now > every / 8) {

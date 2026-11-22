@@ -1,5 +1,40 @@
 # xbased changelog
 
+## 1.2.4 (2026-11)
+
+### New
+- Sound as the console makes it (#375): the audio processor's own DSP
+  program, which many games use for their mix, their reverb and the like
+  and their 5.1 output, now runs recompiled to x86-64, and its speaker
+  outputs are what you hear. Each game plays its own mix and effects, and
+  in 5.1 every speaker gets what the game sends it.
+- Jay's Magic Patcher patches (#391): a .JMP file copied into the mods
+  folder shows up in its game's Mods & patches. It's offered only on the
+  executable it fits (its game, the builds its CRC-32s name, every record's
+  bytes there, offsets only on its region's release), and goes in whole or
+  not at all.
+
+### Fixes
+- Frame pacing in games that show each frame as soon as it's drawn (Star
+  Wars Republic Commando, #395): a frame that took a little longer moved
+  the limiter's timing, and about once a second two frames came out almost
+  together, at Original, Up to 60 and Up to 30 alike. A late frame now
+  keeps its place and the next one comes on time.
+- Tomb Raider: Legend: no more flashes of older frames while Lara moves.
+  The rows of a picture the game wrote with the CPU are uploaded as they
+  are, without the rows the GPU had drawn since.
+- Box art (#385): titles with trade marks (007: NightFire), names with
+  dotted acronyms (Codename: Kids Next Door) and names the libretro list
+  writes with a licence's words around them or without the subtitle
+  (Lotus Challenge, Wakeboarding Unleashed, Splinter Cell Double Agent,
+  NightCaster) find their covers. Download cover says how it went and,
+  when no cover matches, opens Choose cover image. The picker's "No covers
+  match." no longer covers its From a file row. A game that had a cover
+  keeps the same one.
+- Screenshots: the shortcut writes a line in xbased.log, and a screenshot
+  that can't be saved says so on screen, with the reason in the log,
+  instead of nothing (#383).
+
 ## 1.2.3 (2026-11)
 
 ### Fixes

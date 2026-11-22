@@ -40,6 +40,9 @@ void hle_present_end(float sx, float sy, bool fxaa, int upscale, bool average, u
 /* A picture of the next refresh that goes through, as the window shows it,
  * written to path (a BMP) on the window's thread. */
 void hle_present_shot(const char *path);
+/* How the picture asked for path ended, once: 1 written, -1 not (why: the
+ * reason, in the log too), 0 not yet (or another path's). */
+int hle_present_shot_end(const char *path, char *why, size_t n);
 /* The CRT filter on the window's picture: 0 none, 1 soft scanlines, 2 a
  * TV, 3 an arcade monitor (any thread; the next refresh). */
 void hle_present_set_crt(int kind);

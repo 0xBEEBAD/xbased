@@ -870,7 +870,11 @@ static int g_fps_cap;   /* ... its limit, uncapped (0: none) */
 static float g_volume = 1.0f;
 static bool g_mute_bg = true;   /* silent while the window isn't the active one */
 
-/* screenshots\<title>-<date>.jpg beside the executable */
+static char g_shot_asked[MAX_PATH + 128];  /* the shortcut's picture, its end not seen yet */
+static double g_shot_asked_t;
+
+/* screenshots\<title>-<date>.jpg in the data folder: said in the log, and a
+ * notice once it is written or why it wasn't (screenshot_end) */
 static void screenshot(void)
 {
     char dir[MAX_PATH + 32], p[MAX_PATH + 128];
@@ -881,7 +885,28 @@ static void screenshot(void)
     snprintf(p, sizeof(p), "%s/%s-%04d%02d%02d-%02d%02d%02d.jpg", dir, g_key, t.wYear, t.wMonth, t.wDay, t.wHour,
              t.wMinute, t.wSecond);
     hle_present_shot(p);
+    nc_log("xbased-app", "screenshot: %s", p);
+    snprintf(g_shot_asked, sizeof(g_shot_asked), "%s", p);
+    g_shot_asked_t = ui_time();
     notice(T(S_SHOT_SAVED), p);
+}
+
+/* (each refresh) the shortcut's picture not had: said, instead of the
+ * notice that waits for its file (nothing seen, nothing in the log, #383) */
+static void screenshot_end(void)
+{
+    if (!g_shot_asked[0]) {
+        return;
+    }
+    char why[160] = "";
+    const int end = hle_present_shot_end(g_shot_asked, why, sizeof(why));
+    if (end < 0 || (!end && ui_time() - g_shot_asked_t > 5)) {
+        nc_log("xbased-app", "screenshot: not saved (%s)", end < 0 ? why : "no picture shown in 5 s");
+        notice(T(S_SHOT_FAILED), NULL);
+        g_shot_asked[0] = 0;
+    } else if (end > 0) {
+        g_shot_asked[0] = 0;
+    }
 }
 
 /* ------------------------------------------------------------ the overlay */
@@ -1160,6 +1185,7 @@ static void notice(const char *text, const char *after_file)
  * in out of white; a notice over the game a moment. */
 static void overlay_tick(void)
 {
+    screenshot_end();
     if (!ui_is_overlay()) {
         return;
     }

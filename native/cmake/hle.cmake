@@ -122,6 +122,7 @@ add_library(xbased_apu STATIC
   ${NC_APU}/dsp/dsp.c
   ${NC_APU}/dsp/dsp_cpu.c
   ${NC_APU}/dsp/dsp_dma.c
+  ${NC_APU}/dsp/dsp_rec.cpp
   ${NC_APU}/dsp/gp_ep.c
   ${NC_APU}/vp/resample.c
   ${NC_APU}/vp/vp.c
@@ -129,6 +130,10 @@ add_library(xbased_apu STATIC
 target_include_directories(xbased_apu PRIVATE "${NC_REPO}")
 target_compile_options(xbased_apu PRIVATE -Wno-unused-parameter -Wno-unused-function -Wno-sign-compare
                        -Wno-unused-variable)
+if(TARGET nc_zydis)
+  # the GP's program compiled to x86-64 (dsp/dsp_rec.cpp) with Zydis's encoder
+  target_link_libraries(xbased_apu PRIVATE nc_zydis)
+endif()
 if(WIN32 OR NC_LINUX_X64)
   # the audio output on SDL3's audio streams (dev/apu/out.c)
   target_link_libraries(xbased_apu PUBLIC xbased_hle SDL3::SDL3)

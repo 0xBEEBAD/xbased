@@ -874,6 +874,7 @@ static uint64_t next_vblank(uint64_t prev)
 static uint64_t g_cap_ns;           /* uncapped: a frame at most this often (0: no limit) */
 static uint64_t g_frame_due_ns;     /* uncapped: the instant the limit's last frame stands for (frame_due) */
 static uint64_t g_trap_slot_ns;     /* a trap's handler's next flip: its slot (hle_host_flip_slot; 0: none) */
+static uint64_t g_trap_every_ns;    /* ... and its pace */
 static volatile int g_own_pace;     /* the title runs at its own rate whatever the options say */
 static uint32_t g_title_id;         /* the title that boots (nc_dev_nv2a_title_pace) */
 
@@ -1030,6 +1031,7 @@ int64_t hle_host_flip_slot(int64_t want, int64_t every)
     if (every > 0 && want > 0 && every_grid((uint64_t)every, &vs, &pd, &at, NULL)) {
         slot = (int64_t)grid_at_or_after((uint64_t)want - pd / 2, vs, pd, at);
     }
+    __atomic_store_n(&g_trap_every_ns, every > 0 ? (uint64_t)every : 0, __ATOMIC_RELAXED);
     __atomic_store_n(&g_trap_slot_ns, every > 0 && slot > 0 ? (uint64_t)slot : 0, __ATOMIC_RELEASE);
     return slot;
 }
@@ -1489,16 +1491,48 @@ uint64_t hle_host_flip_vblank_ns(void)
      * before, 8 ms earlier, ready 12 ms after it and 18 ms to the screen
      * (12 where they fell on vblanks); on a variable refresh rate display
      * the pace's own instants */
+    /* (a flip that came late, up to half its pace past the slot it is on:
+     * pbmode.c pace_flip) */
     const uint64_t ts = __atomic_load_n(&g_trap_slot_ns, __ATOMIC_ACQUIRE);
-    if (ts && now + FRAME_DUE_SPAN >= ts && now < ts + FRAME_DUE_SPAN) {
-        return ts;
+    const uint64_t te = __atomic_load_n(&g_trap_every_ns, __ATOMIC_RELAXED);
+    const uint64_t late = te / 2 > FRAME_DUE_SPAN ? te / 2 + EARLY_POLL_NS : FRAME_DUE_SPAN;
+    static uint64_t s_given;    /* the trap's pace's slot given last */
+    if (ts && now + FRAME_DUE_SPAN >= ts && now < ts + late) {
+        /* a slot is one picture's: one that comes before the pace has
+         * moved on (a late frame on its slot, the next drawn at once after
+         * it) is due at the slot after the last one given (it was due at the
+         * same instant as that one, or a slot before it, one never on
+         * screen) */
+        const uint64_t d = te && ts <= s_given && s_given - ts < te ? s_given + te : ts;
+        s_given = d;
+        return d;
+    }
+    /* On the pace, outside its slot's window (the decoder met the flip
+     * before pace_flip, or a while after): the slot after the last one given,
+     * the one a picture a slot keeps to, when that is within a slot of now.
+     * The vblank's rules below gave such flips an instant off the pace's grid
+     * (at Up to 60 the console's 59.94 Hz vblank drifts past the limit's 60:
+     * Republic Commando had one picture due 2 to 10 ms after the one before
+     * and the next 30 to 23 after it, a few times in 30 s), or the last
+     * one's. */
+    if (ts && te && s_given && now < ts + 3 * te && now + te > s_given + te && now < s_given + 2 * te) {
+        s_given += te;
+        return s_given;
     }
     /* a limit's frame: due at its first early vblank's place (frame_due) */
     const uint64_t fd = __atomic_load_n(&g_frame_due_ns, __ATOMIC_ACQUIRE);
-    if (fd && __atomic_load_n(&g_uncap_on, __ATOMIC_RELAXED) && now + EARLY_POLL_NS >= fd && now < fd + FRAME_DUE_SPAN) {
-        return fd;
+    uint64_t d = fd && __atomic_load_n(&g_uncap_on, __ATOMIC_RELAXED) && now + EARLY_POLL_NS >= fd && now < fd + FRAME_DUE_SPAN
+                     ? fd
+                     : last && now >= last + frame - frame / 4 && now < last + frame + frame / 2 ? last + frame : last;
+    /* and a flip on the trap's pace those rules put at the slot given last,
+     * before it or less than half a slot after it (a late frame drawn at once
+     * after the one before: due at its instant, one of the two never on
+     * screen) is on the slot after it */
+    if (ts && te && s_given && now < ts + 3 * te && d < s_given + te / 2 && s_given + te < now + 2 * te) {
+        s_given += te;
+        d = s_given;
     }
-    return last && now >= last + frame - frame / 4 && now < last + frame + frame / 2 ? last + frame : last;
+    return d;
 }
 
 int64_t hle_host_vblank_period_ns(void)

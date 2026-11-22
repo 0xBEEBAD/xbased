@@ -2485,6 +2485,20 @@ static void scr_game(void)
         }
         SDL_SetAtomicInt(&g_cover_file_set, 0);
     }
+    /* Download cover's end, said: no name fitting the game did nothing to
+     * be seen (#385), the picker opened for one */
+    switch (lib_fetch_ended(g)) {
+    case LIB_COVER_GOT:
+        dash_toast(T(S_COVER_SET));
+        break;
+    case LIB_COVER_NONE:
+        dash_toast(T(S_COVER_NOT_FOUND));
+        dash_cover_open(g);
+        break;
+    case LIB_COVER_FAILED:
+        dash_toast(T(S_COVER_DL_FAILED));
+        break;
+    }
     const char *fs = lib_fetch_status();
     if (fs) {
         ui_text(W - 60, lib_scanning() ? 116 : 84, fs, 18, UI_FONT_REGULAR, UI_GREEN, UI_ALIGN_RIGHT);

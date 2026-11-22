@@ -53,6 +53,9 @@ UiTex *lib_icon(LibGame *g);
 UiTex *lib_cover(LibGame *g);
 /* Box art: g's (or every game's without one) fetched on a thread. */
 void lib_fetch_cover(LibGame *g);
+/* how the cover lib_fetch_cover asked for ended, once (0: not yet) */
+enum { LIB_COVER_GOT = 1, LIB_COVER_NONE, LIB_COVER_FAILED };
+int lib_fetch_ended(const LibGame *g);
 void lib_fetch_all_covers(void);
 const char *lib_fetch_status(void);   /* NULL: idle */
 /* The cover picker (the UI's thread): box art names for g, best first,

@@ -45,6 +45,8 @@
 #include "native/third_party/stb/stb_image_write.h"
 
 #include "hw/xbox/hle/vk/native_window.h"
+#include <errno.h>
+#include <string.h>
 #ifdef _WIN32
 #include <windows.h>
 #include "hw/xbox/hle/vk/share.h"
@@ -974,6 +976,36 @@ void hle_present_shot(const char *path)
     g_ps.shot_want = true;
 }
 
+/* how the last picture ended (hle_present_shot_end): a picture that couldn't
+ * be had was asked for again each refresh, said nowhere (#383) */
+static struct {
+    char path[512], why[160];
+    int end;        /* 1 written, -1 not, 0 none since */
+} g_shot;
+
+static void shot_ended(bool ok, const char *why)
+{
+    snprintf(g_shot.path, sizeof(g_shot.path), "%s", g_ps.shot_path);
+    snprintf(g_shot.why, sizeof(g_shot.why), "%s", why ? why : "");
+    __atomic_store_n(&g_shot.end, ok ? 1 : -1, __ATOMIC_RELEASE);
+    if (!ok) {
+        hle_log("xbased-hle-back", "present: no picture in %s: %s", g_ps.shot_path, why);
+    }
+}
+
+int hle_present_shot_end(const char *path, char *why, size_t n)
+{
+    const int end = __atomic_load_n(&g_shot.end, __ATOMIC_ACQUIRE);
+    if (!end || strcmp(path, g_shot.path)) {
+        return 0;
+    }
+    if (why && n) {
+        snprintf(why, n, "%s", g_shot.why);
+    }
+    __atomic_store_n(&g_shot.end, 0, __ATOMIC_RELAXED);
+    return end;
+}
+
 /* The buffer for a picture of size bytes, host-visible. */
 static bool shot_buf(VkDeviceSize size)
 {
@@ -1013,6 +1045,7 @@ static void shot_write(uint32_t w, uint32_t h)
 {
     void *map = NULL;
     if (T.vkMapMemory(g_hvk.dev, g_ps.shot_mem, 0, VK_WHOLE_SIZE, 0, &map) != VK_SUCCESS) {
+        shot_ended(false, "its copy couldn't be read (vkMapMemory)");
         return;
     }
     const size_t pl = strlen(g_ps.shot_path);
@@ -1025,8 +1058,12 @@ static void shot_write(uint32_t w, uint32_t h)
             rgb[i * 3 + 1] = src[i * 4 + 1];
             rgb[i * 3 + 2] = src[i * 4 + (rgba ? 2 : 0)];
         }
+        errno = 0;
         if (stbi_write_jpg(g_ps.shot_path, (int)w, (int)h, 3, rgb, 90)) {
             hle_log("xbased-hle-back", "present: picture %ux%u in %s", w, h, g_ps.shot_path);
+            shot_ended(true, NULL);
+        } else {
+            shot_ended(false, errno ? strerror(errno) : "the file couldn't be written");
         }
         g_free(rgb);
         T.vkUnmapMemory(g_hvk.dev, g_ps.shot_mem);
@@ -1060,6 +1097,9 @@ static void shot_write(uint32_t w, uint32_t h)
         g_free(row);
         fclose(f);
         hle_log("xbased-hle-back", "present: picture %ux%u in %s", w, h, g_ps.shot_path);
+        shot_ended(true, NULL);
+    } else {
+        shot_ended(false, strerror(errno));
     }
     T.vkUnmapMemory(g_hvk.dev, g_ps.shot_mem);
 }
@@ -2711,7 +2751,18 @@ void hle_present_end(float sx, float sy, bool fxaa, int upscale, bool average, u
         ov_draw(cb, f, iw, ih, scene_ok);
     }
     T.vkCmdEndRendering(cb);
-    const bool shot = g_ps.shot_want && g_ps.shot_can && shot_buf((VkDeviceSize)iw * ih * 4);
+    bool shot = false;
+    if (g_ps.shot_want) {
+        if (!g_ps.shot_can) {
+            shot_ended(false, "the window's pictures can't be copied (its swapchain has no transfer source)");
+            g_ps.shot_want = false;
+        } else if (!shot_buf((VkDeviceSize)iw * ih * 4)) {
+            shot_ended(false, "no memory for its copy");
+            g_ps.shot_want = false;
+        } else {
+            shot = true;
+        }
+    }
 #ifdef _WIN32
     if (g_rm.on) {
         remote_end(cb, f, dst, shot, iw, ih, key);

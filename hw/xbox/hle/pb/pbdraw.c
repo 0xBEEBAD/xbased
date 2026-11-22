@@ -999,21 +999,55 @@ static bool rtlog_on(void)
     return on || g_dlog_left > 0;       /* and among the draw log's draws (debug.xbased.pbdraws) */
 }
 
-/* Target id's memory into its image, whatever was written; used: as
+/* Rows [y0, y1) of target id's memory into its image; used: as
  * rt_cpu_upload's. */
-static void rt_upload(PbObj *o, uint32_t id, bool used)
+static void rt_upload_rows(PbObj *o, uint32_t id, bool used, uint32_t y0, uint32_t y1)
 {
     obj_edges_set(o);
-    const HleRect r = { 0, 0, (int32_t)o->d.w, (int32_t)o->d.h };
-    const int32_t pt[1][2] = { { 0, 0 } };
+    const HleRect r = { 0, (int32_t)y0, (int32_t)o->d.w, (int32_t)y1 };
+    const int32_t pt[1][2] = { { 0, (int32_t)y0 } };
     hle_res_upload(id, o->d.pa, o->d.pitch, 1, &r, pt);
     o->written = ++g_pd.wseq;
     o->cpu_used |= used;
     g_pd.rt_uploads++;
     if (rtlog_on()) {
-        hle_log("xbased-hle-pb", "rt upload %u: %08x %ux%u pitch %u fmt %02x swap %llu", id,
-                o->d.pa, o->d.w, o->d.h, o->d.pitch, o->d.xfmt, (unsigned long long)g_pd.swaps);
+        hle_log("xbased-hle-pb", "rt upload %u: %08x %ux%u pitch %u fmt %02x rows %u-%u swap %llu", id,
+                o->d.pa, o->d.w, o->d.h, o->d.pitch, o->d.xfmt, y0, y1, (unsigned long long)g_pd.swaps);
     }
+}
+
+/* Target id's memory into its image, whatever was written */
+static void rt_upload(PbObj *o, uint32_t id, bool used)
+{
+    rt_upload_rows(o, id, used, 0, o->d.h);
+}
+
+/* The rows [*y0, *y1) of target o's memory the CPU wrote since its image
+ * last took it, by span_written's rules (the pages wholly inside it by their
+ * dirty bits, its first and last by its own bytes there), read before
+ * obj_written takes the bits; false: none that way. */
+static bool obj_dirty_rows(const PbObj *o, uint32_t *y0, uint32_t *y1)
+{
+    const uint32_t lo = o->d.pa, hi = lo + o->d.pitch * o->d.h, p0 = lo & ~4095u, pl = (hi - 1) & ~4095u;
+    uint32_t a = UINT32_MAX, b = 0;
+    for (uint32_t p = p0;; p += 4096) {
+        const uint32_t s0 = MAX(lo, p), s1 = MIN(hi, p + 4096);
+        const bool d = p == p0 ? edge_dirty(p) && span_hash(s0, s1 - s0) != o->edge_hash[0] :
+                       p == pl ? edge_dirty(p) && span_hash(s0, s1 - s0) != o->edge_hash[1] : edge_dirty(p);
+        if (d) {
+            a = MIN(a, s0);
+            b = MAX(b, s1);
+        }
+        if (p == pl) {
+            break;
+        }
+    }
+    if (a >= b) {
+        return false;
+    }
+    *y0 = (a - lo) / o->d.pitch;
+    *y1 = MIN(o->d.h, (b - lo + o->d.pitch - 1) / o->d.pitch);
+    return *y1 > *y0;
 }
 
 /* The CPU wrote render target id's memory since it was last looked at (a
@@ -1031,10 +1065,22 @@ static bool rt_cpu_upload(uint32_t id, bool used)
         return false;
     }
     coh_pend_wait(o->d.pa, o->d.pitch * o->d.h);
+    /* only the rows the CPU wrote: the rest of the memory is older than the
+     * image (the GPU draws in the image; a writeback lands later, or not at
+     * all past the rows it drew). Tomb Raider: Legend keeps data of its own
+     * in the rows below the 448 it draws of each 640 x 480 back buffer and
+     * writes there every frame; the whole memory uploaded over the frame
+     * just drawn showed an old one for a frame (flashes while playing) */
+    uint32_t y0 = 0, y1 = o->d.h;
+    const bool rows = obj_dirty_rows(o, &y0, &y1);
     if (!obj_written(o)) {
         return false;
     }
-    rt_upload(o, id, used);
+    if (rows) {
+        rt_upload_rows(o, id, used, y0, y1);
+    } else {
+        rt_upload(o, id, used);
+    }
     return true;
 }
 
@@ -1122,6 +1168,7 @@ static void writeback(uint32_t id)
     rb->pa = d->pa;
     rb->pitch = d->pitch;
     rb->arena_off = HLE_RB_DIRECT;
+    rb->rows = len / d->pitch;
     hle_res_rb_land(rb, fb, len, hle_fe_last_value() + 1);     /* the next submission */
     hle_barrier_arm_landing(d->pa, len, hle_fe_last_value() + 1);
     hle_fe_commit();
@@ -3534,6 +3581,7 @@ static unsigned writeback_range(uint32_t pa, uint32_t end, bool gpu_newer, const
         rb->pa = next->d.pa;
         rb->pitch = next->d.pitch;
         rb->arena_off = HLE_RB_DIRECT;
+        rb->rows = len / next->d.pitch;
         hle_res_rb_land(rb, fb, len, v);
         hle_barrier_arm_landing(next->d.pa, len, v);
         hle_fe_commit();
@@ -4951,6 +4999,7 @@ static uint64_t coh_land(PbObj *o)
         rb->pa = o->d.pa;
         rb->pitch = o->d.pitch;
         rb->arena_off = HLE_RB_DIRECT;      /* rows: guest RAM, or landed from fb */
+        rb->rows = len / o->d.pitch;
         hle_res_rb_land(rb, fb, len, v);
         hle_barrier_arm_keep(o->d.pa, len, v, true);
         hle_fe_commit();

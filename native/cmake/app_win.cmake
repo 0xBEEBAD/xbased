@@ -5,6 +5,7 @@ set(NC_APP_SOURCES
   "${CMAKE_CURRENT_SOURCE_DIR}/app/win_main.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/win_mods.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/mod_fit.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/app/mod_jmp.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/win_auto.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/win_devctl.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/win_aslr.c"
@@ -44,7 +45,7 @@ endif()
 set_target_properties(xbased PROPERTIES OUTPUT_NAME xbased)
 # xbased's version, set here alone: the app's (xbased_version.h, from
 # app/version.h.in) and the executable's version information (xbased.rc)
-set(XBASED_VERSION 1.2.3)
+set(XBASED_VERSION 1.2.4)
 string(REPLACE "." "," XBASED_VERSION_RC "${XBASED_VERSION}")
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/app/version.h.in" "${CMAKE_CURRENT_BINARY_DIR}/gen/xbased_version.h" @ONLY)
 if(WIN32)

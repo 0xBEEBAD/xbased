@@ -2218,14 +2218,21 @@ static void cmd_readback(const HleCmdReadback *c)
     bool linear = s && s->d.pitch && fi && (fi->flags & HLE_FI_LIN);
     bool written = s && s->img && s->layout != VK_IMAGE_LAYOUT_UNDEFINED;
     uint32_t w = s ? (c->w ? c->w : s->d.w) : 0, h = s ? (c->h ? c->h : s->d.h) : 0;
+    /* the rows the decoder asked for, the ones the GPU drew (its landing is
+     * that big): Tomb Raider: Legend draws 448 rows of its 640 x 480 back
+     * buffers and keeps data of its own below them; copied whole, a
+     * writeback didn't fit its landing and was skipped, the memory kept an
+     * old frame, and the title's next write there brought that frame back
+     * into the image (a flash of it) */
+    const uint32_t rows = c->rows && c->rows < h ? c->rows : h;
     /* without zero-copy RAM, the arena copy that lands in guest memory */
-    bool fits = c->fb && s && s->texel_bytes && h &&
-                (uint64_t)c->pitch * (h - 1) + (uint64_t)w * s->texel_bytes <= c->fb_len;
+    bool fits = c->fb && s && s->texel_bytes && rows &&
+                (uint64_t)c->pitch * (rows - 1) + (uint64_t)w * s->texel_bytes <= c->fb_len;
     /* ... and with it, the rows the GPU writes in place: inside guest RAM (a surface's offset,
      * pitch and size are the title's) */
     const bool in_ram = !g_hram.zero_copy ||
-                        (s && s->texel_bytes && h &&
-                         (uint64_t)c->pa + (uint64_t)c->pitch * (h - 1) + (uint64_t)w * s->texel_bytes <=
+                        (s && s->texel_bytes && rows &&
+                         (uint64_t)c->pa + (uint64_t)c->pitch * (rows - 1) + (uint64_t)w * s->texel_bytes <=
                          g_hram.size);
     if (s && linear && written && in_ram && (g_hram.zero_copy || fits) && hle_surf_ensure(s) &&
         (s->aspect & VK_IMAGE_ASPECT_COLOR_BIT) && s->texel_bytes &&
@@ -2244,13 +2251,13 @@ static void cmd_readback(const HleCmdReadback *c)
         VkBufferImageCopy r = {
             .bufferOffset = fb ? c->fb - 1 : c->pa, .bufferRowLength = c->pitch / s->texel_bytes,
             .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
-            .imageExtent = { w, h, 1 } };
+            .imageExtent = { w, rows, 1 } };
         if (img) {
             T.vkCmdCopyImageToBuffer(cb, img, il,
                                      !fb ? g_hram.buf : g_hland.buf ? g_hland.buf : g_harena.buf,
                                      1, &r);
             if (fb) {
-                hle_tl_land_copied(c->fb - 1, c->pitch, w * s->texel_bytes, h);
+                hle_tl_land_copied(c->fb - 1, c->pitch, w * s->texel_bytes, rows);
             }
         }
         VkMemoryBarrier2 mb = {
