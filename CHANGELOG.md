@@ -1,5 +1,15 @@
 # xbased changelog
 
+## 1.2.5 (2026-11)
+
+### Fixes
+- Stereo: what a game sends to the centre or the rear speakers is heard
+  again (#402). The new audio path of 1.2.4 played only the front pair in
+  stereo, so Dynasty Warriors 5's officers' voice lines, which it sends to
+  the centre speaker even in stereo, were lost. The centre and the rears
+  now go into the front speakers as the console mixes them for its analog
+  out (at -3 dB, the LFE left out); 5.1 is as it was.
+
 ## 1.2.4 (2026-11)
 
 ### New

@@ -823,15 +823,38 @@ void mcpx_apu_dsp_frame(MCPXAPUState *d, float mixbins[NUM_MIXBINS][NUM_SAMPLES_
                 }
             }
         }
+        /* Stereo: the six folded into the front pair, as the console's EP
+         * downmixes them for its analog out whatever the speaker setting (the
+         * XDK's multichannel white paper: the centre and the surrounds into
+         * the front speakers at reduced volume, the LFE dropped; the voices'
+         * own mix folds the same, vp.c). A title sends to the centre in
+         * stereo too: Dynasty Warriors 5, booted in stereo, puts its
+         * officers' lines there (#402), and the front pair alone lost them.
+         * A frame whose six are the pair three times (DirectSound's stereo
+         * layout, seen in Max Payne's) is the pair as it is: folding it
+         * would play it 7.6 dB louder. */
         if ((d->monitor.point == MCPX_APU_DEBUG_MON_GP) ||
             (d->monitor.point == MCPX_APU_DEBUG_MON_GP_OR_EP && !ep_enabled)) {
             int off = (d->ep_frame_div % 8) * NUM_SAMPLES_PER_FRAME;
+            int32_t s[6][NUM_SAMPLES_PER_FRAME];
+            bool pair3 = true;
+            for (int c = 0; c < 6; c++) {
+                for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
+                    const uint32_t v = dsp_read_memory(d->gp.dsp, 'X', 0x1400 + c * 0x20 + i);
+                    s[c][i] = (int32_t)(v << 8) >> 8;   /* 24 bits, signed */
+                }
+            }
+            for (int i = 0; i < NUM_SAMPLES_PER_FRAME && pair3; i++) {
+                pair3 = s[2][i] == s[0][i] && s[4][i] == s[0][i] && s[3][i] == s[1][i] && s[5][i] == s[1][i];
+            }
+            /* -3 dB (0.70710678) in 16.16 */
+            const int64_t side = pair3 ? 0 : 46341;
             for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
-                uint32_t l = dsp_read_memory(d->gp.dsp, 'X', 0x1400 + i);
-                d->monitor.frame_buf[off + i][0] = l >> 8;
-                uint32_t r =
-                    dsp_read_memory(d->gp.dsp, 'X', 0x1400 + 1 * 0x20 + i);
-                d->monitor.frame_buf[off + i][1] = r >> 8;
+                const int64_t l = ((int64_t)s[0][i] << 16) + side * ((int64_t)s[2][i] + s[4][i]);
+                const int64_t r = ((int64_t)s[1][i] << 16) + side * ((int64_t)s[2][i] + s[5][i]);
+                const int64_t l16 = l >> 24, r16 = r >> 24;
+                d->monitor.frame_buf[off + i][0] = (int16_t)(l16 > 32767 ? 32767 : l16 < -32768 ? -32768 : l16);
+                d->monitor.frame_buf[off + i][1] = (int16_t)(r16 > 32767 ? 32767 : r16 < -32768 ? -32768 : r16);
             }
         }
     }
