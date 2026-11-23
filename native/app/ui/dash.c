@@ -141,6 +141,40 @@ void dash_toast(const char *msg)
     /* time to read it: longer for a longer one */
     const double t = 3 + strlen(D.toast) / 30.0;
     D.toast_until = ui_time() + (t < 12 ? t : 12);
+    D.toast_row.on = false;
+}
+
+void dash_toast_row(const char *msg, const char *key)
+{
+    dash_toast(msg);
+    const enum Screen top = dash_top();
+    D.toast_row.on = true;
+    D.toast_row.top = top;
+    D.toast_row.sp = D.sp;
+    D.toast_row.tab = D.tab;
+    D.toast_row.sel = D.sel[top];
+    D.toast_row.key = key;
+}
+
+/* a setting changed: its warning (if showing) goes, the new value may bring its own */
+void dash_toast_row_done(const char *key)
+{
+    if (D.toast_row.on && D.toast_row.key && !strcmp(D.toast_row.key, key)) {
+        D.toast_row.on = false;
+        D.toast_until = 0;
+    }
+}
+
+bool dash_toast_on(void)
+{
+    if (D.toast_row.on) {
+        const int t = D.toast_row.top;
+        if (dash_top() != t || D.sp != D.toast_row.sp || D.tab != D.toast_row.tab || D.sel[t] != D.toast_row.sel) {
+            D.toast_row.on = false;
+            D.toast_until = 0;
+        }
+    }
+    return D.toast[0] && ui_time() < D.toast_until;
 }
 
 /* s in lines no wider than max_w (at spaces; CJK, which has none, between
@@ -300,6 +334,29 @@ static void cursor(bool show)
     }
 }
 
+/* In a game's menu: the shortcuts that opened it (dash_ingame), so that
+ * pressing it again closes it as Resume does (#404) */
+static ImMap g_ig_map;
+
+/* the menu's shortcut on the controller, its button as pressed (im_face's) */
+static bool menu_pad_shortcut(const SDL_GamepadButtonEvent *b, int button)
+{
+    SDL_Gamepad *gp = SDL_GetGamepadFromID(b->which);
+    int code = IM_HKP_NONE;
+    if (button == SDL_GAMEPAD_BUTTON_GUIDE) {
+        code = IM_HKP_GUIDE;
+    } else if (button == SDL_GAMEPAD_BUTTON_TOUCHPAD) {
+        code = IM_HKP_TOUCHPAD;
+    } else if (button == SDL_GAMEPAD_BUTTON_MISC1) {
+        code = IM_HKP_SHARE;
+    } else if (gp && SDL_GetGamepadButton(gp, SDL_GAMEPAD_BUTTON_GUIDE)) {
+        code = IM_HKP_WITH + button;
+    } else if (gp && button != SDL_GAMEPAD_BUTTON_BACK && SDL_GetGamepadButton(gp, SDL_GAMEPAD_BUTTON_BACK)) {
+        code = IM_HKP_BACK_WITH + button;
+    }
+    return code != IM_HKP_NONE && code == g_ig_map.hk_pad[IM_HK_MENU];
+}
+
 static void poll_input(void)
 {
     static float ax[2];
@@ -341,6 +398,13 @@ static void poll_input(void)
             in->repeat |= e.key.repeat;
             in->any = true;
             const SDL_Keycode k = e.key.key;
+            if (g_game_running && !e.key.repeat && k == g_ig_map.hotkey[IM_HK_MENU]) {
+                /* the menu's key, with the Ctrl and Alt it was set with, Shift if it was */
+                const uint8_t held = ((in->mod & SDL_KMOD_CTRL) ? 1 : 0) | ((in->mod & SDL_KMOD_ALT) ? 2 : 0) |
+                                     ((in->mod & SDL_KMOD_SHIFT) ? 4 : 0);
+                const uint8_t need = g_ig_map.hk_mod[IM_HK_MENU];
+                in->menu |= (held & 3) == (need & 3) && (!(need & 4) || (held & 4));
+            }
             if (D.typing && ((k >= SDLK_A && k <= SDLK_Z) || (k >= SDLK_0 && k <= SDLK_9) || k == SDLK_SPACE ||
                              k == SDLK_BACKSPACE || k == SDLK_DELETE || k == SDLK_TAB)) {
                 break;  /* a letter for the text field (in->key, in->text) */
@@ -430,6 +494,7 @@ static void poll_input(void)
                     break;
                 }
             }
+            dash_toast_row_done("pad.dc");      /* a controller back: its notice goes */
             break;
         case SDL_EVENT_GAMEPAD_REMOVED:
             for (int i = 0; i < 8; i++) {
@@ -449,6 +514,7 @@ static void poll_input(void)
             if (down) {
                 in->pad_button = button;
                 in->any = true;
+                in->menu |= g_game_running && menu_pad_shortcut(&e.gbutton, button);
             }
             switch (button) {
             case SDL_GAMEPAD_BUTTON_DPAD_UP: held(1, down); if (down) press(1); break;
@@ -613,6 +679,20 @@ static void auto_poll(void)
                     SDL_SetJoystickVirtualAxis(vj, a, (Sint16)(v[a] > 32767 ? 32767 : v[a] < -32768 ? -32768 : v[a]));
                 }
             }
+        } else if (!strncmp(line, "PADBTN ", 7)) {
+            /* "PADBTN <SDL button number> <1|0>": a button of the virtual
+             * gamepad the game plugged in (its "VPAD"), from the menu */
+            int b = -1, down = 0;
+            sscanf(line + 7, "%d %d", &b, &down);
+            int n = 0;
+            SDL_JoystickID *ids = SDL_GetJoysticks(&n);
+            for (int i = 0; ids && i < n; i++) {
+                SDL_Joystick *j = SDL_IsJoystickVirtual(ids[i]) ? SDL_GetJoystickFromID(ids[i]) : NULL;
+                if (j && b >= 0) {
+                    SDL_SetJoystickVirtualButton(j, b, down != 0);
+                }
+            }
+            SDL_free(ids);
         } else if (!strncmp(line, "shot ", 5)) {
             const char *dir = getenv("XBASED_AUTO_DIR");
             snprintf(g_shot_req, sizeof(g_shot_req), "%s/shot_%s.bmp", dir ? dir : ".", line + 5);
@@ -1020,6 +1100,7 @@ void list_end(List *l)
     if (!l->count) {
         return;
     }
+    bool jumped = false;
     if (l->focused) {
         if (D.in.up) {
             *l->sel = (*l->sel + l->count - 1) % l->count;
@@ -1027,9 +1108,57 @@ void list_end(List *l)
         if (D.in.down) {
             *l->sel = (*l->sel + 1) % l->count;
         }
+        /* a list in sections (a game's settings: video, audio, system):
+         * LB and RB to the previous and the next one's first row (#400).
+         * A section starts after each heading, and at the top when rows
+         * come before the first heading. */
+        if (l->nhead && (D.in.lb || D.in.rb)) {
+            int starts[9], ns = 0;
+            if (l->head[0] > 0) {
+                starts[ns++] = 0;
+            }
+            for (int k = 0; k < l->nhead; k++) {
+                if (l->head[k] + 1 < l->count) {
+                    starts[ns++] = l->head[k] + 1;
+                }
+            }
+            int cur = 0;    /* the section the selection is in */
+            while (cur + 1 < ns && starts[cur + 1] <= *l->sel) {
+                cur++;
+            }
+            const int to = D.in.rb ? cur + 1 : cur - 1;
+            if (ns && to >= 0 && to < ns) {
+                *l->sel = starts[to];
+                *l->scroll = starts[to] > 0 ? starts[to] - 1 : 0;     /* on top, under its heading */
+                jumped = true;
+            }
+        }
+        /* the wheel: the view moved, the row under the pointer selected
+         * (as the pointer moving onto it does), so left, right and A act
+         * on a row in sight */
         const bool over = D.in.mx >= l->x && D.in.mx < l->x + l->w && D.in.my >= l->y && D.in.my < l->y + l->h;
-        if (D.in.wheel && over) {
-            *l->scroll -= (int)D.in.wheel;
+        if (D.in.wheel && over && l->count > l->visible) {
+            static double s_wheel_at;   /* the last wheel step over a list */
+            const int end = l->count - l->visible;
+            int s = *l->scroll - (int)D.in.wheel;
+            /* on past an end it was at already, after a pause: round to the
+             * other end, as up and down do at the first and last rows (#404);
+             * the steps of one spin, coming to the end, stop there */
+            if (ui_time() - s_wheel_at > 0.35) {
+                s = s > end && *l->scroll == end ? 0 : s < 0 && *l->scroll == 0 ? end : s;
+            }
+            s_wheel_at = ui_time();
+            s = s > end ? end : s < 0 ? 0 : s;
+            if (s != *l->scroll) {
+                *l->scroll = s;
+                const int last = s + l->visible - 1;
+                int at = s + (int)((D.in.my - l->y) / l->row_h);
+                at = at > last ? last : at < s ? s : at;
+                if (is_heading(l, at)) {
+                    at = at < last ? at + 1 : at - 1;
+                }
+                *l->sel = at;
+            }
         }
     }
     if (*l->sel >= l->count) {
@@ -1039,7 +1168,26 @@ void list_end(List *l)
     for (int guard = 0; l->nhead && guard < l->count && is_heading(l, *l->sel); guard++) {
         *l->sel = (*l->sel + (D.in.up ? l->count - 1 : 1)) % l->count;
     }
-    if (D.in.up || D.in.down || !D.in.wheel) {
+    /* The view follows the selection when the selection moves (a press,
+     * the pointer, a tab or a screen changed, rows came or went), and
+     * otherwise stays where the wheel put it (#400: it was pulled back to
+     * the selection the next frame, and the wheel never moved a list whose
+     * selected row would have left the view; a section's first row on top
+     * brought its heading back the same way). What the selection was when
+     * this screen's list last ended tells. */
+    static struct { int sel, tab, count, sp; bool seen; } s_was[SCR_COUNT];
+    const int si = (int)(l->sel - D.sel);
+    bool moved = true;
+    if (si >= 0 && si < SCR_COUNT) {
+        moved = !s_was[si].seen || s_was[si].sel != *l->sel || s_was[si].tab != D.tab ||
+                s_was[si].count != l->count || s_was[si].sp != D.sp || D.anim == 0;
+        s_was[si].sel = *l->sel;
+        s_was[si].tab = D.tab;
+        s_was[si].count = l->count;
+        s_was[si].sp = D.sp;
+        s_was[si].seen = true;
+    }
+    if (D.in.up || D.in.down || jumped || (moved && !D.in.wheel)) {
         if (*l->sel > 0 && is_heading(l, *l->sel - 1) && *l->sel - 1 < *l->scroll) {
             *l->scroll = *l->sel - 1;   /* a section's first row: its heading in sight */
         }
@@ -1098,7 +1246,7 @@ void dash_help_draw(void)
     const char *s = g_help;
     const int when = g_help_when;
     g_help = NULL;
-    if (!s || (D.toast[0] && ui_time() < D.toast_until)) {
+    if (!s || dash_toast_on()) {
         return;     /* a notice in its place */
     }
     /* in a game's menu: when the setting takes effect */
@@ -1188,6 +1336,7 @@ static const struct {
     {S_FAV_FIRST, S_H_FAV_FIRST, HELP_NOW}, {S_LAST_FIRST, S_H_LAST_FIRST, HELP_NOW},
     {S_DEADZONE, S_H_DEADZONE, HELP_ON_RESUME}, {S_INVERT_RSTICK, S_H_INVERT, HELP_ON_RESUME},
     {S_INVERT_LSTICK, S_H_INVERT, HELP_ON_RESUME}, {S_RUMBLE, S_H_RUMBLE, HELP_ON_RESUME},
+    {S_PAUSE_DC, S_H_PAUSE_DC, HELP_ON_RESUME},
     {S_FACE_LAYOUT, S_H_FACE, HELP_ON_RESUME}, {S_MOUSE_STICK, S_H_MOUSE, HELP_ON_RESUME},
     {S_MOUSE_SENS, S_H_MOUSE_SENS, HELP_ON_RESUME}, {S_COMMUNICATOR, S_H_COMMUNICATOR, HELP_NEXT_START},
 };
@@ -1274,19 +1423,22 @@ void opt_choice(List *l, enum UiStr label, const char *key, const char *const *v
     const int slots = D.editing_game ? n + 1 : n;
     int pos = D.editing_game ? cur + 1 : (cur < 0 ? 0 : cur);
     pos = (pos + delta + slots) % slots;
+    dash_toast_row_done(key);   /* the value's warning goes with it */
     if (D.editing_game && pos == 0) {
         cfg_unset(c, key);
     } else {
         cfg_set(c, key, vals[D.editing_game ? pos - 1 : pos]);
         const char *now_v = vals[D.editing_game ? pos - 1 : pos];
+        /* the warnings while the row is on: they would cover the rows and
+         * tabs gone to next (#400) */
         if (!strcmp(key, "devtime") && !strcmp(now_v, "0")) {
-            dash_toast(T(S_DISC_WARN));     /* a few titles need the drive's time (native/kernel/io.c) */
+            dash_toast_row(T(S_DISC_WARN), key);    /* a few titles need the drive's time (native/kernel/io.c) */
         } else if (!strcmp(key, "ram") && !strcmp(now_v, "128")) {
-            dash_toast(T(S_RAM_WARN));      /* retail titles meet a debug kit's memory map */
+            dash_toast_row(T(S_RAM_WARN), key);     /* retail titles meet a debug kit's memory map */
         } else if (!strcmp(key, "fsrate") && !strcmp(now_v, "60")) {
-            dash_toast(T(S_FSRATE_TIP));    /* what it does, and the switch's black moment */
+            dash_toast_row(T(S_FSRATE_TIP), key);   /* what it does, and the switch's black moment */
         } else if (!strcmp(key, "shaders") && !strcmp(now_v, "async")) {
-            dash_toast(T(S_ASYNC_WARN));    /* draws wait for no shader: they are skipped */
+            dash_toast_row(T(S_ASYNC_WARN), key);   /* draws wait for no shader: they are skipped */
         }
     }
 }
@@ -2446,7 +2598,7 @@ static void scr_game(void)
         D.sel[SCR_MODS] = 0;
         dash_push(SCR_MODS);
     }
-    if (list_row(&l, T(S_CONTROLS), NULL, NULL)) {
+    if (list_row(&l, T(S_GAME_CONTROLS), NULL, NULL)) {    /* this game's, apart from the global ones (#404) */
         D.editing_game = true;
         D.player = 0;
         dash_push(SCR_CONTROLS);
@@ -2689,6 +2841,7 @@ static void update_poll(void)
         snprintf(msg, sizeof(msg), T(S_UPDATING), upd_version());
         snprintf(D.toast, sizeof(D.toast), "%s", msg);
         D.toast_until = ui_time() + 0.5;
+        D.toast_row.on = false;
         break;
     case UPD_INSTALLED:
         if (upd_relaunch()) {
@@ -2906,7 +3059,7 @@ int dash_run(SDL_Window *win, const char *exe)
         if (scanning && dash_top() != SCR_REMAP) {
             draw_scan_badge();
         }
-        if (D.toast[0] && ui_time() < D.toast_until) {
+        if (dash_toast_on()) {
             draw_toast();
         }
         if (go_pic || go_back) {
@@ -3075,6 +3228,13 @@ static void scr_ingame_slots(void)
     draw_hints(g_ig_saving ? T(S_SAVE_STATE) : T(S_LOAD_STATE), T(S_BACK), NULL, NULL);
 }
 
+static char g_ig_notice[256];
+
+void dash_ingame_notice(const char *msg)
+{
+    snprintf(g_ig_notice, sizeof(g_ig_notice), "%s", msg ? msg : "");
+}
+
 int dash_ingame(SDL_Window *win, const char *key, const char *title, const char *frame_bmp, int *slot,
                 void (*live)(const struct Config *global, const struct Config *game))
 {
@@ -3105,6 +3265,7 @@ int dash_ingame(SDL_Window *win, const char *key, const char *title, const char 
     }
     D.stack[0] = SCR_INGAME;
     D.sel[SCR_INGAME] = 0;  /* on Resume each time, as a console's: no Quit by habit */
+    im_resolve(&g_ig_map, &D.global, NULL);     /* its shortcut closes it too */
     g_auto_off = -1;
     /* the game's overlay (its presenter draws the menu over its picture),
      * or a renderer of this menu's own on the window */
@@ -3118,6 +3279,13 @@ int dash_ingame(SDL_Window *win, const char *key, const char *title, const char 
     }
     snd_init();
     snd_enable(cfg_bool(&D.global, "ui.sounds", true));
+    if (g_ig_notice[0]) {
+        /* why the menu came up (win_main.c: a controller gone): until the
+         * selection moves or a controller is connected again */
+        dash_toast_row(g_ig_notice, "pad.dc");
+        D.toast_until = ui_time() + 120;
+        g_ig_notice[0] = 0;
+    }
     UiTex *frame = ov ? NULL : load_bmp(frame_bmp);
     g_ig_done = false;
     g_ig_result = DASH_INGAME_RESUME;
@@ -3145,6 +3313,15 @@ int dash_ingame(SDL_Window *win, const char *key, const char *title, const char 
         const float ek = ease(k);
         poll_input();
         auto_poll();
+        if (D.in.menu && dash_top() != SCR_REMAP && !t_close) {
+            /* its own shortcut again (Guide, F1): closed as Resume does (#404); not
+             * while a shortcut or a button is being set */
+            dash_save_cfg();
+            g_ig_result = DASH_INGAME_RESUME;
+            g_ig_done = true;
+            memset(&D.in, 0, sizeof(D.in));
+            D.in.mx = D.in.my = -1;
+        }
         if (t_close) {
             memset(&D.in, 0, sizeof(D.in));     /* closing: nothing more chosen */
             D.in.mx = D.in.my = -1;
@@ -3198,6 +3375,9 @@ int dash_ingame(SDL_Window *win, const char *key, const char *title, const char 
                 D.in.pad = saved.pad;
             }
             draw_ask();
+        }
+        if (dash_toast_on()) {
+            draw_toast();   /* a setting's warning in a game's menu too (its help made way for it, unseen) */
         }
         ui_set_alpha(1);
         if (live) {

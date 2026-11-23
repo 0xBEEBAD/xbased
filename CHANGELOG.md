@@ -1,5 +1,42 @@
 # xbased changelog
 
+## 1.2.6 (2026-11)
+
+### New
+- Pause when a controller disconnects (Controls, on by default, #400): if a
+  player's controller goes during a game, the in-game menu opens, the game
+  waits, and a notice says whose controller it was. A controller connected
+  again while the menu is up is taken by the game as it closes.
+- Fast forward (toggle) (#404): a second fast forward shortcut, F3 by
+  default and none on the controller, that stays on until pressed again.
+  While fast forward is on, by either shortcut, two arrows show in the top
+  right corner of the picture.
+- The in-game menu closes with the shortcut that opens it (#404): Guide on
+  the controller, F1 on the keyboard, or whatever they were set to.
+- LB and RB jump between the sections of a game's settings (video, audio,
+  system) and between mods and cheats (#400).
+- A clear warning that frame rate patches and an unlocked frame rate can
+  get you banned from Insignia (#400), as one is turned on and under those
+  rows, with the advice to turn on Online mode before playing online.
+
+### Fixes
+- Star Wars Republic Commando: its legal screen stays on screen while the
+  game loads, instead of garbage (#398). The game keeps a copy of that
+  screen to show while its graphics are released, and xbased kept showing
+  the old frame buffer, which the loader was filling with its data.
+- The mouse wheel moves the settings lists whatever row is selected (#400):
+  a list didn't move when the selected row would have left it. The wheel
+  selects the row under the pointer, and past an end, after a pause, goes
+  round to the other end as the controller does (#404).
+- The warnings of a setting (fast disc, 128 MB, full screen refresh,
+  asynchronous shaders, the frame rate patch tip) go as soon as you leave
+  their row or tab, instead of covering the next ones; they show in the
+  in-game menu too, and end in a full stop in every language (#400).
+- Interface sounds are only under Interface (#400), and a game's own
+  controls are called "Game controls" (#404).
+- The frame rate unlock no longer suggests the game's frame rate patch when
+  one of its patches is on already.
+
 ## 1.2.5 (2026-11)
 
 ### Fixes

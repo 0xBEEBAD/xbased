@@ -101,6 +101,17 @@ static void act(const char *a, const char *label)
             {"Y", SDL_GAMEPAD_BUTTON_NORTH}, {"START", SDL_GAMEPAD_BUTTON_START}, {"BACK", SDL_GAMEPAD_BUTTON_BACK},
             {"UP", SDL_GAMEPAD_BUTTON_DPAD_UP}, {"DOWN", SDL_GAMEPAD_BUTTON_DPAD_DOWN},
             {"LEFT", SDL_GAMEPAD_BUTTON_DPAD_LEFT}, {"RIGHT", SDL_GAMEPAD_BUTTON_DPAD_RIGHT}};
+        if (!_stricmp(a + 5, "off")) {
+            /* "VPAD off": the virtual gamepad unplugged (a controller gone) */
+            if (vj) {
+                const SDL_JoystickID id = SDL_GetJoystickID(vj);
+                SDL_CloseJoystick(vj);
+                SDL_DetachVirtualJoystick(id);
+                vj = NULL;
+                nc_log("xbased-auto", "%.1f s: virtual gamepad unplugged", now_s() - g_auto.t0);
+            }
+            return;
+        }
         if (!vj) {
             SDL_VirtualJoystickDesc d;
             SDL_INIT_INTERFACE(&d);

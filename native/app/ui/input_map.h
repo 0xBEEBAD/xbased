@@ -19,7 +19,8 @@ enum {
     IM_LUP, IM_LDOWN, IM_LLEFT, IM_LRIGHT, IM_RUP, IM_RDOWN, IM_RLEFT, IM_RRIGHT,
     IM_INPUTS
 };
-enum { IM_HK_MENU, IM_HK_SAVE, IM_HK_LOAD, IM_HK_TURBO, IM_HK_PAUSE, IM_HK_SHOT, IM_HK_FULL, IM_HOTKEYS };
+/* (IM_HK_TURBO_TOGGLE: fast forward on until pressed again, #404) */
+enum { IM_HK_MENU, IM_HK_SAVE, IM_HK_LOAD, IM_HK_TURBO, IM_HK_TURBO_TOGGLE, IM_HK_PAUSE, IM_HK_SHOT, IM_HK_FULL, IM_HOTKEYS };
 
 /* The Duke's state, as the core's NcPadState (usb.h) holds it. */
 typedef struct ImPad {
@@ -86,6 +87,7 @@ typedef struct ImMap {
     float trigger_dz;           /* trigger.deadzone: travel ignored at the start, 0..1 */
     float trigger_full;         /* trigger.full: the travel that is already a full press */
     bool rumble;
+    bool dc_pause;          /* a player's controller gone mid-game: the menu (pad.dcpause, #400) */
     /* the mouse (#255): the stick it moves (mouse.stick: 0 none, 1 left, 2
      * right) and how fast (mouse.sens, 1 = 100%), the game's over the global */
     int mouse_stick;

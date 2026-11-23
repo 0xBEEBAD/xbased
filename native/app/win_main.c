@@ -622,16 +622,46 @@ static void joystick_added(SDL_JoystickID id)
     SDL_AddGamepadMapping(map); /* a gamepad now: SDL_EVENT_GAMEPAD_ADDED follows */
 }
 
+/* A player's controller gone while the game runs (1-4, 0 none): the menu
+ * opens with a notice and the game waits (pad.dcpause, #400) */
+static int g_dc_player;
+
 static void pad_removed(SDL_JoystickID id)
 {
     for (unsigned i = 0; i < 4; i++) {
         if (g_pads[i] && SDL_GetGamepadID(g_pads[i]) == id) {
+            for (int p = 0; p < 4 && !g_dc_player; p++) {
+                if (player_pad(p) == g_pads[i]) {
+                    g_dc_player = p + 1;
+                }
+            }
             SDL_CloseGamepad(g_pads[i]);
             g_pads[i] = NULL;
             nc_log("xbased-app", "player %u's controller unplugged", i + 1);
             pads_changed();
         }
     }
+}
+
+/* The controllers as they are now: the in-game menu's own loop takes the
+ * events of the ones plugged in or out while it is up, which the game never
+ * saw (one connected again there stayed out of the game). */
+static void pads_resync(void)
+{
+    for (unsigned i = 0; i < 4; i++) {
+        if (g_pads[i] && !SDL_GamepadConnected(g_pads[i])) {
+            SDL_CloseGamepad(g_pads[i]);
+            g_pads[i] = NULL;
+            nc_log("xbased-app", "player %u's controller unplugged", i + 1);
+        }
+    }
+    int n = 0;
+    SDL_JoystickID *ids = SDL_GetGamepads(&n);
+    for (int k = 0; ids && k < n; k++) {
+        pad_added(ids[k]);      /* (ones already in keep their place) */
+    }
+    SDL_free(ids);
+    pads_changed();
 }
 
 /* Keys a shortcut with Ctrl or Alt took: the game doesn't see them until
@@ -1372,6 +1402,7 @@ static void ingame_menu(SDL_Window *win, bool *paused, bool minimized)
         g_ov_up = false;
         g_notice[0] = 0;
         const int act = dash_ingame(win, g_key, title ? title + 1 : g_disc, NULL, &slot, live_cfg);
+        pads_resync();
         play_pointer_off();
         nc_auto_resync();
         if (act == DASH_INGAME_QUIT) {
@@ -1412,6 +1443,7 @@ static void ingame_menu(SDL_Window *win, bool *paused, bool minimized)
     }
     nc_present_frame(NULL);     /* the surface goes */
     const int act = dash_ingame(win, g_key, title ? title + 1 : g_disc, pic, &slot, NULL);
+    pads_resync();
     remove(pic);
     if (act == DASH_INGAME_QUIT) {
         quit_to_dash(win);
@@ -1625,14 +1657,29 @@ static SDL_Keymod mods_held(SDL_Keymod m)
     return m;
 }
 
+/* Fast forward: its shortcut held, or the toggle's on (#404), never in
+ * online mode (the console's pace only): frames as fast as they come, its
+ * sign in the picture's corner; off, the run's frame rate setting again */
+static bool g_ff_hold, g_ff_on;
+
+static void ff_apply(void)
+{
+    const bool on = (g_ff_hold || g_ff_on) && !g_online;
+    if (!g_online) {
+        nc_win_prop_set("debug.xbased.uncap", on || g_uncap ? "1" : "0");
+        char cap[16];
+        snprintf(cap, sizeof(cap), "%d", on ? 0 : g_fps_cap);
+        nc_win_prop_set("debug.xbased.fpscap", cap);
+    }
+    hle_present_set_ff(on);
+}
+
 static void hotkey_do(SDL_Window *win, int h, bool down, int slot, bool *paused, bool minimized)
 {
     if (!down) {
         if (h == IM_HK_TURBO) {
-            nc_win_prop_set("debug.xbased.uncap", g_uncap ? "1" : "0");
-            char cap[16];
-            snprintf(cap, sizeof(cap), "%d", g_fps_cap);
-            nc_win_prop_set("debug.xbased.fpscap", cap);
+            g_ff_hold = false;
+            ff_apply();
         }
         return;
     }
@@ -1658,11 +1705,13 @@ static void hotkey_do(SDL_Window *win, int h, bool down, int slot, bool *paused,
         load_state(slot);
         break;
     case IM_HK_TURBO:
-        if (g_online) {
-            break;      /* the console's pace only (online mode) */
-        }
-        nc_win_prop_set("debug.xbased.uncap", "1");  /* frames as fast as they come, while held */
-        nc_win_prop_set("debug.xbased.fpscap", "0");
+        g_ff_hold = true;       /* while held */
+        ff_apply();
+        break;
+    case IM_HK_TURBO_TOGGLE:
+        g_ff_on = !g_ff_on && !g_online;
+        nc_log("xbased-app", "fast forward %s", g_ff_on ? "on" : "off");
+        ff_apply();
         break;
     case IM_HK_SHOT:
         screenshot();
@@ -2384,6 +2433,18 @@ int main(int argc, char *argv[])
 #endif
         if (nc_auto_take_menu()) {
             ingame_menu(win, &paused, minimized);
+        }
+        if (g_dc_player) {
+            /* a player's controller gone: the menu, which pauses, and why */
+            const int p = g_dc_player;
+            g_dc_player = 0;
+            if (g_map.dc_pause && SDL_GetAtomicInt(&g_core_state) == 1) {
+                char msg[256];
+                snprintf(msg, sizeof(msg), T(S_PAD_DC), p);
+                nc_log("xbased-app", "player %d's controller disconnected: the menu opens", p);
+                dash_ingame_notice(msg);
+                ingame_menu(win, &paused, minimized);
+            }
         }
         update_pads(focused);
         state_request_poll();

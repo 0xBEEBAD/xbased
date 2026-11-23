@@ -50,6 +50,8 @@ void hle_present_set_crt(int kind);
 void hle_present_set_vsync(bool on);
 /* The frame rate shown in the window's corner, 0 none (any thread). */
 void hle_present_set_osd(float fps);
+/* Fast forward on (#404): a >> in the picture's top right corner. */
+void hle_present_set_ff(bool on);
 /* Windows: the pictures drawn for the game's frame (vk/share.h, token: its
  * block's) instead of the window's own swapchain, from the next refresh;
  * hle_present_remote, once they are. */

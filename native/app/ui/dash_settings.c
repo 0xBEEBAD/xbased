@@ -311,8 +311,7 @@ void scr_settings(void)
         opt_int(&l, S_VOLUME, "volume", 0, 100, 5, 100, "%");
         opt_bool(&l, S_HRTF, "hrtf", true, false);
         opt_bool(&l, S_MUTE_BG, "mutebg", true, false);
-        opt_bool(&l, S_UI_SOUNDS, "ui.sounds", true, false);
-        break;
+        break;      /* the interface's sounds: on Interface (#400: they were on both) */
     }
     case 2: {
         rows_language(&l);
@@ -476,6 +475,7 @@ void scr_settings(void)
             }
         }
         opt_bool(&l, S_RUMBLE, "rumble", true, false);
+        opt_bool(&l, S_PAUSE_DC, "pad.dcpause", true, false);  /* the game's menu as a player's pad goes (win_main.c) */
         {
             /* the face buttons as the controller prints them: a Nintendo
              * layout's A on the right (#337) */
@@ -511,7 +511,8 @@ void scr_settings(void)
             }
         }
         for (int h = 0; h < IM_HOTKEYS; h++) {
-            static const char *const k_names[IM_HOTKEYS] = {"menu", "save", "load", "turbo", "pause", "shot", "full"};
+            static const char *const k_names[IM_HOTKEYS] = {"menu", "save", "load", "turbo", "turbotoggle", "pause", "shot",
+                                                            "full"};
             char key[24], label[96];
             snprintf(key, sizeof(key), "hkpad.%s", k_names[h]);
             snprintf(label, sizeof(label), "%s  (%s)", T(im_hotkey_label(h)), T(S_HK_PAD));
@@ -991,20 +992,33 @@ static bool mod_on(const ModItem *m)
 }
 
 /* the game's frame rate patch in the list (60 or 120 fps), if it has one */
+/* a patch or cheat for a higher frame rate, by its name */
+static bool fps_named(const ModItem *m)
+{
+    char s[sizeof(m->id) + sizeof(m->name) + 2];
+    snprintf(s, sizeof(s), "%s %s", m->id, m->name);
+    for (char *c = s; *c; c++) {
+        *c = (char)tolower((unsigned char)*c);
+    }
+    return strstr(s, "60fps") || strstr(s, "60 fps") || strstr(s, "120fps") || strstr(s, "120 fps");
+}
+
 static const ModItem *fps_patch(void)
 {
     for (int i = 0; i < g_nmods; i++) {
-        const ModItem *m = &g_mods[i];
-        char s[sizeof(m->id) + sizeof(m->name) + 2];
-        snprintf(s, sizeof(s), "%s %s", m->id, m->name);
-        for (char *c = s; *c; c++) {
-            *c = (char)tolower((unsigned char)*c);
-        }
-        if (!m->cheat && (strstr(s, "60fps") || strstr(s, "60 fps") || strstr(s, "120fps") || strstr(s, "120 fps"))) {
-            return m;
+        if (!g_mods[i].cheat && fps_named(&g_mods[i])) {
+            return &g_mods[i];
         }
     }
     return NULL;
+}
+
+/* s, then a space and the warning that frame rate patches and an unlocked
+ * frame rate get players banned on Insignia (#400), in a buffer of n */
+static const char *with_ban_warning(char *out, size_t n, const char *s)
+{
+    snprintf(out, n, "%s%s%s", s && s[0] ? s : "", s && s[0] ? " " : "", T(S_INSIGNIA_FPS_WARN));
+    return out;
 }
 
 void scr_mods(void)
@@ -1074,22 +1088,31 @@ void scr_mods(void)
             } else {
                 cfg_unset(&D.game, "fpscap");
             }
-            /* unlocked where the game has a patch of its own for it: the
-             * patch, made for the game, is the better way */
-            const ModItem *fp = fps_patch();
-            if (cur == 0 && to != 0 && fp && !mod_on(fp)) {
-                static char tip[600];
-                snprintf(tip, sizeof(tip), T(S_FPS_PATCH_TIP), fp->name);
-                dash_toast(tip);
+            /* unlocked: Insignia's ban for it (#400), and where the game
+             * has a patch of its own for it, that the patch, made for the
+             * game, is the better way; while the row is on */
+            dash_toast_row_done("uncap");
+            if (cur == 0 && to != 0) {
+                const ModItem *fp = fps_patch();
+                static char tip[600], toast[1024];
+                tip[0] = 0;
+                bool fps_on = false;    /* (one of its frame rate patches on already: no tip) */
+                for (int i = 0; i < g_nmods; i++) {
+                    fps_on |= !g_mods[i].cheat && fps_named(&g_mods[i]) && mod_on(&g_mods[i]);
+                }
+                if (fp && !fps_on) {
+                    snprintf(tip, sizeof(tip), T(S_FPS_PATCH_TIP), fp->name);
+                }
+                dash_toast_row(with_ban_warning(toast, sizeof(toast), tip), "uncap");
             }
         }
         if (list_selected(&l)) {
             const ModItem *fp = fps_patch();
-            static char tip[600];
+            static char tip[600], text[1024];
             if (fp) {
                 snprintf(tip, sizeof(tip), T(S_FPS_PATCH_TIP), fp->name);
             }
-            help = fp ? tip : T(S_UNCAP_HELP);
+            help = with_ban_warning(text, sizeof(text), fp ? tip : T(S_UNCAP_HELP));
         }
     }
     /* the mods and patches, then the cheats in a section of their own,
@@ -1111,10 +1134,14 @@ void scr_mods(void)
             }
             int delta = 0;
             if (list_row(&l, label, mod_on(m) ? T(S_ON) : T(S_OFF), &delta) || delta) {
+                dash_toast_row_done("mod");
                 if (mod_on(m)) {
                     cfg_remove_value(&D.game, m->cheat ? "cheat" : "mod", m->id);
                 } else {
                     cfg_add(&D.game, m->cheat ? "cheat" : "mod", m->id);
+                    if (fps_named(m)) {
+                        dash_toast_row(T(S_INSIGNIA_FPS_WARN), "mod");  /* Insignia bans for it (#400) */
+                    }
                 }
             }
             if (list_selected(&l)) {
@@ -1153,7 +1180,12 @@ void scr_mods(void)
         }
     }
     list_end(&l);
-    /* the selected row's help (a notice, the frame rate patch's, in its place) */
+    /* the selected row's help (a notice, the frame rate patch's, in its
+     * place); a frame rate patch's with Insignia's ban for it */
+    static char fps_help[1024];
+    if (!help && shown && fps_named(shown)) {
+        help = with_ban_warning(fps_help, sizeof(fps_help), shown->desc);
+    }
     dash_help(help ? help : shown && shown->desc[0] ? shown->desc : NULL, HELP_NEXT_START);
     dash_help_draw();
     if (D.in.back) {
@@ -1291,7 +1323,8 @@ void scr_controls(void)
 {
     const float W = ui_w(), H = ui_h();
     char title[96];
-    snprintf(title, sizeof(title), "%s — %s %d", T(S_CONTROLS), T(S_PLAYER), D.player + 1);
+    snprintf(title, sizeof(title), "%s — %s %d", T(D.editing_game ? S_GAME_CONTROLS : S_CONTROLS), T(S_PLAYER),
+             D.player + 1);     /* a game's own, named apart from the global ones (#404) */
     draw_header(title, D.editing_game && D.cur ? D.cur->g.title : NULL);
     Config *c = D.editing_game ? &D.game : &D.global;
     List l;

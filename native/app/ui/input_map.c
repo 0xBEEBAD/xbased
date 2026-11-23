@@ -32,9 +32,9 @@ static const int k_pad_def[IM_INPUTS] = {
     AX(SDL_GAMEPAD_AXIS_LEFTY, 1), AX(SDL_GAMEPAD_AXIS_LEFTY, 0), AX(SDL_GAMEPAD_AXIS_LEFTX, 1),
     AX(SDL_GAMEPAD_AXIS_LEFTX, 0), AX(SDL_GAMEPAD_AXIS_RIGHTY, 1), AX(SDL_GAMEPAD_AXIS_RIGHTY, 0),
     AX(SDL_GAMEPAD_AXIS_RIGHTX, 1), AX(SDL_GAMEPAD_AXIS_RIGHTX, 0)};
-static const char *const k_hk_name[IM_HOTKEYS] = {"menu", "save", "load", "turbo", "pause", "shot", "full"};
-static const SDL_Keycode k_hk_def[IM_HOTKEYS] = {SDLK_F1, SDLK_F5, SDLK_F8, SDLK_TAB, SDLK_F2, SDLK_F12, SDLK_F11};
-static const enum UiStr k_hk_label[IM_HOTKEYS] = {S_HK_MENU, S_HK_SAVE, S_HK_LOAD, S_HK_TURBO,
+static const char *const k_hk_name[IM_HOTKEYS] = {"menu", "save", "load", "turbo", "turbotoggle", "pause", "shot", "full"};
+static const SDL_Keycode k_hk_def[IM_HOTKEYS] = {SDLK_F1, SDLK_F5, SDLK_F8, SDLK_TAB, SDLK_F3, SDLK_F2, SDLK_F12, SDLK_F11};
+static const enum UiStr k_hk_label[IM_HOTKEYS] = {S_HK_MENU, S_HK_SAVE, S_HK_LOAD, S_HK_TURBO, S_HK_TURBO_TOGGLE,
                                                   S_HK_PAUSE, S_HK_SHOT, S_HK_FULL};
 
 const char *im_input_label(int i)
@@ -344,7 +344,7 @@ static const struct { const char *v, *label; int code; } k_hkp[] = {
 };
 /* the menu keeps the Guide button's tap (it always opened it), a
  * screenshot the Share button's; the rest none until set */
-static const char *const k_hkp_def[IM_HOTKEYS] = {"guide", "none", "none", "none", "none", "share", "none"};
+static const char *const k_hkp_def[IM_HOTKEYS] = {"guide", "none", "none", "none", "none", "none", "share", "none"};
 
 int im_hkpad_count(void)
 {
@@ -423,6 +423,7 @@ void im_resolve(ImMap *m, const Config *global, const Config *game)
     const Config *tf = game && cfg_get(game, "trigger.full") ? game : global;
     m->trigger_full = cfg_int(tf, "trigger.full", 100) / 100.0f;
     m->rumble = cfg_bool(global, "rumble", true);
+    m->dc_pause = cfg_bool(global, "pad.dcpause", true);
     im_set_face(global);
     const Config *ms = game && cfg_get(game, "mouse.stick") ? game : global;
     const char *stick = cfg_get(ms, "mouse.stick");

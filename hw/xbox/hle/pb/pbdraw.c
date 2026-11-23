@@ -1948,8 +1948,28 @@ void hle_pbd_cpu_display(uint32_t pa)
 {
     uint32_t pitch, xfmt, w, h, seq;
     unsigned hz;
-    if (!g_pd.on || g_pd.device) {
-        return;                             /* D3D's: its own frames, flipped */
+    if (!g_pd.on) {
+        return;
+    }
+    if (g_pd.device) {
+        /* D3D's own frames are flipped. A mode set that points the display
+         * at another of its targets, once a frame was shown, is what the
+         * console scans out from then on: D3DDevice_PersistDisplay's copy of
+         * the front buffer, drawn by the GPU into memory the title keeps
+         * (MmPersistContiguousMemory), shown while the device is released
+         * and the title loads. Republic Commando's legal screen (#398): the
+         * front buffer stayed on screen, and the loader's code and data,
+         * written over its memory, came up as the picture. */
+        const uint32_t id = object_at(pa & 0x0FFFFFFFu);
+        PbObj *o = obj_of(id);
+        const PbObj *so = obj_of(g_pd.shown_id);
+        if (o && so && id != g_pd.shown_id && so->d.pa != o->d.pa) {
+            coh_shown(o);
+            present_now(id);
+            hle_log("xbased-hle-pb", "display mode with frame buffer %08x: shows %u (%ux%u), a target of its own",
+                    pa, id, o->d.w, o->d.h);
+        }
+        return;
     }
     hle_pb_display_mode_get(&pitch, &xfmt, &hz);
     if (!mode_size(0, &w, &h, &seq)) {

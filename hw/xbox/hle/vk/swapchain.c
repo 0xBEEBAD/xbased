@@ -286,7 +286,9 @@ static const char k_fs_crt[] =
     "  o = ramp(col * vig);\n"
     "}\n";
 /* The frame rate in a corner (hle_present_set_osd): four seven-segment
- * digits, green on dark, drawn by the shader alone. extra.x: the number. */
+ * digits, green on dark, drawn by the shader alone. extra.x: the number.
+ * extra.y 1: fast forward's sign instead (hle_present_set_ff), two
+ * triangles pointing right. */
 static const char k_fs_osd[] =
     "float seg(vec2 p, int m) {\n"
     "  const float t = 0.07;\n"
@@ -301,6 +303,12 @@ static const char k_fs_osd[] =
     "  return 0.0;\n"
     "}\n"
     "void main() {\n"
+    "  if (pc.extra.y > 0.5) {\n"
+    "    float lx = fract(v_uv.x * 2.0), y = abs(v_uv.y - 0.5);\n"
+    "    float on = lx > 0.14 && lx < 0.86 && y < 0.36 * (0.86 - lx) / 0.72 ? 1.0 : 0.0;\n"
+    "    o = mix(vec4(0.02, 0.07, 0.01, 1.0), vec4(0.55, 0.95, 0.16, 1.0), on);\n"
+    "    return;\n"
+    "  }\n"
     "  const int SEG[10] = int[10](0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F);\n"
     "  int n = int(pc.extra.x + 0.5);\n"
     "  int cell = int(v_uv.x * 4.0);\n"
@@ -937,6 +945,7 @@ static void lose_window(void)
 
 static int g_crt;   /* the CRT filter's kind, 0 none */
 static float g_osd; /* the frame rate shown, 0 none */
+static bool g_osd_ff; /* fast forward's sign shown */
 
 static float g_clip_x = 1.0f, g_clip_y = 1.0f;
 
@@ -949,6 +958,11 @@ void hle_present_set_clip(float cx, float cy)
 void hle_present_set_osd(float fps)
 {
     g_osd = fps;
+}
+
+void hle_present_set_ff(bool on)
+{
+    g_osd_ff = on;
 }
 
 /* V-Sync: on (FIFO, the default), or off for whoever likes tearing
@@ -2742,6 +2756,13 @@ void hle_present_end(float sx, float sy, bool fxaa, int upscale, bool average, u
             /* top left, 4 digits each 0.022 of the window's height wide */
             const float dh = 0.045f, dw = dh * 0.62f * (float)wh / (float)ww;
             float oc[12] = { -0.98f, -0.97f, -0.98f + 4 * dw * 2, -0.97f + dh * 2, g_osd, 0, 0, 0,
+                             g_ps.rot[0], g_ps.rot[1], g_ps.rot[2], g_ps.rot[3] };
+            quad(cb, f, SET_OSD, g_ps.pipe[P_OSD], src, oc, iw, ih);
+        }
+        if (g_osd_ff && g_ps.pipe[P_OSD]) {
+            /* fast forward on (#404): its sign top right, three digits wide */
+            const float dh = 0.045f, dw = dh * 0.62f * (float)wh / (float)ww;
+            float oc[12] = { 0.98f - 3 * dw * 2, -0.97f, 0.98f, -0.97f + dh * 2, 0, 1, 0, 0,
                              g_ps.rot[0], g_ps.rot[1], g_ps.rot[2], g_ps.rot[3] };
             quad(cb, f, SET_OSD, g_ps.pipe[P_OSD], src, oc, iw, ih);
         }
