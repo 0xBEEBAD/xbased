@@ -1,5 +1,20 @@
 # xbased changelog
 
+## 1.2.7 (2026-11)
+
+### Fixes
+- Screenshots no longer freeze the picture (#401). The picture is read,
+  encoded and written on a thread of its own (the screen stood still for
+  about a third of a second, longer at 4K), and its notice no longer makes
+  the screen redraw every refresh while it shows.
+- Savestates hold the game only while it is taken (#401). The file is
+  written once the game runs again, and the wait for the game's next frame
+  is shorter (Republic Commando 680 ms down to 90, San Andreas about 130).
+  States saved by earlier versions load as before.
+- HRTF filtering off (Audio, or a game's settings): the sounds a game
+  places in 3D play at the level they have with the filter, instead of 7 to
+  8 dB louder (#410). Max Payne's gunshots and effects covered its dialogue.
+
 ## 1.2.6 (2026-11)
 
 ### New

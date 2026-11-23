@@ -128,6 +128,7 @@ static struct {
 } g_pb;
 
 static uint32_t g_fl_flips;             /* flips so far (hle_pb_flip_read) */
+static int64_t g_trap_flip_ns;          /* the last flip a trap's handler did (hle_pb_flips_in_traps) */
 
 /* The report gate on (g_sc_gate, XBASED_HLE_PB_VISGATE), and the report
  * scout reading the guest's pushes (g_sc_on): only once the decoder has met
@@ -1033,6 +1034,7 @@ static void consume_pass(void)
         hle_host_gpu_trace(HLE_GTR_RESUME, 1);
         if (__atomic_load_n(&g_fl_flips, __ATOMIC_ACQUIRE) != g_pb.trap_flips) {
             pace_flip();                            /* its handler flipped */
+            __atomic_store_n(&g_trap_flip_ns, hle_now_ns(), __ATOMIC_RELAXED);
         }
     }
     if (!fifo_open()) {
@@ -1728,6 +1730,12 @@ bool hle_pb_park(bool at_flip, uint64_t timeout_ns)
         g_usleep(1000);
     }
     return true;
+}
+
+bool hle_pb_flips_in_traps(void)
+{
+    const int64_t t = __atomic_load_n(&g_trap_flip_ns, __ATOMIC_RELAXED);
+    return t && hle_now_ns() - t < 1000000000;
 }
 
 void hle_pb_unpark(void)

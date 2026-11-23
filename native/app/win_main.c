@@ -379,8 +379,11 @@ static void pause_core(bool on)
     g_paused_ms.on = on;
 }
 
+static void saves_finish(void);
+
 static _Noreturn void exit_now(int code)
 {
+    saves_finish();         /* a savestate being written: whole first */
     paused_note();
     const bool closing = g_frame && !(code & 0x40000000) && !g_frame_keep;
     if (closing) {
@@ -774,16 +777,22 @@ static void *save_thread(void *arg)
     const int slot = (int)(intptr_t)arg;
     char path[MAX_PATH * 2];
     state_path(slot, path, sizeof(path));
-    const char *err = nc_state_save(path);
-    nc_log("xbased-app", "savestate %d: %s", slot, err ? err : "saved");
+    /* the state taken with the game held, then (the game going on) its
+     * picture asked for at once, the frame it was taken at still on the
+     * screen, and the file written (#401: the write held the game too) */
+    const char *err = nc_state_save_begin(path);
+    char pic[MAX_PATH * 2];
     if (!err) {
         /* its picture: the frame shown, the dashboard's thumbnail */
-        char pic[MAX_PATH * 2];
         snprintf(pic, sizeof(pic), "%.*s.bmp", (int)(strlen(path) - 4), path);
         remove(pic);                        /* (an older one's picture) */
         snprintf(pic, sizeof(pic), "%.*s.jpg", (int)(strlen(path) - 4), path);
         remove(pic);
         hle_present_shot(pic);
+        err = nc_state_save_finish();
+    }
+    nc_log("xbased-app", "savestate %d: %s", slot, err ? err : "saved");
+    if (!err) {
         /* the notice after the picture: not in it */
         for (int i = 0; i < 100 && GetFileAttributesA(pic) == INVALID_FILE_ATTRIBUTES; i++) {
             SDL_Delay(10);
@@ -812,8 +821,18 @@ static void save_state(int slot)
     }
 }
 
+/* A savestate still being written: its file, before it's read or the run
+ * ends (exit_now) */
+static void saves_finish(void)
+{
+    for (int i = 0; i < 500 && SDL_GetAtomicInt(&g_saving); i++) {
+        SDL_Delay(10);
+    }
+}
+
 static void load_state(int slot)
 {
+    saves_finish();
     char path[MAX_PATH * 2], opt[MAX_PATH * 2 + 16];
     state_path(slot, path, sizeof(path));
     const char *err = nc_state_compat(path);
