@@ -2986,9 +2986,15 @@ typedef struct DirEntry {
  * FindFirstFile("STAGE398.lz") found nothing: GCDVDEmu.cpp's Fatal Error. */
 #define LISTING_MAX (1u << 20)
 
+/* A listing holds only the entries its enumeration's mask matches: a
+ * FindFirstFile of one name listed the whole folder, a host folder with a
+ * stat per entry, and Armed and Dangerous looks each sound up twice in its
+ * cache partition (~390 files) as a level loads: 16 ms a call on Windows, the
+ * guest's CPU held, the level's first seconds at half its rate (#365). */
 typedef struct DirList {
     DirEntry *e;
     unsigned n, cap;
+    const char *mask;
 } DirList;
 
 static DirEntry *dir_add(DirList *l)
@@ -3011,13 +3017,18 @@ static bool disc_list_entry(void *ctx, const uint8_t *e)
 {
     DirList *l = ctx;
     const uint8_t nlen = e[13];
-    if (nlen < sizeof(l->e->name)) {
+    char name[sizeof(l->e->name)];
+    if (nlen < sizeof(name)) {
+        memcpy(name, e + 14, nlen);
+        name[nlen] = 0;
+        if (!wildcard(l->mask, name)) {
+            return false;
+        }
         DirEntry *d = dir_add(l);
         if (!d) {
             return true;
         }
-        memcpy(d->name, e + 14, nlen);
-        d->name[nlen] = 0;
+        memcpy(d->name, name, nlen + 1u);
         d->size = nc_rd32(e + 8);
         d->dir = e[12] & 0x10;
     }
@@ -3029,6 +3040,9 @@ static bool disc_list_entry(void *ctx, const uint8_t *e)
 static void ov_entry(void *ctx, const char *name, uint32_t size, bool is_dir)
 {
     DirList *l = ctx;
+    if (!wildcard(l->mask, name)) {
+        return;     /* nor was the disc's file it replaces */
+    }
     for (unsigned i = 0; i < l->n; i++) {
         if (!strcasecmp(l->e[i].name, name)) {
             l->e[i].size = size;
@@ -3066,7 +3080,8 @@ static void list_dir(NcKernel *k, const NcFile *nf, DirList *l)
     while (d && (de = readdir(d))) {
         char guest[512];
         name_from_host(de->d_name, guest, sizeof(guest));
-        if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, "..") || strlen(guest) >= sizeof(l->e->name)) {
+        if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, "..") || strlen(guest) >= sizeof(l->e->name) ||
+            !wildcard(l->mask, guest)) {
             continue;
         }
         char p[600];
@@ -3118,7 +3133,7 @@ static uint64_t NtQueryDirectoryFile(NcKernel *k, NcFrame *f, const uint32_t *a)
         /* A new enumeration lists the directory once (NcFile.listing). */
         nf->dir_next = 0;
         snprintf(nf->mask, sizeof(nf->mask), "%s", mask);
-        DirList l = {NULL, 0, 0};
+        DirList l = {NULL, 0, 0, nf->mask};
         list_dir(k, nf, &l);
         free(nf->listing);
         nf->listing = l.e ? l.e : malloc(sizeof(DirEntry));

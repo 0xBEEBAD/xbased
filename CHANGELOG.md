@@ -1,5 +1,20 @@
 # xbased changelog
 
+## 1.2.8 (2026-11)
+
+### Fixes
+- Armed and Dangerous: a level no longer starts at half its frame rate for
+  its first seconds (#365). Each time a game looked for one file by name in
+  a folder, the whole folder was listed, and on the hard disk with a lookup
+  of every file in it: the game looks up each sound of a level in its cache
+  as the level loads, about 16 ms each on Windows with the game held. The
+  loading screen is shorter too.
+- Grand Theft Auto III: the raindrops on the screen show in the rain
+  (#389). A draw that reads the very picture it draws into now reads it
+  where it asks to, as the console does: each drop shows the scene behind
+  it through the water, and read at its own spot it drew the picture over
+  itself, unseen.
+
 ## 1.2.7 (2026-11)
 
 ### Fixes
