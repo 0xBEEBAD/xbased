@@ -192,21 +192,10 @@ int hle_host_anisotropy(void)
     return g_anisotropy;
 }
 
-/* A custom Vulkan driver's entry point (the app loads Turnip through
- * adrenotools), or the system driver's. */
-static PFN_vkGetInstanceProcAddr g_custom_gipa;
-
-void nc_hle_set_vk_loader(void *gipa)
-{
-    g_custom_gipa = (PFN_vkGetInstanceProcAddr)gipa;
-}
-
+/* The system driver's entry point. */
 void *hle_host_vk_loader(void)
 {
     static PFN_vkGetInstanceProcAddr gipa;
-    if (g_custom_gipa) {
-        return (void *)g_custom_gipa;
-    }
 #ifdef __ANDROID__
     if (!gipa) {
         void *lib = dlopen("libvulkan.so", RTLD_NOW | RTLD_LOCAL);

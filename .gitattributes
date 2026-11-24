@@ -1,6 +1,6 @@
 # xbased: text files are LF in the repository and in every checkout (with
-# core.autocrlf a Windows checkout had them CRLF, gradlew among them, and
-# files were committed with mixed endings); batch files keep CRLF
+# core.autocrlf a Windows checkout had them CRLF, and files were committed
+# with mixed endings); batch files keep CRLF
 *               text=auto eol=lf
 *.bat           text eol=crlf
 *.cmd           text eol=crlf

@@ -37,6 +37,7 @@ above:
   General Public License, version 3 or later; its upscaler is AMD
   FidelityFX Super Resolution 1 (EASU and RCAS), MIT
   (licenses/amd-fsr1.license.txt).
-- The libraries the app bundles (FEX, SDL3, adrenotools, glslang, volk,
-  Vulkan Memory Allocator, SPIRV-Reflect, nv2a_vsh_cpu, libchdr (BSD-3), and FEX's own
-  dependencies): their licenses are in licenses/.
+- The libraries the executables are built with: SDL3, Zydis and Zycore,
+  glslang, volk, SPIRV-Reflect, nv2a_vsh_cpu, libchdr with its LZMA SDK and
+  zstd decoders, xxHash, libslirp, zlib, and on Windows the LLVM C++ runtime
+  (libc++, compiler-rt) and winpthreads. Their licenses are in licenses/.

@@ -1,6 +1,6 @@
 /*
- * xbased native core — a run's options (options.h), shared by the app's front
- * end (native/app/app_main.c) and xboxrun (native/run/xboxrun.c).
+ * xbased native core — a run's options (options.h), from the app's front end
+ * (native/app/win_main.c).
  */
 #include "native/core/options.h"
 #include "native/core/core.h"

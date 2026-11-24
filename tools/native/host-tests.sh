@@ -14,7 +14,6 @@
 #   processor itself, from the app's build folder (default ../build/win;
 #   Windows only for now)
 #
-# tests/native/apu_out and fexrun are not run: they are Android's.
 # Prints a line per test program and ends with the number that failed.
 set -u
 REPO=$(cd "$(dirname "$0")/../.." && pwd)

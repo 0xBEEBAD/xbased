@@ -1,6 +1,6 @@
 /*
- * xbased native core — a run's options, the arguments a front end passes on
- * (the app's NativeCoreActivity.getArguments, xboxrun's command line):
+ * xbased native core — a run's options, the arguments the front end passes on
+ * (native/app/win_main.c):
  *
  *   uncap            every frame presented at once, without waiting for
  *                    vblank (the HLE GPU's XBASED_HLE_UNCAP)

@@ -40,9 +40,6 @@ void hle_disp_present_late(bool on);
  * and submitted its last read of: the render thread may write it again (the
  * one queue puts the write after the read). */
 void hle_disp_release(int slot);
-/* The front frame's pixels, RGBA, top row first (g_free them), for captures
- * without the app's window (native/run/capture.c); NULL when there is none. */
-uint8_t *hle_disp_read_front(uint32_t *w, uint32_t *h);
 
 typedef struct HleDispStats {
     uint64_t written, presented, dropped, write_waits;

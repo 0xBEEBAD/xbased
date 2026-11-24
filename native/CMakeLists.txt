@@ -1,8 +1,8 @@
 # xbased native core (QEMU-free): its own x86 translator + reimplemented Xbox
 # kernel, for Windows x64 and Linux x86-64.
 #
-# xbased_native is the core library; xboxrun runs a title from the command
-# line (not part of the default build).
+# xbased_native is the core library, the xbased executable runs it
+# (cmake/app_win.cmake).
 cmake_minimum_required(VERSION 3.20)
 project(xbased_native C CXX)
 
@@ -168,8 +168,6 @@ if(EXISTS "${NC_DEPS}/libchdr/CMakeLists.txt")
   target_compile_definitions(xbased_native PRIVATE NC_HAVE_CHD)
 endif()
 
-add_executable(xboxrun EXCLUDE_FROM_ALL run/xboxrun.c run/capture.c)
-target_link_libraries(xboxrun PRIVATE xbased_native xbased_hle z)
 target_link_libraries(xbased_hle PUBLIC xbased_native)
 target_link_libraries(nc_slirp PRIVATE xbased_native)   # nc_log
 
@@ -208,10 +206,10 @@ else()
 endif()
 
 if(WIN32)
-  nc_win_compat(xbased_native xbased_hle xbased_apu nc_glib nc_slirp xboxrun)
+  nc_win_compat(xbased_native xbased_hle xbased_apu nc_glib nc_slirp)
   if(TARGET xbased)
     nc_win_compat(xbased)
   endif()
 elseif(NC_LINUX_X64)
-  nc_linux_compat(xbased_native xbased_hle xbased_apu nc_glib nc_slirp xboxrun xbased)
+  nc_linux_compat(xbased_native xbased_hle xbased_apu nc_glib nc_slirp xbased)
 endif()

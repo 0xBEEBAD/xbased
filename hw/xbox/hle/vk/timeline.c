@@ -384,8 +384,7 @@ void hle_tl_signaled(uint64_t value)
 }
 
 /* How long the GPU has been on our work without running out of it (0: it's
- * out now). A GPU queue below ours (the app's window: our kgsl contexts are
- * at priority 7, native/app/vkdriver.c) only runs when it does. */
+ * out now). */
 int64_t hle_tl_busy_ns(void)
 {
     if (!g_tl.sem || hle_atomic_read(&g_tl.completed) >= hle_atomic_read(&g_tl.submitted)) {

@@ -33,9 +33,6 @@ void nc_hle_set_fatal(int kind, const char *why);
 int nc_hle_fatal_kind(void);
 /* The title renders by push-buffer decoding (pbmode.h). */
 bool nc_hle_pb_active(void);
-/* Before boot: the vkGetInstanceProcAddr of a custom Vulkan driver (Turnip
- * through adrenotools) for the HLE GPU, instead of the system driver's. */
-void nc_hle_set_vk_loader(void *gipa);
 /* Before boot: the HLE GPU's render scale (1-4x the title's resolution). */
 void nc_hle_set_render_scale(int scale);
 /* Anisotropic filtering forced on the game's textures: 0 (the game's own), 2-16. */

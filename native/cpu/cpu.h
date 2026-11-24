@@ -15,10 +15,10 @@
 extern "C" {
 #endif
 
-/* Same order as x86 encodings and FEX's register file. */
+/* Same order as x86 encodings. */
 enum { NC_EAX, NC_ECX, NC_EDX, NC_EBX, NC_ESP, NC_EBP, NC_ESI, NC_EDI };
 
-/* Mirrors FEXCore::Core::SystemOpKind (checked in cpu.cpp). */
+/* What a system op hands back to the core (cpu_x86.cpp). */
 enum NcSysOp {
     NC_SYSOP_NONE = 0,
     NC_SYSOP_IN,
@@ -141,10 +141,9 @@ void nc_cpu_invalidate(NcCpu *cpu, uint32_t va, uint32_t len);
  * invalidate its translations from a fault). */
 bool nc_cpu_on_own_thread(NcCpu *cpu);
 
-/* At the end of a system op: the first time the running thread's x87 control
- * word selects single precision, FEX's reduced x87 starts rounding to it
- * (translations made from now on) and every translation so far is dropped;
- * true that once. Titles that never select it keep the plain reduced x87. */
+/* At the end of a system op: whether the running thread's x87 control word
+ * selecting single precision made the translations change (true that once).
+ * Always false on x86-64 hosts, whose x87 rounds as the control word says. */
 bool nc_cpu_x87_single_check(NcCpu *cpu);
 
 /* From any host thread: the guest leaves with NC_SYSOP_INTERRUPT at the start
@@ -196,15 +195,13 @@ void nc_cpu_fault_resume(NcCpu *cpu, void *ucontext);
 /* The faulting access was a write (a data abort's WnR). */
 bool nc_cpu_fault_is_write(const void *ucontext);
 
-/* A SIGBUS (si_code code) in translated guest code: an atomic access the host
- * can't make at that alignment (a locked x86 instruction at an address its
- * size doesn't divide), done by FEX's unaligned-access handler, which moves
- * the faulting context's PC past it. True if handled. */
+/* A SIGBUS (si_code code) in translated guest code from an atomic access the
+ * host can't make at that alignment. True if handled (never on x86-64 hosts,
+ * which make them). */
 bool nc_cpu_unaligned_fault(NcCpu *cpu, int code, void *ucontext);
 
-/* A fault in the call-ret shadow stack's guard pages (unbalanced guest
- * CALL/RET, e.g. across guest thread switches): resets its pointer in the
- * faulting context (a ucontext_t *) as FEX's front ends do. True if handled. */
+/* A fault in a call-ret shadow stack's guard pages (unbalanced guest
+ * CALL/RET). True if handled (never: the x86-64 translator keeps none). */
 bool nc_cpu_callret_fault(NcCpu *cpu, uintptr_t fault_addr, void *ucontext);
 
 #if defined(__x86_64__) /* the x86-64 translator (Windows, Linux) */
