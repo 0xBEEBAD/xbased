@@ -1,5 +1,21 @@
 # xbased changelog
 
+## 1.2.9 (2026-11)
+
+### Fixes
+- Crazy Taxi 3: no longer drops to 30 or 20 fps after a few levels (#407).
+  Its menus draw into its frame buffers from the CPU, and those buffers kept
+  counting as the CPU's for the rest of the session: each time the game
+  changed what it draws to (about 150 times a frame in Glitter Oasis) a
+  whole frame buffer was copied back to memory, and every frame missed its
+  vblank. A buffer now counts as the CPU's only while the CPU keeps writing
+  it. Forza Motorsport's buffers did the same after its menus.
+- The frame pacing hold (which keeps a game's frames in step with the
+  display) lets go of a game it slows down: Crazy Taxi 3 waits for a vblank
+  after each frame, and held it missed one more each time (20 fps). Games
+  that need the hold keep it, such as GTA Vice City at its own 30 fps and
+  Ninja Gaiden Black.
+
 ## 1.2.8 (2026-11)
 
 ### Fixes

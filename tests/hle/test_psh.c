@@ -258,11 +258,11 @@ static void test_bumpenv(void)
     HT_CHECK(strstr(buf, "uvec4 bump;") != NULL);
     HT_CHECK(strstr(buf, "vec2 d = mat2(unpackHalf2x16(pc.bump.x), unpackHalf2x16(pc.bump.y)) * "
                          "sgn8(t0.bg);") != NULL);
-    HT_CHECK(strstr(buf, "t1 = samp(1u, nvproj(vTex1).xy + d);") != NULL);
+    HT_CHECK(strstr(buf, "t1 = samp(1u, vTex1.xy + d);") != NULL);      /* (s, t) not divided by q (4ce115b94e) */
     HT_CHECK(strstr(buf, "vec4 t2 = samp(2u, nvproj(vTex2).xy);") != NULL);
     k.vol = 2;                          /* t1 a volume: r passes through */
     HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), &un) > 0);
-    HT_CHECK(strstr(buf, "t1 = samp3(1u, vec3(nvproj(vTex1).xy + d, vTex1.z));") != NULL);
+    HT_CHECK(strstr(buf, "t1 = samp3(1u, vec3(vTex1.xy + d, vTex1.z));") != NULL);
     rs[HLE_PS_TEXMODES] = 1 | (1u << 5) | (7u << 10);
     rs[HLE_PS_INPUTTEX] = 1u << 16;                     /* t2 reads t1 */
     hle_psh_key(rs, &k);

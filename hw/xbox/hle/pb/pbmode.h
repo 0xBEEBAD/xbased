@@ -31,6 +31,10 @@ void hle_pb_put(void);
 /* pbdraw.c: a frame swapped went to the display (its flip), for the frame
  * latency (pbmode.c fl_hold). Any thread. */
 void hle_pb_frame_flipped(void);
+/* pbdraw.c, at a flip of the guest's (its vblank ISR's, the vCPU thread):
+ * frame (the frames swapped counting it) shown, swapped (its
+ * FLIP_INCREMENT_WRITE decoded) at swap_ns: what a hold cost (pbmode.c) */
+void hle_pb_frame_shown(uint32_t frame, int64_t swap_ns);
 /* The guest is writing DMA_PUT = put (its vCPU thread), before the register
  * holds it: the report scout reads what it pushed (mem/barrier.h
  * hle_barrier_report_pushed) before the decoder can. */

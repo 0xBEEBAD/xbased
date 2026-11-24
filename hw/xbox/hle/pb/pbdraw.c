@@ -132,7 +132,9 @@ typedef struct PbObj {
     uint64_t lvl_w[16];                 /* ... and its written then */
     uint64_t written;                   /* g_pd.wseq at its last draw, clear or copy */
     uint64_t edge_hash[2];              /* its bytes on its first and last page (rt_cpu_sync) */
-    bool cpu_used;                      /* the CPU wrote its memory (writeback) */
+    bool cpu_used;                      /* the CPU wrote its memory lately (writeback,
+                                           cpu_used_expire) */
+    uint64_t cpu_frame;                 /* ... the frame it last did (pd_frames) */
     uint64_t mem_seq;                   /* g_pd.wseq when a texture took its memory as the
                                            title's data: superseded while written <= it */
     /* its memory against its image (coh_*, colour targets) */
@@ -235,6 +237,7 @@ static struct {
      * (pend_flipped: one whose flip came before it, hle_pb_flipped) */
     uint32_t pend[8];
     bool pend_flipped[8];
+    int64_t pend_ns[8];                 /* when each was swapped */
     uint32_t pend_head, pend_tail;
     /* D3D's immediate flip (its trap's handler, before the frame's
      * FLIP_INCREMENT_WRITE): ahead_pa, the bound target's memory while it
@@ -999,6 +1002,15 @@ static bool rtlog_on(void)
     return on || g_dlog_left > 0;       /* and among the draw log's draws (debug.xbased.pbdraws) */
 }
 
+/* The frames so far: swaps, and display starts for a title that flips
+ * without one */
+static uint64_t pd_frames(void)
+{
+    return g_pd.swaps + g_pd.pcrtc_presents;
+}
+
+#define CPU_USED_FRAMES 60                  /* frames without the CPU's writes: cpu_used_expire */
+
 /* Rows [y0, y1) of target id's memory into its image; used: as
  * rt_cpu_upload's. */
 static void rt_upload_rows(PbObj *o, uint32_t id, bool used, uint32_t y0, uint32_t y1)
@@ -1008,7 +1020,10 @@ static void rt_upload_rows(PbObj *o, uint32_t id, bool used, uint32_t y0, uint32
     const int32_t pt[1][2] = { { 0, (int32_t)y0 } };
     hle_res_upload(id, o->d.pa, o->d.pitch, 1, &r, pt);
     o->written = ++g_pd.wseq;
-    o->cpu_used |= used;
+    if (used) {
+        o->cpu_used = true;
+        o->cpu_frame = pd_frames();
+    }
     g_pd.rt_uploads++;
     if (rtlog_on()) {
         hle_log("xbased-hle-pb", "rt upload %u: %08x %ux%u pitch %u fmt %02x rows %u-%u swap %llu", id,
@@ -1713,6 +1728,7 @@ static void swap(void)
     if (head - __atomic_load_n(&g_pd.pend_tail, __ATOMIC_ACQUIRE) < ARRAY_SIZE(g_pd.pend)) {
         g_pd.pend[head % ARRAY_SIZE(g_pd.pend)] = c->swap_id;
         g_pd.pend_flipped[head % ARRAY_SIZE(g_pd.pend)] = pa && flipped == pa;
+        g_pd.pend_ns[head % ARRAY_SIZE(g_pd.pend)] = hle_now_ns();
         __atomic_store_n(&g_pd.pend_head, head + 1, __ATOMIC_RELEASE);
     }
     g_pd.swap_wseq = g_pd.wseq;
@@ -2147,6 +2163,7 @@ void hle_pb_flipped(uint32_t start)
     } while (!__atomic_compare_exchange_n(&g_pd.pend_tail, &tail, tail + 1, false, __ATOMIC_ACQ_REL,
                                           __ATOMIC_ACQUIRE));
     __atomic_store_n(&g_pd.flipped_ns, hle_now_ns(), __ATOMIC_RELAXED);     /* once a frame */
+    hle_pb_frame_shown(tail + 1u, g_pd.pend_ns[tail % ARRAY_SIZE(g_pd.pend)]);
     hle_pb_frame_flipped();
     hle_hitch_frame(id, HLE_FR_FLIP);
     /* due at the vblank this flip came in: the console's display changes
@@ -5508,6 +5525,40 @@ static void coh_to_display(PbObj *x, bool clear)
     }
 }
 
+/* A target the CPU wrote (cpu_used) goes back to memory at each unbind,
+ * whatever its size, and the coherence leaves it alone; once the CPU has
+ * let it be for CPU_USED_FRAMES frames it is a target like the others
+ * again, kept from its memory as it is now (as a frame buffer that leaves
+ * the display, coh_shown). Kept for good, Crazy Taxi 3's two frame buffers,
+ * written by its CPU in the menus, went back to memory whole (1.2 MB) at
+ * each of the ~150 target changes of a Glitter Oasis frame, 5000 a second:
+ * the decoder waited for room to land them, each frame missed its vblank,
+ * and the level played at 30 fps for minutes (#407; from a savestate there,
+ * the flag not set, at 60). */
+static void cpu_used_expire(void)
+{
+    const uint64_t f = pd_frames();
+    for (unsigned i = 0; i < g_pd.nobjs; i++) {
+        PbObj *x = &g_pd.objs[i];
+        uint32_t xl;
+        if (!x->cpu_used || f - x->cpu_frame <= CPU_USED_FRAMES) {
+            continue;
+        }
+        const bool uploaded = rt_cpu_upload(x->id, false);     /* its last rows, the old path's */
+        x->cpu_used = false;
+        if (!coh_managed(x, &xl)) {
+            continue;                       /* a frame buffer shown lately, a small target */
+        }
+        if (uploaded || obj_superseded(x)) {
+            coh_synced(x, xl);
+        } else {
+            coh_snap_take(x->d.pa, xl, &x->snap);
+            x->mn_epoch = 0;
+            hle_host_mem_rearm(x->d.pa, xl);
+        }
+    }
+}
+
 /* o is shown (a frame buffer): it and the targets over its memory (a view
  * of part of it: Breakdown's scene rows, target_part) to the front buffer's
  * path, one made over it while it is shown too (coh_display_over), each
@@ -5520,6 +5571,7 @@ static void coh_shown(PbObj *o)
     if (!o) {
         return;
     }
+    cpu_used_expire();
     /* a frame buffer no longer shown lately leaves the front buffer's path:
      * kept again from its memory as it is now (its image the newer for what
      * the GPU drew since it synced: guarded from its next draw). The CPU's

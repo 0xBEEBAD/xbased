@@ -85,6 +85,11 @@ void hle_host_frame_flipped(void)
     nc_ke_frame_flipped();
 }
 
+uint32_t hle_host_frame_holds_timed_out(void)
+{
+    return nc_ke_frame_holds_timed_out();
+}
+
 void hle_host_code_changed(void)
 {
     g_flush = true;

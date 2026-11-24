@@ -382,6 +382,9 @@ bool nc_ob_create_named(NcKernel *k, uint32_t attrs, const char *name, enum NcOb
 void nc_ke_frame_wait_request(NcKernel *k);
 void nc_ke_frame_take(NcKernel *k);
 void nc_ke_frame_flipped(void);
+/* the holds so far that ended at their deadline, the flip they waited for
+ * not come (any thread) */
+uint32_t nc_ke_frame_holds_timed_out(void);
 
 void nc_ps_register(NcKernel *k);
 NcThread *nc_ps_thread_of(NcKernel *k, uint32_t ethread);
