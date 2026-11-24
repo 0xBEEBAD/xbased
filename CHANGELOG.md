@@ -1,5 +1,30 @@
 # xbased changelog
 
+## 1.2.10 (2026-11)
+
+### Fixes
+- Glow and blur effects at higher resolutions: a game's blur passes, which
+  sample a target at offsets of one pixel of the console's resolution, now
+  run at the console's resolution, so above 1x they blur instead of breaking
+  into copies. Splinter Cell Pandora Tomorrow's goggles had a grid of green
+  dots round them instead of a soft halo (#412, #421).
+- SoulCalibur II after loading a state: the picture went softer and slower.
+  A frame buffer taller than the screen came back from the state shorter than
+  it is, and the game's final filter, which reads all of it, went through
+  memory at the console's resolution every frame (#418).
+- Dead or Alive 3 kept its 16:9 picture only until a state was loaded, which
+  brought it back in 4:3. Its shape is now read from the game at boot as well.
+
+### Controls
+- Pressure modifier: a new input under each player's buttons. While it's held,
+  A, B, X, Y, Black and White are pressed at the amount set in the controller
+  settings (50% by default), for games that read how hard the face buttons
+  are pressed, like Metal Gear Solid 2 (#420).
+- A trigger assigned to a face button presses it as far as the trigger goes,
+  with the triggers' dead zone and full press applied.
+- DualShock 3: its buttons' pressure goes to the game when SDL reads the pad
+  with its PS3 driver (now on for Windows, with Sony's driver or DsHidMini).
+
 ## 1.2.9 (2026-11)
 
 ### Fixes

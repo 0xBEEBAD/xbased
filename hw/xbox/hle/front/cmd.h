@@ -123,6 +123,9 @@ typedef struct HleSurfDesc {
     uint32_t parent;
     uint16_t levels, faces;
     uint16_t level, face;
+    /* 1: at guest resolution whatever the scale (a filter's taps read it,
+     * pb/pbdraw.c obj_native) */
+    uint16_t native, pad;
 } HleSurfDesc;
 
 typedef struct HleCmdDevice {

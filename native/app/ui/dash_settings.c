@@ -474,6 +474,7 @@ void scr_settings(void)
                 dash_help(T(S_H_TRIGGERS), HELP_ON_RESUME);
             }
         }
+        opt_int(&l, S_PRESS_AMOUNT, "press.amount", 10, 90, 5, 50, "%");   /* the pressure modifier's (#420) */
         opt_bool(&l, S_RUMBLE, "rumble", true, false);
         opt_bool(&l, S_PAUSE_DC, "pad.dcpause", true, false);  /* the game's menu as a player's pad goes (win_main.c) */
         {
@@ -1370,6 +1371,7 @@ void scr_controls(void)
         if (list_row(&l, T(S_TRIGGERS), val, NULL)) {
             dash_push(SCR_TRIGGERS);
         }
+        opt_int(&l, S_PRESS_AMOUNT, "press.amount", 10, 90, 5, 50, "%");   /* the pressure modifier's (#420) */
         const bool custom = cfg_bool(&D.game, "map.custom", false);
         if (list_row(&l, T(S_CUSTOM_CONTROLS), custom ? T(S_ON) : T(S_OFF), NULL)) {
             if (custom) {

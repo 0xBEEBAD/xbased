@@ -986,6 +986,14 @@ static uint64_t AvSetDisplayMode(NcKernel *k, NcFrame *f, const uint32_t *a)
         nc_dev_nv2a_av_mode_set(a[2]);
         nc_dev_nv2a_display_mode(a[4], a[3], a[2] & 0x40000000u ? 50 : 60, a[5]);
         nc_kernel_av_title_scan(k, f);
+    } else if (a[5] && !nc_dev_nv2a_av_title()) {
+        /* No mode (the one the dashboard set stays): Dead or Alive 3's D3D
+         * passes 0 at every call, its parameters on the frames above it all
+         * the same (flags 0x50: 16:9). Unscanned, its shape was the console's
+         * setting from its disc, and a state made so (no shape in it) came
+         * back 4:3: the load's RAM scan (kstate.c) took another structure
+         * of that shape first. */
+        nc_kernel_av_title_scan(k, f);
     }
     return 0;
 }

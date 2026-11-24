@@ -135,6 +135,8 @@ typedef struct PbObj {
     bool cpu_used;                      /* the CPU wrote its memory lately (writeback,
                                            cpu_used_expire) */
     uint64_t cpu_frame;                 /* ... the frame it last did (pd_frames) */
+    bool with_ds;                       /* bound with a depth buffer (never at guest resolution alone,
+                                           obj_native) */
     uint64_t mem_seq;                   /* g_pd.wseq when a texture took its memory as the
                                            title's data: superseded while written <= it */
     /* its memory against its image (coh_*, colour targets) */
@@ -703,6 +705,26 @@ static PbObj *evict_slot(void)
     return best;
 }
 
+/* The colour targets a filter's taps read (obj_native): at guest resolution
+ * when made again (evicted, a savestate's load), not scaled for a frame
+ * first. */
+#define NATIVE_KEYS 64
+static struct {
+    uint32_t pa, xfmt, pitch, w, h;
+} g_native[NATIVE_KEYS];
+static unsigned g_nnative;
+
+static bool native_key(const HleSurfDesc *d)
+{
+    for (unsigned i = 0; i < g_nnative; i++) {
+        if (g_native[i].pa == d->pa && g_native[i].xfmt == d->xfmt && g_native[i].pitch == d->pitch &&
+            g_native[i].w == d->w && g_native[i].h == d->h) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /* The object for a surface (memory, format, pitch, size), made the first
  * time; 0 if none can be. A linear surface's height is only what its clip
  * reaches (the NV2A has none): a view of the top rows of one already made,
@@ -763,6 +785,7 @@ static uint32_t object(uint32_t pa, uint32_t xfmt, uint32_t pitch, uint32_t w, u
     o->d.pitch = pitch;
     o->d.levels = 1;
     o->d.faces = 1;
+    o->d.native = native_key(&o->d);
     obj_owns(o);
     uint32_t olen;
     o->display = coh_len(o, &olen) && coh_display_over(pa, olen);  /* a frame buffer's memory */
@@ -1296,6 +1319,60 @@ static bool covers_display(const PbObj *o)
            o->d.h >= g_pd.disp_h;
 }
 
+/* o's image made again at guest resolution (native) or at the scale: its
+ * pixels go (the back end parks the old image), a filter's target is drawn
+ * again each frame */
+static void obj_rescale(PbObj *o, bool native)
+{
+    o->d.native = native;
+    HleCmdObj *c = begin(HLE_OP_OBJ_CREATE, sizeof(*c));
+    c->s = o->d;
+    hle_fe_commit();
+    o->written = 0;
+    o->synced = 0;
+    o->gpu_rows = 0;
+}
+
+/* A colour target two or more stages of one draw read: a filter's taps (a
+ * blur, a box downsample) at offsets of a guest texel. Scaled, each tap reads
+ * one host texel of that texel's block and the kernel came apart into copies
+ * of what it blurs: Splinter Cell Pandora Tomorrow's glow, its frame brought
+ * down into a 512 x 512 target, then 256, 128, 64, 32, each from the last with
+ * four taps, a grid of sharp green dots round Sam's goggles at 6x where 1x
+ * has a soft halo (#412, #421). At guest resolution from then on, as the
+ * small targets and the half-frame linear ones are (vk/surf.c surf_scale),
+ * and when made again (g_native). Not the frame (a target as large as the
+ * display: its bright pass taps it too), a frame buffer, a texture's levels
+ * or faces, nor one drawn with a depth buffer (the NV2A pairs the two by
+ * size: both at one scale). */
+static void obj_native(uint32_t id)
+{
+    PbObj *o = obj_of(id);
+    const HleFmtInfo *fi = o && !o->d.native && !o->owner && !o->d.parent && !o->display && !o->with_ds &&
+                           !covers_display(o) && o != g_pd.rt_obj ? hle_fmt_info(o->d.xfmt) : NULL;
+    if (!fi || (fi->flags & (HLE_FI_DEPTH | HLE_FI_DXT))) {
+        return;
+    }
+    /* (at guest resolution already: a small swizzled one, a half frame's linear one, surf_scale's) */
+    if ((!o->d.pitch && MAX(o->d.w, o->d.h) <= 128) || (o->d.pitch && o->d.w <= 360 && o->d.h <= 288)) {
+        return;
+    }
+    obj_rescale(o, true);
+    if (g_nnative < NATIVE_KEYS) {
+        g_native[g_nnative].pa = o->d.pa;
+        g_native[g_nnative].xfmt = o->d.xfmt;
+        g_native[g_nnative].pitch = o->d.pitch;
+        g_native[g_nnative].w = o->d.w;
+        g_native[g_nnative].h = o->d.h;
+        g_nnative++;
+    }
+    static unsigned s_logged;
+    if (s_logged++ < 16) {
+        hle_log("xbased-hle-pb", "surface %u (%08x %ux%u fmt %02x): a filter's taps read it, at guest resolution",
+                o->id, o->d.pa, o->d.w, o->d.h, o->d.xfmt);
+    }
+}
+
 /* The targets the surface methods describe, bound when they changed. */
 static void sync_rt(void)
 {
@@ -1362,6 +1439,22 @@ static void sync_rt(void)
     }
     if (ds && ds != g_pd.ds) {
         zwrite_from_colour(ds);
+    }
+    PbObj *ro = rt && ds ? obj_of(rt) : NULL;
+    if (ro) {
+        /* drawn with a depth buffer: at its scale (obj_native), back to it if a
+         * filter's taps had made it native */
+        ro->with_ds = true;
+        if (ro->d.native) {
+            obj_rescale(ro, false);
+            for (unsigned i = 0; i < g_nnative; i++) {
+                if (g_native[i].pa == ro->d.pa && g_native[i].xfmt == ro->d.xfmt && g_native[i].w == ro->d.w &&
+                    g_native[i].h == ro->d.h) {
+                    g_native[i] = g_native[--g_nnative];
+                    break;
+                }
+            }
+        }
     }
     if (rt != g_pd.rt || ds != g_pd.ds) {
         if (rt != g_pd.rt) {
@@ -3149,6 +3242,68 @@ static uint32_t target_part(uint32_t pa, uint32_t code, const HleFmtInfo *fi, ui
 /* The texture stage s samples: the object id, 0 if it can't be drawn;
  * *unset when the stage has none (CONTROL0 disabled), *lin when its format
  * is linear (sampled by texel coordinates). */
+/* A linear texture taller than the colour target over its memory (the same
+ * pitch, no wider): the surface it reads is that tall, and the target a view
+ * of its top rows, as object() makes the tallest one the binds there take. A
+ * linear target is only as tall as the clips that bound it reach, and after
+ * a savestate's load the first bind sizes it by the clip the state was saved
+ * with: SoulCalibur II's 640 x 960 back buffer came back 640 x 825 (its
+ * frames' viewport, never the whole surface again), and D3D's Present,
+ * which filters all of it into the 640 x 480 front buffer, read the memory
+ * each frame instead, the image landed there first: the picture at the
+ * console's resolution, and a landing a frame (#418). Made the texture's
+ * height: the target's image in its top rows, the memory below them. Only a
+ * target the coherence keeps (its memory's writes tracked), not the one
+ * being drawn into, and up to twice its height (Hunter: The Reckoning -
+ * Redeemer's supersampled back buffer is twice its frame's); its landings
+ * stay the rows the GPU drew. NULL: none. */
+static PbObj *grow_target(PbObj *o, uint32_t th)
+{
+    uint32_t len;
+    if (o == g_pd.rt_obj || o->owner || o->d.parent || !o->d.pitch || !coh_managed(o, &len) || th <= o->d.h ||
+        th > 2u * o->d.h || th > 4096 || (uint64_t)o->d.pa + (uint64_t)o->d.pitch * th > hle_ram_size()) {
+        return NULL;
+    }
+    const uint32_t oid = o->id, ow = o->d.w, oh = o->d.h, rows = land_rows(o);
+    const bool cpu_used = o->cpu_used;
+    const uint64_t cpu_frame = o->cpu_frame;
+    rt_cpu_sync(oid);
+    const uint32_t id = object(o->d.pa, o->d.xfmt, o->d.pitch, ow, th);
+    PbObj *t = obj_of(id);
+    o = obj_of(oid);                        /* (a slot may have gone to it) */
+    if (!t || t == o) {
+        return NULL;
+    }
+    if (!t->written) {
+        rt_upload(t, id, false);            /* the memory (restored_pixels took it after a load) */
+    }
+    uint32_t tl;
+    if (coh_managed(t, &tl)) {
+        coh_synced(t, tl);
+    }
+    if (o) {
+        HleCmdCopy *c = begin(HLE_OP_COPY, sizeof(*c));
+        memset(c, 0, sizeof(*c));
+        c->src = oid;
+        c->dst = id;
+        c->nrects = 1;
+        c->rect[0] = (HleRect){ 0, 0, (int32_t)ow, (int32_t)oh };
+        hle_fe_commit();
+        t->written = ++g_pd.wseq;
+        t->gpu_rows = rows;
+        t->cpu_used = cpu_used;
+        t->cpu_frame = cpu_frame;
+        coh_drawn(t);
+    }
+    t->bound = ++g_pd.binds;                /* the one bound last there (object_at) */
+    static unsigned s_logged;
+    if (s_logged++ < 8) {
+        hle_log("xbased-hle-pb", "surface %u (%08x %ux%u): sampled as %u rows, made that tall (%u)", oid,
+                t->d.pa, ow, oh, th, id);
+    }
+    return t;
+}
+
 static uint32_t texture(unsigned s, bool *unset, bool *lin)
 {
     uint32_t b = 64 * s;
@@ -3232,6 +3387,11 @@ static uint32_t texture(unsigned s, bool *unset, bool *lin)
     if (fi && (fi->flags & HLE_FI_LIN) && !want_depth && !dxt) {
         const uint32_t tp = R(NV097_SET_TEXTURE_CONTROL1 + b) >> 16, tr = R(NV097_SET_TEXTURE_IMAGE_RECT + b);
         PbObj *fit = rows_at(pa, tp, tr >> 16, tr & 0xFFFF);
+        const HleFmtInfo *bi = best && !fit ? hle_fmt_info(best->d.xfmt) : NULL;
+        if (bi && best->d.pitch == tp && (tr >> 16) <= best->d.w && (tr & 0xFFFF) > best->d.h &&
+            bi->bpp == fi->bpp) {
+            fit = grow_target(best, tr & 0xFFFF);
+        }
         if (fit && !coh_mem_newer(fit)) {
             best = fit;
         } else if (best && best != g_pd.rt_obj &&
@@ -3877,6 +4037,19 @@ static void emit(HleCmdDraw *d)
         /* per draw: the state cache isn't rebuilt when only a texture changes */
         d->tex_rect[s] = lin ? R(NV097_SET_TEXTURE_IMAGE_RECT + 64 * s) : 0;
         d->tex_ord |= tex_order(s, d->tex[s]) << 2 * s;
+    }
+    /* a filter's pass: one quad into a target no larger than what it taps */
+    for (unsigned s = 0; s < 3 && d->count <= 6 && g_pd.rt_obj; s++) {
+        const PbObj *src = obj_of(d->tex[s]);
+        if (!src || (uint64_t)g_pd.rt_obj->d.w * g_pd.rt_obj->d.h > (uint64_t)src->d.w * src->d.h) {
+            continue;
+        }
+        for (unsigned t = s + 1; t < 4; t++) {
+            if (d->tex[t] == d->tex[s]) {
+                obj_native(d->tex[s]);      /* its taps (#412) */
+                break;
+            }
+        }
     }
     state();
     uint32_t zf = (R(NV097_SET_SURFACE_FORMAT) >> 4) & 0xF;

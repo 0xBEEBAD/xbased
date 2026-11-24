@@ -17,6 +17,10 @@ enum {
     IM_A, IM_B, IM_X, IM_Y, IM_BLACK, IM_WHITE, IM_LT, IM_RT, IM_START, IM_BACK, IM_LS, IM_RS,
     IM_DUP, IM_DDOWN, IM_DLEFT, IM_DRIGHT,
     IM_LUP, IM_LDOWN, IM_LLEFT, IM_LRIGHT, IM_RUP, IM_RDOWN, IM_RLEFT, IM_RRIGHT,
+    /* held: the face buttons pressed at press.amount (the Duke's are
+     * pressure sensitive: MGS2 aims on a light press of X and fires on a
+     * full one, #420) */
+    IM_PRESS,
     IM_INPUTS
 };
 /* (IM_HK_TURBO_TOGGLE: fast forward on until pressed again, #404) */
@@ -86,6 +90,7 @@ typedef struct ImMap {
     uint8_t linvert, rinvert;   /* stick.linvert, stick.rinvert: the axes turned over, 1 X, 2 Y */
     float trigger_dz;           /* trigger.deadzone: travel ignored at the start, 0..1 */
     float trigger_full;         /* trigger.full: the travel that is already a full press */
+    float press_amount;         /* press.amount: the face buttons' pressure while IM_PRESS is held, 0..1 */
     bool rumble;
     bool dc_pause;          /* a player's controller gone mid-game: the menu (pad.dcpause, #400) */
     /* the mouse (#255): the stick it moves (mouse.stick: 0 none, 1 left, 2

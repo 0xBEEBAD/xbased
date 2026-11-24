@@ -33,6 +33,8 @@ static struct {
     float amount[32];       /* a stick's push, 0..1 ("LUP=0.3"): 1 unless given */
     void (*save)(int), (*load)(int);
     bool menu;              /* the in-game menu asked for */
+    bool sticks_set;        /* "STICKS lx ly rx ry": the sticks held there till the next (up positive) */
+    int16_t sticks[4];
 } g_auto;
 
 static double now_s(void)
@@ -89,6 +91,20 @@ static void act(const char *a, const char *label)
     }
     if (!_stricmp(a, "menu")) {
         g_auto.menu = true;
+        return;
+    }
+    if (!_strnicmp(a, "sticks ", 7)) {
+        /* "STICKS lx ly rx ry" (-32768..32767, up positive): both sticks held
+         * there until the next STICKS (all 0 lets them go); a direction's
+         * own press (LUP...) still goes over its axis. A stick turned
+         * slowly round (Splinter Cell's lock picks) needs both axes at once. */
+        int v[4] = {0};
+        sscanf(a + 7, "%d %d %d %d", &v[0], &v[1], &v[2], &v[3]);
+        g_auto.sticks_set = false;
+        for (int i = 0; i < 4; i++) {
+            g_auto.sticks[i] = (int16_t)(v[i] > 32767 ? 32767 : v[i] < -32768 ? -32768 : v[i]);
+            g_auto.sticks_set |= v[i] != 0;
+        }
         return;
     }
     if (!_strnicmp(a, "vpad ", 5)) {
@@ -294,12 +310,20 @@ void nc_auto_pad(NcPadState *s)
         return;
     }
     const double now = now_s();
+    if (g_auto.sticks_set) {
+        s->lx = g_auto.sticks[0];
+        s->ly = g_auto.sticks[1];
+        s->rx = g_auto.sticks[2];
+        s->ry = g_auto.sticks[3];
+    }
     for (unsigned i = 0; i < NCTL; i++) {
         if (g_auto.until[i] <= now) {
             continue;
         }
         if (k_ctl[i].analog >= 0) {
-            s->analog[k_ctl[i].analog] = 0xFF;
+            /* "A=0.4": a pressure-sensitive button pressed that hard */
+            const uint8_t v = (uint8_t)(g_auto.amount[i] * 255.0f + 0.5f);
+            s->analog[k_ctl[i].analog] = v > s->analog[k_ctl[i].analog] ? v : s->analog[k_ctl[i].analog];
         } else if (k_ctl[i].stick) {
             int16_t *axis[4] = {&s->lx, &s->ly, &s->rx, &s->ry};
             *axis[k_ctl[i].stick - 1] = (int16_t)(k_ctl[i].dir * g_auto.amount[i] * 32767);

@@ -10,16 +10,17 @@
 
 static const char *const k_name[IM_INPUTS] = {"a", "b", "x", "y", "black", "white", "lt", "rt", "start", "back",
                                               "ls", "rs", "up", "down", "left", "right", "lup", "ldown", "lleft",
-                                              "lright", "rup", "rdown", "rleft", "rright"};
+                                              "lright", "rup", "rdown", "rleft", "rright", "press"};
 static const char *const k_label[IM_INPUTS] = {
     "A", "B", "X", "Y", "Black", "White", "Left trigger", "Right trigger", "Start", "Back", "Left stick (click)",
     "Right stick (click)", "D-pad up", "D-pad down", "D-pad left", "D-pad right", "Left stick up", "Left stick down",
     "Left stick left", "Left stick right", "Right stick up", "Right stick down", "Right stick left",
-    "Right stick right"};
+    "Right stick right", "Pressure modifier"};
 /* the keyboard's defaults (player 1) */
 static const SDL_Keycode k_kb_def[IM_INPUTS] = {
     SDLK_SPACE, SDLK_LSHIFT, SDLK_Q, SDLK_E, SDLK_C, SDLK_Z, SDLK_1, SDLK_3, SDLK_RETURN, SDLK_BACKSPACE, SDLK_F, SDLK_H,
-    SDLK_UP, SDLK_DOWN, SDLK_LEFT, SDLK_RIGHT, SDLK_W, SDLK_S, SDLK_A, SDLK_D, SDLK_I, SDLK_K, SDLK_J, SDLK_L};
+    SDLK_UP, SDLK_DOWN, SDLK_LEFT, SDLK_RIGHT, SDLK_W, SDLK_S, SDLK_A, SDLK_D, SDLK_I, SDLK_K, SDLK_J, SDLK_L,
+    SDLK_UNKNOWN};
 /* the gamepad's: 1 + button, 1000 + axis * 2 + negative */
 #define B(x) (1 + (x))
 #define AX(a, neg) (1000 + (a) * 2 + (neg))
@@ -31,7 +32,7 @@ static const int k_pad_def[IM_INPUTS] = {
     B(SDL_GAMEPAD_BUTTON_DPAD_DOWN), B(SDL_GAMEPAD_BUTTON_DPAD_LEFT), B(SDL_GAMEPAD_BUTTON_DPAD_RIGHT),
     AX(SDL_GAMEPAD_AXIS_LEFTY, 1), AX(SDL_GAMEPAD_AXIS_LEFTY, 0), AX(SDL_GAMEPAD_AXIS_LEFTX, 1),
     AX(SDL_GAMEPAD_AXIS_LEFTX, 0), AX(SDL_GAMEPAD_AXIS_RIGHTY, 1), AX(SDL_GAMEPAD_AXIS_RIGHTY, 0),
-    AX(SDL_GAMEPAD_AXIS_RIGHTX, 1), AX(SDL_GAMEPAD_AXIS_RIGHTX, 0)};
+    AX(SDL_GAMEPAD_AXIS_RIGHTX, 1), AX(SDL_GAMEPAD_AXIS_RIGHTX, 0), 0};
 static const char *const k_hk_name[IM_HOTKEYS] = {"menu", "save", "load", "turbo", "turbotoggle", "pause", "shot", "full"};
 static const SDL_Keycode k_hk_def[IM_HOTKEYS] = {SDLK_F1, SDLK_F5, SDLK_F8, SDLK_TAB, SDLK_F3, SDLK_F2, SDLK_F12, SDLK_F11};
 static const enum UiStr k_hk_label[IM_HOTKEYS] = {S_HK_MENU, S_HK_SAVE, S_HK_LOAD, S_HK_TURBO, S_HK_TURBO_TOGGLE,
@@ -49,6 +50,7 @@ const char *im_input_label(int i)
     case IM_RT: return T(S_IN_RT);
     case IM_LS: return T(S_IN_LS);
     case IM_RS: return T(S_IN_RS);
+    case IM_PRESS: return T(S_IN_PRESS);
     default: break;
     }
     if (i >= IM_DUP && i <= IM_DRIGHT) {
@@ -422,6 +424,8 @@ void im_resolve(ImMap *m, const Config *global, const Config *game)
     m->trigger_dz = cfg_int(td, "trigger.deadzone", 10) / 100.0f;
     const Config *tf = game && cfg_get(game, "trigger.full") ? game : global;
     m->trigger_full = cfg_int(tf, "trigger.full", 100) / 100.0f;
+    const Config *pa = game && cfg_get(game, "press.amount") ? game : global;
+    m->press_amount = cfg_int(pa, "press.amount", 50) / 100.0f;
     m->rumble = cfg_bool(global, "rumble", true);
     m->dc_pause = cfg_bool(global, "pad.dcpause", true);
     im_set_face(global);
@@ -464,6 +468,37 @@ static float pad_value(SDL_Gamepad *g, int pad)
     }
     const float v = SDL_GetGamepadAxis(g, (SDL_GamepadAxis)((pad - 1000) / 2)) / 32767.0f;
     return (pad & 1) ? (v < 0 ? -v : 0) : (v > 0 ? v : 0);
+}
+
+/* How hard a button of a controller that reports it is pressed, 0..1 (-1:
+ * no such reading): the DualShock 3's face buttons, shoulders and d-pad are
+ * pressure sensitive as the Duke's face buttons are, and SDL's PS3 drivers
+ * give their pressure as ten axes after the six, in the order of the
+ * buttons' enumeration (SDL_hidapi_ps3.c: sixteen axes, no other count).
+ * Only while the button is down: a driver whose extra axes rest at their
+ * centre would have every button half pressed. A clone that reports none (0
+ * while pressed) is the button's press. */
+static float pad_pressure(SDL_Gamepad *g, int button)
+{
+    static const signed char k_axis[SDL_GAMEPAD_BUTTON_DPAD_RIGHT + 1] = {
+        [SDL_GAMEPAD_BUTTON_SOUTH] = 6, [SDL_GAMEPAD_BUTTON_EAST] = 7, [SDL_GAMEPAD_BUTTON_WEST] = 8,
+        [SDL_GAMEPAD_BUTTON_NORTH] = 9, [SDL_GAMEPAD_BUTTON_LEFT_SHOULDER] = 10,
+        [SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER] = 11, [SDL_GAMEPAD_BUTTON_DPAD_UP] = 12,
+        [SDL_GAMEPAD_BUTTON_DPAD_DOWN] = 13, [SDL_GAMEPAD_BUTTON_DPAD_LEFT] = 14,
+        [SDL_GAMEPAD_BUTTON_DPAD_RIGHT] = 15};
+    if (!g || button < 0 || button > SDL_GAMEPAD_BUTTON_DPAD_RIGHT || !k_axis[button] ||
+        SDL_GetGamepadType(g) != SDL_GAMEPAD_TYPE_PS3) {
+        return -1;
+    }
+    SDL_Joystick *j = SDL_GetGamepadJoystick(g);
+    if (!j || SDL_GetNumJoystickAxes(j) != 16) {
+        return -1;
+    }
+    if (!SDL_GetGamepadButton(g, (SDL_GamepadButton)button)) {
+        return 0;
+    }
+    const float v = (SDL_GetJoystickAxis(j, k_axis[button]) + 32768) / 65535.0f;
+    return v > 0.02f ? v : 1.0f;
 }
 
 /* An original Xbox pad (the Duke, the Controller S) on Linux's xpad driver
@@ -623,7 +658,16 @@ void im_read_mouse(const ImMap *m, int p, const bool *keys, SDL_Gamepad *pad, bo
             const SDL_Scancode sc = SDL_GetScancodeFromKey(k, NULL);
             kv = keys[sc] ? 1.0f : 0.0f;
         }
-        float pv = pad_value(pad, m->pad[p][i]);
+        const int pe = m->pad[p][i];
+        float pv = pad_value(pad, pe);
+        if (i >= IM_A && i <= IM_WHITE && pe > 0 && pe < 1000) {
+            /* the Duke's pressure-sensitive buttons: a controller's own pressure */
+            const float pr = pad_pressure(pad, im_face(pe - 1));
+            pv = pr >= 0 ? pr : pv;
+        } else if (i >= IM_A && i <= IM_WHITE && (pe - 1000) / 2 >= SDL_GAMEPAD_AXIS_LEFT_TRIGGER) {
+            /* ... or a trigger's travel, as the triggers take it */
+            pv = im_trigger(pv, m->trigger_dz, m->trigger_full);
+        }
         if ((i == IM_BLACK || i == IM_WHITE) && pv < 1 && duke_bw(pad, i == IM_BLACK)) {
             pv = 1;
         }
@@ -644,6 +688,11 @@ void im_read_mouse(const ImMap *m, int p, const bool *keys, SDL_Gamepad *pad, bo
             continue;
         }
         out->analog[i] = (uint8_t)(a >= 1 ? 255 : a <= 0.1f ? 0 : a * 255);
+        if (v[IM_PRESS] > 0.5f && out->analog[i]) {
+            /* the pressure modifier held: a lighter press, never none */
+            const float q = out->analog[i] * m->press_amount;
+            out->analog[i] = (uint8_t)(q < 1 ? 1 : q);
+        }
     }
     stick(m, v[IM_LRIGHT], v[IM_LLEFT], v[IM_LUP], v[IM_LDOWN], m->linvert, &out->lx, &out->ly);
     stick(m, v[IM_RRIGHT], v[IM_RLEFT], v[IM_RUP], v[IM_RDOWN], m->rinvert, &out->rx, &out->ry);

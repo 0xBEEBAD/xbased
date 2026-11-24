@@ -1942,6 +1942,13 @@ int main(int argc, char *argv[])
     nc_win_mods_cleanup(g_exe_dir);     /* what an update took away (win_mods.h) */
 
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
+#ifdef _WIN32
+    /* SDL's own PS3 drivers, off on Windows unless asked: the DualShock 3
+     * through Sony's driver (sixaxis.sys) or DsHidMini, its buttons'
+     * pressure with it (input_map.c pad_pressure, #420) */
+    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_PS3, "1");
+    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_PS3_SIXAXIS_DRIVER, "1");
+#endif
 #ifndef _WIN32
     /* PulseAudio's API first: PipeWire desktops serve it too, and where
      * PipeWire's own is missing (WSLg) SDL waits half a minute on it */
