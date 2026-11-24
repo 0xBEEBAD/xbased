@@ -95,10 +95,47 @@ static uint64_t mono_ns(void)
     return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
 }
 
+/* The disc's image: its size and the XDVDFS header's sector, as the image
+ * it is (a CHD's or a server's: the plain image they hold). A CHD made from
+ * an image and the image are one disc: a state made from either loads from
+ * the other. States made before this took a CHD's file as it is
+ * (disc_container): those still load from it. */
+static void disc_image(uint64_t *size, uint32_t *hash)
+{
+    const NcDisc *d = &g_core->disc;
+    uint8_t sec[2048];
+    *size = nc_disc_image_size(d);
+    *hash = nc_disc_image_read(d, d->part_off + 32 * 2048, sec, sizeof(sec)) ? (uint32_t)crc32(0, sec, sizeof(sec)) : 0;
+}
+
+static void disc_container(uint64_t *size, uint32_t *hash)
+{
+    const NcDisc *d = &g_core->disc;
+    struct stat st;
+    uint8_t sec[2048];
+    *size = fstat(d->fd, &st) == 0 ? (uint64_t)st.st_size : 0;
+    *hash = pread(d->fd, sec, sizeof(sec), (off_t)(d->part_off + 32 * 2048)) == (ssize_t)sizeof(sec)
+                ? (uint32_t)crc32(0, sec, sizeof(sec))
+                : 0;
+}
+
+/* A state's disc is this one: as the image, or as the file a state from
+ * before took (the same for a plain image) */
+static bool disc_is(const NcStateInfo *info, const NcStateInfo *want)
+{
+    if (info->disc_size == want->disc_size && info->disc_hash == want->disc_hash) {
+        return true;
+    }
+    uint64_t size;
+    uint32_t hash;
+    disc_container(&size, &hash);
+    return info->disc_size == size && info->disc_hash == hash;
+}
+
 /* What identifies the running title: its XBE (the first 4 KiB of its file
- * and its size) and its disc (the size, the XDVDFS header's sector). The XBE
- * as the disc has it: a mod that patches or replaces it (native/core/mods.c)
- * leaves the game the same one, its states loadable either way. */
+ * and its size) and its disc (disc_image). The XBE as the disc has it: a mod
+ * that patches or replaces it (native/core/mods.c) leaves the game the same
+ * one, its states loadable either way. */
 static void identity(NcStateInfo *in)
 {
     NcCore *c = g_core;
@@ -119,12 +156,7 @@ static void identity(NcStateInfo *in)
     memset(in->xbe_sha1, 0, sizeof(in->xbe_sha1));
     memcpy(in->xbe_sha1, &crc, 4);
     memcpy(in->xbe_sha1 + 4, &xf.size, 4);
-    struct stat st;
-    in->disc_size = fstat(c->disc.fd, &st) == 0 ? (uint64_t)st.st_size : 0;
-    uint8_t sec[2048];
-    in->disc_hash = pread(c->disc.fd, sec, sizeof(sec), (off_t)(c->disc.part_off + 32 * 2048)) == (ssize_t)sizeof(sec)
-                        ? (uint32_t)crc32(0, sec, sizeof(sec))
-                        : 0;
+    disc_image(&in->disc_size, &in->disc_hash);
     in->ram_size = c->vm.ram_size;
 }
 
@@ -308,7 +340,7 @@ static const char *identity_check(const NcStateInfo *info, const NcStateInfo *wa
         snprintf(why, sizeof(why), "the state is of another game (%08x, this is %08x)", info->title_id, want->title_id);
         return why;
     }
-    if (info->disc_size != want->disc_size || info->disc_hash != want->disc_hash) {
+    if (!disc_is(info, want)) {
         return "the state was made with another copy of this game's disc";
     }
     if (info->ram_size != want->ram_size) {
@@ -328,7 +360,7 @@ const char *nc_state_compat(const char *path)
          * load boots the state's) */
         memset(&want, 0, sizeof(want));
         identity(&want);
-        if (info.disc_size != want.disc_size || info.disc_hash != want.disc_hash) {
+        if (!disc_is(&info, &want)) {
             return "the state was made with another game's disc (or another copy of it)";
         }
         if (info.ram_size != want.ram_size) {
@@ -350,6 +382,9 @@ const char *nc_state_load(const char *path)
     }
     const char *bad = identity_check(&info, &want);
     if (bad) {
+        nc_log("xbased-native-state", "load %s: %s (the state's title %08x, disc %llu bytes, header %08x; this one's "
+               "%08x, %llu bytes, %08x)", path, bad, info.title_id, (unsigned long long)info.disc_size, info.disc_hash,
+               want.title_id, (unsigned long long)want.disc_size, want.disc_hash);
         return bad;
     }
     /* the devices hold still while their state is replaced */

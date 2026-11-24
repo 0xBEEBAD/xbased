@@ -72,6 +72,11 @@ static void rows_video(List *l)
     static const char *uv[] = {"bilinear", "fsr", "nearest"};
     const char *un[] = {T(S_BILINEAR), "AMD FSR 1", T(S_NEAREST)};
     opt_choice(l, S_UPSCALE, "upscale", uv, un, 3, "bilinear");
+    /* the frame at the render scale averaged to the console's resolution
+     * (times 2 or 4) before it's scaled to the screen (#427) */
+    static const char *dsv[] = {"0", "1", "2", "4"};
+    const char *dsn[] = {T(S_OFF), "1x", "2x", "4x"};
+    opt_choice(l, S_DOWNSAMPLE, "downsample", dsv, dsn, 4, "0");
     static const char *cv[] = {"0", "1", "2", "3"};
     const char *cn[] = {T(S_OFF), T(S_CRT_SOFT), T(S_CRT_TV), T(S_CRT_ARCADE)};
     opt_choice(l, S_CRT, "crt", cv, cn, 4, "0");

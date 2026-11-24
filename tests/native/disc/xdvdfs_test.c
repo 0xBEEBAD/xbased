@@ -32,6 +32,8 @@ bool nc_nbd_read(int fd, void *buf, size_t len, uint64_t off) { (void)fd; (void)
 void nc_chd_detach(int fd) { (void)fd; }
 bool nc_chd_is(int fd) { (void)fd; return false; }
 bool nc_chd_read(int fd, void *buf, size_t len, uint64_t off) { (void)fd; (void)buf; (void)len; (void)off; return false; }
+uint64_t nc_chd_size(int fd) { (void)fd; return 0; }
+uint64_t nc_nbd_size(int fd) { (void)fd; return 0; }
 bool nc_fold_attach(int fd) { (void)fd; return false; }
 void nc_fold_detach(int fd) { (void)fd; }
 bool nc_fold_is(int fd) { (void)fd; return false; }

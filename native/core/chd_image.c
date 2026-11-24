@@ -27,6 +27,10 @@ bool nc_chd_read(int fd, void *buf, size_t len, uint64_t off)
 {
     return false;
 }
+uint64_t nc_chd_size(int fd)
+{
+    return 0;
+}
 #else
 #include <libchdr/cdrom.h>
 #include <libchdr/chd.h>
@@ -212,6 +216,15 @@ void nc_chd_detach(int fd)
         c->fd = -1;
     }
     pthread_mutex_unlock(&g_mu);
+}
+
+uint64_t nc_chd_size(int fd)
+{
+    pthread_mutex_lock(&g_mu);
+    const Chd *c = find(fd);
+    const uint64_t size = c ? c->size : 0;
+    pthread_mutex_unlock(&g_mu);
+    return size;
 }
 
 bool nc_chd_is(int fd)

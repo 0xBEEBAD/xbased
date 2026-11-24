@@ -1355,6 +1355,9 @@ static void apply_cfg(const Config *global, const Config *game, bool sound)
         if ((v = cfg_get(c, "upscale"))) {
             nc_present_set_upscale(nc_upscale_from_name(v));
         }
+        if ((v = cfg_get(c, "downsample"))) {
+            nc_present_set_down(atoi(v));
+        }
         if ((v = cfg_get(c, "crt"))) {
             hle_present_set_crt(atoi(v));
         }
@@ -1766,6 +1769,7 @@ static const char k_usage[] =
     "  scale=N              internal resolution (1 to 8)\n"
     "  aspect=auto|4:3|16:9|stretch\n"
     "  upscale=bilinear|fsr, fxaa=0|1, crt=N\n"
+    "  downsample=0|1|2|4   the picture averaged to the console's resolution (times N) first\n"
     "  shaders=hybrid|async|sync\n"
     "  uncap, fpscap=N      the frame rate lifted, up to N a second\n"
     "  online               online mode: the console's frame rate and speed, no mods or cheats\n"
@@ -2138,6 +2142,8 @@ int main(int argc, char *argv[])
             nc_present_set_fxaa(atoi(a + 5) != 0);
         } else if (!strncmp(a, "upscale=", 8)) {
             nc_present_set_upscale(nc_upscale_from_name(a + 8));
+        } else if (!strncmp(a, "downsample=", 11)) {
+            nc_present_set_down(atoi(a + 11));
         } else if (!strncmp(a, "crt=", 4)) {
             hle_present_set_crt(atoi(a + 4));
         } else if (!strncmp(a, "vsync=", 6)) {

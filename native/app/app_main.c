@@ -8,9 +8,10 @@
  *            and the window's: "aspect=auto|4:3|16:9|stretch" the picture's
  *            shape, "fxaa=0|1" FXAA over each frame and
  *            "upscale=bilinear|fsr" how a frame smaller than its place on
- *            screen is scaled up; "padinput=sdl" the legacy input (the first
- *            SDL gamepad as player 1); "vkdriver=" the custom Vulkan driver
- *            (vkdriver.c)
+ *            screen is scaled up, "downsample=0|1|2|4" the frame averaged to
+ *            the console's resolution (times N) first; "padinput=sdl" the
+ *            legacy input (the first SDL gamepad as player 1); "vkdriver="
+ *            the custom Vulkan driver (vkdriver.c)
  *
  * The core boots and runs on its own thread (FEX keeps per-thread state, so
  * boot and run share it). This thread owns the window: it hands the
@@ -573,6 +574,9 @@ EXPORT int SDL_main(int argc, char *argv[])
         }
         if (!strncmp(argv[i], "upscale=", 8)) {
             nc_present_set_upscale(nc_upscale_from_name(argv[i] + 8));
+        }
+        if (!strncmp(argv[i], "downsample=", 11)) {
+            nc_present_set_down(atoi(argv[i] + 11));
         }
         /* vkdriver=<driver dir>|<library>|<hook library dir>: the custom
          * Vulkan driver chosen in the settings (Turnip), via adrenotools. */

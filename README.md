@@ -48,8 +48,8 @@ No BIOS, MCPX ROM or hard-disk image is needed.
 
 | Platform | File | |
 |---|---|---|
-| **Windows** 10/11 (x64) | `xbased-1.2.11-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
-| **Linux** (x86-64) | `xbased-1.2.11-x86_64.AppImage` | `chmod +x` it and run. Ubuntu 22.04 or newer, or any distribution of the same age. |
+| **Windows** 10/11 (x64) | `xbased-1.2.12-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
+| **Linux** (x86-64) | `xbased-1.2.12-x86_64.AppImage` | `chmod +x` it and run. Ubuntu 22.04 or newer, or any distribution of the same age. |
 
 Get them from **[Releases](https://github.com/crazyriddler/xbased/releases/latest)**.
 
@@ -120,6 +120,8 @@ xbased doesn't include any copyrighted Xbox software.
 - **Interface in 4:3** for bezels and frame shaders over a 4:3 picture.
 - **FXAA** and **anisotropic filtering** up to 16x.
 - **Upscaling**: bilinear or AMD FSR 1.
+- **Downsampling**: the high-resolution picture averaged back to the console's own
+  resolution (or 2x, 4x) for smooth edges with the original look.
 - **CRT filters**: soft scanlines, a classic TV, an arcade monitor.
 - Every setting **global or per game**.
 

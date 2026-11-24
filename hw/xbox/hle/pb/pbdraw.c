@@ -163,6 +163,9 @@ typedef struct PbObj {
     bool display;                       /* shown: the front-buffer path keeps its memory */
     uint32_t frees;                     /* hle_barrier_frees over its memory when it was made
                                            or last named as the colour target (obj_freed) */
+    uint32_t mem_pitch;                 /* a swizzled target's memory as its last draw or clear
+                                           left it: written through a linear view of it (object_view),
+                                           that view's rows of this pitch; 0 its own order */
 } PbObj;
 
 /* A texture the stage registers described: the back end's image of it,
@@ -224,6 +227,8 @@ static struct {
     uint64_t shown_written;             /* ... its written then */
     uint64_t wseq;                      /* draws, clears and copies into objects */
     PbObj *rt_obj;                      /* the bound colour target's */
+    uint32_t rt_view_pitch;             /* ... bound through a linear view of it (its swizzled twin,
+                                           object_view): that view's pitch; 0 as itself */
     bool rt_fresh;                      /* no clear or draw into it since its bind, the last
                                            swap or the last pass (rt_first_write) */
     PbObj *ds_obj;                      /* the bound depth target's (ds_written) */
@@ -504,11 +509,22 @@ static uint32_t sd_height(uint32_t cur, unsigned hz)
 static bool mode_size(uint32_t cur, uint32_t *w, uint32_t *h, uint32_t *seq)
 {
     static const uint32_t k_w[] = { 640, 720, 1280, 1920 };
-    uint32_t pitch, xfmt;
+    uint32_t pitch, xfmt, mw;
     unsigned hz;
-    *seq = hle_pb_display_mode_get(&pitch, &xfmt, &hz);
+    *seq = hle_pb_display_mode_get(&pitch, &xfmt, &hz, &mw);
     const HleFmtInfo *fi = pitch ? hle_fmt_info(xfmt) : NULL;
     const uint32_t bytes = fi && !(fi->flags & (HLE_FI_DEPTH | HLE_FI_DXT)) ? fi->bpp / 8 : 0;
+    /* the mode's own width (its timing's) when its rows hold it: a frame
+     * buffer may be wider than the picture. Max Payne's USA disc shows its
+     * graphic novel and loading screens in the 640 x 480 480p mode from a
+     * 16-bit buffer 768 pixels wide (1536 bytes, 720's tile pitch): by the
+     * pitch the display was 720 wide, the 80 columns the picture leaves
+     * black on the right (#423) */
+    if (bytes && (mw == 640 || mw == 720) && pitch >= mw * bytes) {
+        *w = mw;
+        *h = sd_height(cur, hz);
+        return true;
+    }
     for (unsigned i = 0; bytes && i < ARRAY_SIZE(k_w); i++) {
         if (k_w[i] * bytes == pitch || tile_pitch(k_w[i] * bytes) == pitch) {
             *w = k_w[i];
@@ -1456,6 +1472,10 @@ static void sync_rt(void)
             }
         }
     }
+    {
+        const PbObj *vo = rt && !swz ? obj_of(rt) : NULL;
+        g_pd.rt_view_pitch = vo && !vo->d.pitch ? cpitch : 0;
+    }
     if (rt != g_pd.rt || ds != g_pd.ds) {
         if (rt != g_pd.rt) {
             writeback(g_pd.rt);
@@ -1639,6 +1659,7 @@ static void clear(uint32_t flags)
     hle_fe_commit();
     if (g_pd.rt_obj && (c->flags & HLE_CLEAR_TARGET)) {
         g_pd.rt_obj->written = ++g_pd.wseq;
+        g_pd.rt_obj->mem_pitch = g_pd.rt_view_pitch;
         rt_gpu_rows(g_pd.rt_obj);
         coh_drawn(g_pd.rt_obj);
     }
@@ -1735,7 +1756,7 @@ static uint32_t scanout_object(uint32_t pa)
 {
     uint32_t pitch, xfmt;
     unsigned hz;
-    hle_pb_display_mode_get(&pitch, &xfmt, &hz);
+    hle_pb_display_mode_get(&pitch, &xfmt, &hz, NULL);
     const HleFmtInfo *fi = pitch ? hle_fmt_info(xfmt) : NULL;
     const uint32_t w = g_pd.disp_w, h = g_pd.disp_h;
     if (!fi || (fi->flags & (HLE_FI_DEPTH | HLE_FI_DXT)) || pitch < w * (fi->bpp / 8) || !h ||
@@ -2080,7 +2101,7 @@ void hle_pbd_cpu_display(uint32_t pa)
         }
         return;
     }
-    hle_pb_display_mode_get(&pitch, &xfmt, &hz);
+    hle_pb_display_mode_get(&pitch, &xfmt, &hz, NULL);
     if (!mode_size(0, &w, &h, &seq)) {
         hle_log("xbased-hle-pb", "frame buffer %08x: no video mode it fits (pitch %u format %02x): not shown", pa,
                 pitch, xfmt);
@@ -2797,6 +2818,7 @@ bool hle_pbd_blit_images(uint32_t sbase, uint32_t sp, uint32_t dbase, uint32_t d
     c->y[0] = (int32_t)oy;
     hle_fe_commit();
     dd->written = ++g_pd.wseq;
+    dd->mem_pitch = 0;                      /* copied into: its own order */
     obj_gpu_rows(dd, (uint64_t)oy + h);
     coh_drawn(dd);
     return true;
@@ -2833,6 +2855,7 @@ void hle_pbd_blit(uint32_t dbase, uint32_t dp, uint32_t ox, uint32_t oy, uint32_
     const int32_t pt[1][2] = { { (int32_t)ox, (int32_t)oy } };
     hle_res_upload(dst, dbase, dp, 1, &r, pt);
     dd->written = ++g_pd.wseq;
+    dd->mem_pitch = 0;
     if (kept) {
         const uint64_t was = dd->synced;
         coh_synced(dd, len);                /* the copy's bytes are the image's too */
@@ -3233,6 +3256,7 @@ static uint32_t target_part(uint32_t pa, uint32_t code, const HleFmtInfo *fi, ui
     hle_mem_written(pa, pitch * h);         /* the image holds the copy, not the memory */
     if (whole) {
         dst->written = ++g_pd.wseq;
+        dst->mem_pitch = 0;
     }
     obj_gpu_rows(dst, (uint64_t)y + h);
     coh_drawn(dst);
@@ -3290,6 +3314,7 @@ static PbObj *grow_target(PbObj *o, uint32_t th)
         c->rect[0] = (HleRect){ 0, 0, (int32_t)ow, (int32_t)oh };
         hle_fe_commit();
         t->written = ++g_pd.wseq;
+        t->mem_pitch = 0;
         t->gpu_rows = rows;
         t->cpu_used = cpu_used;
         t->cpu_frame = cpu_frame;
@@ -4023,6 +4048,7 @@ static void emit(HleCmdDraw *d)
     rt_first_write(false);
     if (g_pd.rt_obj) {
         g_pd.rt_obj->written = ++g_pd.wseq;
+        g_pd.rt_obj->mem_pitch = g_pd.rt_view_pitch;
         rt_gpu_rows(g_pd.rt_obj);
         coh_drawn(g_pd.rt_obj);
     }
@@ -5163,14 +5189,25 @@ static uint64_t coh_land(PbObj *o)
     }
     const int k = coh_slot();
     const HleFmtInfo *fi = hle_fmt_info(o->d.xfmt);
-    uint32_t fb = k < 0 ? 0 : o->d.pitch ? hle_res_rb_fb(len) : hle_res_land_alloc(len);
-    for (int tries = 0; k >= 0 && !fb && (!o->d.pitch || !hle_res_ram_direct()) && tries < 2; tries++) {
+    /* the rows its memory has: a linear target's own; a swizzled one's last
+     * drawn or cleared through a linear view of it (object_view) as that
+     * view's, one that fills the pitch (the same bytes), as the NV2A writes
+     * a surface by the format it is bound with. Fable draws each piece of
+     * the hero's look (hair, skin) into a 256 x 256 linear target, reads it
+     * back and compresses it into its cache; the swizzled target of that
+     * size an effect had left at that memory took the draws, landed in its
+     * order, and the hair the cache gave close up was streaks (#380). */
+    const uint32_t lpitch = o->d.pitch ? o->d.pitch :
+                            o->mem_pitch && fi && o->mem_pitch == o->d.w * (fi->bpp / 8) &&
+                            o->mem_pitch * o->d.h == len ? o->mem_pitch : 0;
+    uint32_t fb = k < 0 ? 0 : lpitch ? hle_res_rb_fb(len) : hle_res_land_alloc(len);
+    for (int tries = 0; k >= 0 && !fb && (!lpitch || !hle_res_ram_direct()) && tries < 2; tries++) {
         /* the landing buffer full: the oldest landing's space first, else all */
         const uint64_t ov = tries ? 0 : hle_tl_land_oldest();
         coh_wait(ov ? ov : hle_fe_last_value() + 1);
-        fb = o->d.pitch ? hle_res_rb_fb(len) : hle_res_land_alloc(len);
+        fb = lpitch ? hle_res_rb_fb(len) : hle_res_land_alloc(len);
     }
-    if (k < 0 || (!fb && (!o->d.pitch || !hle_res_ram_direct()))) {
+    if (k < 0 || (!fb && (!lpitch || !hle_res_ram_direct()))) {
         static unsigned s_logged;
         if (s_logged++ < 8) {
             hle_log("xbased-hle-pb", "target %u (%08x): no room to land its image (%s)", o->id, o->d.pa,
@@ -5178,7 +5215,7 @@ static uint64_t coh_land(PbObj *o)
         }
         return 0;
     }
-    if (o->d.pitch && !fb) {
+    if (lpitch && !fb) {
         coh_pend_wait_inplace(o->d.pa, len);    /* (before its readback is begun) */
     }
     CohLand *l = &g_coh.l[k];
@@ -5188,7 +5225,7 @@ static uint64_t coh_land(PbObj *o)
     l->pa = o->d.pa;
     l->len = len;
     l->written = o->written;
-    l->linear = o->d.pitch != 0;
+    l->linear = lpitch != 0;
     l->landed = false;
     __atomic_store_n(&l->state, 1, __ATOMIC_RELEASE);
     HleCmdReadback *rb = begin(HLE_OP_READBACK, sizeof(*rb));
@@ -5197,7 +5234,7 @@ static uint64_t coh_land(PbObj *o)
     l->v = v;
     rb->surf = o->id;
     bool queued;
-    if (!o->d.pitch) {
+    if (!lpitch) {
         rb->arena_off = HLE_RB_PACKED;
         rb->fb = fb;
         rb->w = o->d.w;
@@ -5207,9 +5244,10 @@ static uint64_t coh_land(PbObj *o)
         queued = hle_tl_land_swz(v, fb - 1, o->d.pa, o->d.w, o->d.h, fi->bpp / 8, coh_landed, token);
     } else {
         rb->pa = o->d.pa;
-        rb->pitch = o->d.pitch;
+        rb->pitch = lpitch;
+        rb->view = !o->d.pitch;             /* a swizzled target's image as rows */
         rb->arena_off = HLE_RB_DIRECT;      /* rows: guest RAM, or landed from fb */
-        rb->rows = len / o->d.pitch;
+        rb->rows = len / lpitch;
         hle_res_rb_land(rb, fb, len, v);
         hle_barrier_arm_keep(o->d.pa, len, v, true);
         hle_fe_commit();

@@ -24,6 +24,8 @@ bool nc_chd_is(int fd);
 /* len bytes of the image it holds at off; zeros past its end. False: a
  * hunk that can't be read. Any thread. */
 bool nc_chd_read(int fd, void *buf, size_t len, uint64_t off);
+/* the image's bytes (0: not a CHD) */
+uint64_t nc_chd_size(int fd);
 
 #ifdef __cplusplus
 }

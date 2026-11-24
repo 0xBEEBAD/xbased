@@ -1,5 +1,34 @@
 # xbased changelog
 
+## 1.2.12 (2026-11)
+
+### New
+- Downsampling (Settings > Video > Downsampling: Off, 1x, 2x, 4x): the game
+  is drawn at the internal resolution, then the picture is averaged down to
+  the console's own resolution, or twice or four times it, before it's scaled
+  to your screen. Smooth edges with the original look. It needs an internal
+  resolution above the size chosen, and works with FXAA, FSR and the CRT look
+  (#427).
+
+### Fixes
+- Fable The Lost Chapters: the hero's hair could turn into streaks up close
+  after some area loads, until the next restart. The game builds the hero's
+  look into a cache on the hard disk at each load, and a piece of it drawn
+  where a swizzled texture of the same size had been landed in the wrong
+  pixel order (#380).
+- Savestates: a state made from a .chd loads from an .iso of the same dump
+  and the other way round, and a state that is refused says why in the log.
+- Frame rate limit: with the GPU maxed out (a high internal resolution on a
+  laptop) the frame rate could drift above the limit, 64 fps at Up to 60 in
+  Crash Bandicoot The Wrath of Cortex. The moments the presenter picks frames
+  up when its GPU finishes them moved the timing the limit follows (#411).
+- Max Payne (USA): the graphic novel and the loading screens stopped short of
+  the right edge, with a black band. Their width now comes from the video
+  mode, not from the wider buffer the game keeps them in (#423).
+- Rayman 3 and other games whose language folders use their own names
+  (ESPANOL, DEUTSCH, FRANCAIS, ITALIANO) started in English whatever the
+  console's language: the disc looked as if it had English only (#428).
+
 ## 1.2.11 (2026-11)
 
 ### Fixes

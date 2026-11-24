@@ -46,11 +46,12 @@ void hle_pb_get(void);
  * thread; the decode thread presents it). */
 void hle_pb_display_start(uint32_t pa);
 /* AvSetDisplayMode (any thread): its frame buffer's pitch and format, the
- * mode's refresh (50 or 60 Hz); the decoder's display takes its size from
- * them (hle_pb_display_mode_get: 0s while none was set; its return value
- * counts the modes set). */
-void hle_pb_display_mode(uint32_t pitch, uint32_t xfmt, unsigned hz);
-uint32_t hle_pb_display_mode_get(uint32_t *pitch, uint32_t *xfmt, unsigned *hz);
+ * mode's refresh (50 or 60 Hz) and width when its timing tells it (0: by the
+ * pitch); the decoder's display takes its size from them
+ * (hle_pb_display_mode_get: 0s while none was set; its return value counts
+ * the modes set). */
+void hle_pb_display_mode(uint32_t pitch, uint32_t xfmt, unsigned hz, uint32_t w);
+uint32_t hle_pb_display_mode_get(uint32_t *pitch, uint32_t *xfmt, unsigned *hz, uint32_t *w);
 /* AvSetDisplayMode (any thread), after hle_pb_display_mode: the frame buffer
  * the display scans out; one a title draws with the CPU, having no GPU
  * device, is shown (hle_pbd_cpu_display). */

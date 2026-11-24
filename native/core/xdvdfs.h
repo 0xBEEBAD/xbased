@@ -53,6 +53,11 @@ bool nc_disc_find(const NcDisc *d, const char *path, NcDiscFile *out);
  * tree doesn't reach. Stops when fn returns true, and returns that. */
 bool nc_disc_dir_each(const uint8_t *dir, uint32_t size, bool (*fn)(void *ctx, const uint8_t *entry), void *ctx);
 
+/* The image's own bytes and size: a CHD's or a server's as the plain image
+ * they hold (what identifies the disc for savestates, whatever holds it). */
+bool nc_disc_image_read(const NcDisc *d, uint64_t off, void *buf, size_t len);
+uint64_t nc_disc_image_size(const NcDisc *d);
+
 /* Reads len bytes at offset off of a file. */
 bool nc_disc_read(const NcDisc *d, const NcDiscFile *f, uint64_t off, void *buf, size_t len);
 /* ... as the title's file I/O sees it: the overlay's files, but not the XBE

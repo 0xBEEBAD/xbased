@@ -144,23 +144,26 @@ bool hle_pb_active(void)
     return g_pb.on;
 }
 
-static uint64_t g_disp_mode;            /* pitch | xfmt << 32 | hz << 48, 0: none */
+static uint64_t g_disp_mode;            /* pitch | xfmt << 32 | hz << 48 | width / 8 << 56, 0: none */
 static uint32_t g_disp_modes;           /* modes set */
 
-void hle_pb_display_mode(uint32_t pitch, uint32_t xfmt, unsigned hz)
+void hle_pb_display_mode(uint32_t pitch, uint32_t xfmt, unsigned hz, uint32_t w)
 {
     __atomic_store_n(&g_disp_mode, (uint64_t)(pitch & 0xFFFFFFFFu) | (uint64_t)(xfmt & 0xFFFF) << 32 |
-                     (uint64_t)(hz & 0xFFFF) << 48, __ATOMIC_RELEASE);
+                     (uint64_t)(hz & 0xFF) << 48 | (uint64_t)((w / 8) & 0xFF) << 56, __ATOMIC_RELEASE);
     __atomic_fetch_add(&g_disp_modes, 1, __ATOMIC_RELEASE);
 }
 
-uint32_t hle_pb_display_mode_get(uint32_t *pitch, uint32_t *xfmt, unsigned *hz)
+uint32_t hle_pb_display_mode_get(uint32_t *pitch, uint32_t *xfmt, unsigned *hz, uint32_t *w)
 {
     const uint32_t n = __atomic_load_n(&g_disp_modes, __ATOMIC_ACQUIRE);
     const uint64_t m = __atomic_load_n(&g_disp_mode, __ATOMIC_ACQUIRE);
     *pitch = (uint32_t)m;
     *xfmt = (uint32_t)(m >> 32) & 0xFFFF;
-    *hz = (unsigned)(m >> 48);
+    *hz = (unsigned)(m >> 48) & 0xFF;
+    if (w) {
+        *w = (uint32_t)(m >> 56) * 8;
+    }
     return n;
 }
 

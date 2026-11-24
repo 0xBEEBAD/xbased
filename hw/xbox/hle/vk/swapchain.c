@@ -16,7 +16,11 @@
  *  - a smaller one is scaled up bilinearly, or by AMD FidelityFX Super
  *    Resolution 1: EASU rebuilds its edges into an image of ours at the
  *    size it takes in the window, once a frame, and RCAS sharpens that on
- *    its way into the window.
+ *    its way into the window;
+ *  - downsampling (hle_present_end's down): a frame at a render scale above
+ *    it averaged first into an image of ours at the console's resolution
+ *    times it (1, 2 or 4), once a frame, which then takes the frame's place
+ *    on the way above: the scale's edges, the console's pixels.
  * FXAA is FXAA 3.11 Quality (Timothy Lottes) as PCSX2's fxaa.fx tunes it
  * (GPL-3.0-or-later); FSR 1 is AMD's ffx_fsr1.h (MIT,
  * licenses/amd-fsr1.license.txt).
@@ -58,11 +62,11 @@
 
 #define T (g_ps.t)
 #define PS_FRAMES 3             /* the presenter's submits in flight */
-enum { SET_WINDOW, SET_FXAA, SET_EASU, SET_OSD, PS_SETS };  /* a frame's descriptor sets */
+enum { SET_WINDOW, SET_FXAA, SET_EASU, SET_OSD, SET_DOWN, PS_SETS };  /* a frame's descriptor sets */
 #define PS_RAMP 1024            /* a frame's share of the ramp buffer (768 used) */
 
 /* the window's pipelines, then those into images of ours (R8G8B8A8) */
-enum { P_BILINEAR, P_AREA, P_RCAS, P_CRT, P_OSD, P_KDOWN, P_KUP, P_FXAA, P_EASU, P_COUNT };
+enum { P_BILINEAR, P_AREA, P_RCAS, P_CRT, P_OSD, P_KDOWN, P_KUP, P_FXAA, P_EASU, P_DOWN, P_COUNT };
 
 /* An image of ours a pass draws into and the window's pass samples. */
 typedef struct PsImg {
@@ -72,7 +76,8 @@ typedef struct PsImg {
     uint32_t w, h;
     VkFormat fmt;
     uint64_t serial;            /* the frame it holds (0: none) */
-    bool fxaa;                  /* FSR's: made from FXAA's */
+    bool fxaa;                  /* FSR's, downsampling's: made from FXAA's */
+    bool down;                  /* FSR's: made from downsampling's */
 } PsImg;
 
 typedef struct PsFrame {
@@ -132,8 +137,9 @@ static struct {
     HleDispFrame f;
     bool have, using;           /* f held; inside hle_disp_use_begin */
     uint64_t serial;            /* frames taken */
-    /* FXAA's image (the frame's size), FSR's (the frame's in the window) */
-    PsImg fx, up;
+    /* FXAA's image (the frame's size), FSR's (the frame's in the window),
+     * downsampling's (the console's resolution times it) */
+    PsImg fx, up, dn;
     /* the display's gamma ramp */
     uint8_t ramp[3][256];
     uint32_t ramp_gen;
@@ -229,6 +235,27 @@ static const char k_fs_area[] =
     "    }\n"
     "  }\n"
     "  o = ramp(sum / wsum);\n"
+    "}\n";
+/* Downsampling (into an image of ours, no ramp yet): each pixel the mean of
+ * the extra.xy frame pixels it covers, up to 16 a side (8x down to 1x: 8),
+ * each weighted by how much of it it covers. */
+static const char k_fs_down[] =
+    "void main() {\n"
+    "  vec2 size = vec2(textureSize(u_tex, 0));\n"
+    "  vec2 r = clamp(pc.extra.xy, vec2(1.0), vec2(16.0));\n"
+    "  vec2 lo = v_uv * size - 0.5 * r, hi = lo + r;\n"
+    "  ivec2 i0 = ivec2(floor(lo)), i1 = ivec2(ceil(hi)) - 1, top = ivec2(size) - 1;\n"
+    "  vec3 sum = vec3(0.0);\n"
+    "  float wsum = 0.0;\n"
+    "  for (int y = i0.y; y <= i1.y; y++) {\n"
+    "    float wy = min(hi.y, float(y + 1)) - max(lo.y, float(y));\n"
+    "    for (int x = i0.x; x <= i1.x; x++) {\n"
+    "      float w = (min(hi.x, float(x + 1)) - max(lo.x, float(x))) * wy;\n"
+    "      sum += w * texelFetch(u_tex, clamp(ivec2(x, y), ivec2(0), top), 0).rgb;\n"
+    "      wsum += w;\n"
+    "    }\n"
+    "  }\n"
+    "  o = vec4(sum / wsum, 1.0);\n"
     "}\n";
 /* A CRT's look (hle_present_set_crt): the frame's lines as scanlines (a
  * gaussian beam across each source line, wider where brighter), a phosphor
@@ -677,7 +704,7 @@ static bool init(void)
                                         .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
                                         .queueFamilyIndex = g_hvk.qfam };
         VkSemaphoreCreateInfo si = { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
-        VkDescriptorSetLayout l[PS_SETS] = { g_ps.dsl, g_ps.dsl, g_ps.dsl, g_ps.dsl };
+        VkDescriptorSetLayout l[PS_SETS] = { g_ps.dsl, g_ps.dsl, g_ps.dsl, g_ps.dsl, g_ps.dsl };
         VkDescriptorSetAllocateInfo dai = { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
                                             .descriptorPool = g_ps.dp, .descriptorSetCount = PS_SETS,
                                             .pSetLayouts = l };
@@ -696,12 +723,13 @@ static bool init(void)
     }
     g_ps.vs = module(HLE_SHADER_VERTEX, k_vs, "");
     static const char *const body[P_COUNT] = { k_fs_bilinear, k_fs_area, k_fs_rcas, k_fs_crt, k_fs_osd,
-                                               k_fs_kdown, k_fs_kup, k_fs_fxaa, k_fs_easu };
+                                               k_fs_kdown, k_fs_kup, k_fs_fxaa, k_fs_easu, k_fs_down };
     for (unsigned i = 0; i < P_COUNT; i++) {
         g_ps.fs[i] = module(HLE_SHADER_FRAGMENT, k_fs_head, body[i]);
     }
     g_ps.pipe[P_FXAA] = pipeline(g_ps.fs[P_FXAA], VK_FORMAT_R8G8B8A8_UNORM);
     g_ps.pipe[P_EASU] = pipeline(g_ps.fs[P_EASU], VK_FORMAT_R8G8B8A8_UNORM);
+    g_ps.pipe[P_DOWN] = pipeline(g_ps.fs[P_DOWN], VK_FORMAT_R8G8B8A8_UNORM);
     hle_log("xbased-hle-back", "present: ready (shaders: bilinear %d, averaging %d, FSR %d, FXAA %d)",
             g_ps.fs[P_BILINEAR] != VK_NULL_HANDLE, g_ps.fs[P_AREA] != VK_NULL_HANDLE,
             g_ps.fs[P_RCAS] != VK_NULL_HANDLE && g_ps.pipe[P_EASU] != VK_NULL_HANDLE,
@@ -1945,21 +1973,28 @@ static void img_pass(VkCommandBuffer cb, PsFrame *f, unsigned set, PsImg *t, VkP
 }
 
 /* How the frame meets the window, logged when that changes. */
-static void log_path(unsigned p, bool fxaa, uint32_t vw, uint32_t vh)
+static void log_path(unsigned p, bool fxaa, uint32_t dw, uint32_t dh, uint32_t vw, uint32_t vh)
 {
     static unsigned s_p = ~0u;
     static bool s_fxaa;
-    static uint32_t s_w, s_h, s_vw, s_vh;
-    if (p == s_p && fxaa == s_fxaa && g_ps.f.w == s_w && g_ps.f.h == s_h && vw == s_vw && vh == s_vh) {
+    static uint32_t s_w, s_h, s_dw, s_dh, s_vw, s_vh;
+    if (p == s_p && fxaa == s_fxaa && g_ps.f.w == s_w && g_ps.f.h == s_h && dw == s_dw && dh == s_dh &&
+        vw == s_vw && vh == s_vh) {
         return;
     }
     s_p = p;
     s_fxaa = fxaa;
     s_w = g_ps.f.w;
     s_h = g_ps.f.h;
+    s_dw = dw;
+    s_dh = dh;
     s_vw = vw;
     s_vh = vh;
-    hle_log("xbased-hle-back", "present: %ux%u%s into %ux%u: %s", s_w, s_h, fxaa ? " after FXAA" : "", vw, vh,
+    char d[48] = "";
+    if (dw) {
+        snprintf(d, sizeof(d), ", downsampled to %ux%u", dw, dh);
+    }
+    hle_log("xbased-hle-back", "present: %ux%u%s%s into %ux%u: %s", s_w, s_h, fxaa ? " after FXAA" : "", d, vw, vh,
             p == P_AREA ? "averaged down" : p == P_RCAS ? "scaled up by FSR" : "bilinear");
 }
 
@@ -2715,7 +2750,7 @@ static void remote_end(VkCommandBuffer cb, PsFrame *f, VkImage dst, bool shot, u
 }
 #endif
 
-void hle_present_end(float sx, float sy, bool fxaa, int upscale, bool average, uint64_t key)
+void hle_present_end(float sx, float sy, bool fxaa, int upscale, bool average, int down, uint64_t key)
 {
     g_ps.shown = false;
     PsFrame *f = &g_ps.fr[g_ps.cur];
@@ -2763,29 +2798,53 @@ void hle_present_end(float sx, float sy, bool fxaa, int upscale, bool average, u
             g_ps.pipe[P_FXAA] = VK_NULL_HANDLE;     /* no image for it: FXAA off */
         }
     }
+    /* downsampling: a frame at a render scale above `down` averaged into
+     * an image at the console's resolution times it, which goes on as the
+     * frame (a new frame, FXAA's or not, or a new size: made again) */
+    uint32_t fw = g_ps.f.w, fh = g_ps.f.h, dw = 0, dh = 0;
+    const int scale = (int)g_hle_rscale;       /* the scale its slots were made at */
+    if (g_ps.have && down > 0 && scale > down && g_ps.pipe[P_DOWN]) {
+        dw = g_ps.f.w * (uint32_t)down / (uint32_t)scale;
+        dh = g_ps.f.h * (uint32_t)down / (uint32_t)scale;
+        if (!dw || !dh || dw >= g_ps.f.w || !img_target(&g_ps.dn, dw, dh, VK_FORMAT_R8G8B8A8_UNORM, "downsampling")) {
+            dw = dh = 0;
+        }
+    }
+    if (dw) {
+        if (g_ps.dn.serial != g_ps.serial || g_ps.dn.fxaa != fxaa_done) {
+            const float extra[4] = { (float)g_ps.f.w / (float)dw, (float)g_ps.f.h / (float)dh, 0.0f, 0.0f };
+            img_pass(cb, f, SET_DOWN, &g_ps.dn, g_ps.pipe[P_DOWN], src, extra);
+            g_ps.dn.serial = g_ps.serial;
+            g_ps.dn.fxaa = fxaa_done;
+        }
+        src = g_ps.dn.view;
+        fw = dw;
+        fh = dh;
+    }
     /* the frame's pixels per window pixel: over 1 (either axis) averaged
      * down, under 1 scaled up as chosen; FSR's EASU into its image first
      * (a new frame, or a new size), its RCAS on the way into the window */
     const float vw = sx * (float)ww, vh = sy * (float)wh;
-    const float rx = g_ps.have ? (float)g_ps.f.w / vw : 1.0f, ry = g_ps.have ? (float)g_ps.f.h / vh : 1.0f;
-    const bool down = (rx > 1.01f || ry > 1.01f) && average && g_ps.pipe[P_AREA];
-    bool fsr = g_ps.have && !down && !g_crt && (rx < 0.99f || ry < 0.99f) && upscale == HLE_UPSCALE_FSR &&
+    const float rx = g_ps.have ? (float)fw / vw : 1.0f, ry = g_ps.have ? (float)fh / vh : 1.0f;
+    const bool area = (rx > 1.01f || ry > 1.01f) && average && g_ps.pipe[P_AREA];
+    bool fsr = g_ps.have && !area && !g_crt && (rx < 0.99f || ry < 0.99f) && upscale == HLE_UPSCALE_FSR &&
                g_ps.pipe[P_EASU] && g_ps.pipe[P_RCAS];
     if (fsr && !img_target(&g_ps.up, (uint32_t)(vw + 0.5f), (uint32_t)(vh + 0.5f), VK_FORMAT_R8G8B8A8_UNORM, "FSR")) {
         g_ps.pipe[P_EASU] = VK_NULL_HANDLE;         /* no image for it: bilinear */
         fsr = false;
     }
-    if (fsr && (g_ps.up.serial != g_ps.serial || g_ps.up.fxaa != fxaa_done)) {
-        const float extra[4] = { (float)g_ps.f.w, (float)g_ps.f.h, (float)g_ps.up.w, (float)g_ps.up.h };
+    if (fsr && (g_ps.up.serial != g_ps.serial || g_ps.up.fxaa != fxaa_done || g_ps.up.down != (dw != 0))) {
+        const float extra[4] = { (float)fw, (float)fh, (float)g_ps.up.w, (float)g_ps.up.h };
         img_pass(cb, f, SET_EASU, &g_ps.up, g_ps.pipe[P_EASU], src, extra);
         g_ps.up.serial = g_ps.serial;
         g_ps.up.fxaa = fxaa_done;
+        g_ps.up.down = dw != 0;
     }
     /* the picture's pass: p over the frame's place, from `from` */
     unsigned p = P_BILINEAR;
     float pc[12] = { -sx, -sy, sx, sy, 0.0f, 0.0f, 0.0f, 0.0f, g_ps.rot[0], g_ps.rot[1], g_ps.rot[2], g_ps.rot[3] };
     VkImageView from = src;
-    if (down) {
+    if (area) {
         p = P_AREA;
         pc[4] = rx;
         pc[5] = ry;
@@ -2797,7 +2856,7 @@ void hle_present_end(float sx, float sy, bool fxaa, int upscale, bool average, u
     if (g_crt && g_ps.pipe[P_CRT]) {
         p = P_CRT;
         pc[4] = (float)g_crt;
-        pc[5] = (float)hle_host_render_scale();
+        pc[5] = (float)(dw ? down : hle_host_render_scale());   /* the console's lines: the frame's over it */
         from = src;
     }
     /* the overlay: its textures first, the picture as one under a cover */
@@ -2851,7 +2910,7 @@ void hle_present_end(float sx, float sy, bool fxaa, int upscale, bool average, u
                              g_ps.rot[0], g_ps.rot[1], g_ps.rot[2], g_ps.rot[3] };
             quad(cb, f, SET_OSD, g_ps.pipe[P_OSD], src, oc, iw, ih);
         }
-        log_path(p, fxaa_done, (uint32_t)(vw + 0.5f), (uint32_t)(vh + 0.5f));
+        log_path(p, fxaa_done, dw, dh, (uint32_t)(vw + 0.5f), (uint32_t)(vh + 0.5f));
     }
     if (ov) {
         ov_draw(cb, f, iw, ih, scene_ok);

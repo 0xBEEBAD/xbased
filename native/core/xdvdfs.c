@@ -122,6 +122,26 @@ bool nc_disc_open(NcDisc *d, int fd)
     return false;
 }
 
+bool nc_disc_image_read(const NcDisc *d, uint64_t off, void *buf, size_t len)
+{
+    return d->fd >= 0 && image_read(d->fd, buf, len, off);
+}
+
+uint64_t nc_disc_image_size(const NcDisc *d)
+{
+    if (d->fd < 0) {
+        return 0;
+    }
+    if (nc_chd_is(d->fd)) {
+        return nc_chd_size(d->fd);
+    }
+    if (nc_nbd_is(d->fd)) {
+        return nc_nbd_size(d->fd);
+    }
+    struct stat st;
+    return fstat(d->fd, &st) == 0 ? (uint64_t)st.st_size : 0;
+}
+
 void nc_disc_close(NcDisc *d)
 {
     if (d->fd >= 0) {

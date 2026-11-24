@@ -44,6 +44,10 @@ void nc_present_set_upscale(int mode);
 /* An "upscale=" value: "fsr", and "sgsr" (Snapdragon GSR, which FSR
  * replaced) as FSR; anything else bilinear. */
 int nc_upscale_from_name(const char *v);
+/* Downsampling: the frame, drawn at the render scale, averaged to the
+ * console's resolution times k (1, 2 or 4; 0 off) before it's scaled to the
+ * window (#427). */
+void nc_present_set_down(int k);
 /* Frames the title presented per second over the last half second, their
  * average interval, and the last one's (ms). */
 void nc_present_stats(float *fps, float *avg_ms, float *last_ms);

@@ -1511,6 +1511,8 @@ static bool lang_fallback(const NcDisc *disc, const char *rel, char *out, size_t
         {"fre", "eng"}, {"fra", "eng"}, {"ger", "eng"}, {"deu", "eng"}, {"ita", "eng"}, {"spa", "eng"},
         {"esp", "eng"}, {"jpn", "eng"}, {"jap", "eng"}, {"kor", "eng"}, {"chi", "eng"}, {"por", "eng"},
         {"fr", "en"}, {"de", "en"}, {"it", "en"}, {"es", "en"}, {"ja", "en"}, {"ko", "en"}, {"zh", "en"}, {"pt", "en"},
+        {"francais", "english"}, {"deutsch", "english"}, {"espanol", "english"}, {"castellano", "english"},
+        {"italiano", "english"}, {"portugues", "english"}, {"nihongo", "english"},
     };
     const size_t len = strlen(rel);
     if (len + 8 >= n) {
@@ -1548,23 +1550,28 @@ static bool lang_fallback(const NcDisc *disc, const char *rel, char *out, size_t
     return false;
 }
 
-/* Folder names for XC_LANGUAGE's values (1 English ... 9 Portuguese). */
-static const char *const k_lang_dirs[10][5] = {
+/* Folder names for XC_LANGUAGE's values (1 English ... 9 Portuguese), in
+ * English and in the language itself: Rayman 3's Gamedata\Vignette has
+ * ENGLISH beside ESPANOL, DEUTSCH, FRANCAIS and ITALIANO, and with only the
+ * English names known the European disc looked English-only and played in
+ * English whatever the console's language (#428). */
+#define LANG_DIR_NAMES 7
+static const char *const k_lang_dirs[10][LANG_DIR_NAMES] = {
     {NULL},
     {"english", "eng", "en", NULL},
-    {"japanese", "jpn", "jap", "ja", "jp"},
-    {"german", "ger", "deu", "de", NULL},
-    {"french", "fre", "fra", "fr", NULL},
-    {"spanish", "spa", "esp", "es", NULL},
-    {"italian", "ita", "it", NULL},
+    {"japanese", "jpn", "jap", "ja", "jp", "nihongo", NULL},
+    {"german", "ger", "deu", "de", "deutsch", NULL},
+    {"french", "fre", "fra", "fr", "francais", NULL},
+    {"spanish", "spa", "esp", "es", "espanol", "castellano", NULL},
+    {"italian", "ita", "it", "italiano", NULL},
     {"korean", "kor", "ko", "kr", NULL},
     {"chinese", "chi", "zh", "cn", NULL},
-    {"portuguese", "por", "pt", NULL},
+    {"portuguese", "por", "pt", "portugues", NULL},
 };
 
 static bool lang_named(const uint8_t *e, int lang)
 {
-    for (int i = 0; i < 5 && k_lang_dirs[lang][i]; i++) {
+    for (int i = 0; i < LANG_DIR_NAMES && k_lang_dirs[lang][i]; i++) {
         const size_t n = strlen(k_lang_dirs[lang][i]);
         if (e[13] == n && !strncasecmp((const char *)e + 14, k_lang_dirs[lang][i], n)) {
             return true;

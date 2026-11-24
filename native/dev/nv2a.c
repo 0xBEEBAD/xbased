@@ -127,6 +127,19 @@ static uint64_t g_sync_vsync_ns, g_sync_period_ns, g_sync_lead_ns, g_sync_fed_ns
 static bool g_vblank_locked;          /* next_vblank's last: locked to the vsyncs */
 static bool g_vblank_timed;           /* ... and placed for the presenter's timed presents */
 static int64_t g_pick_off_ns = -1;    /* pickups after a vsync (smoothed, 0..period) */
+/* The pickups' turn round the refresh over the last PICK_TURN_N of them
+ * (each one's step from the one before, and their sum): a presenter that
+ * picks frames up as its GPU finishes them, not by the vsyncs (a GPU at its
+ * limit), takes them round the refresh at its own pace, and the estimate
+ * that followed them took the vblank's grid along: Crash Bandicoot at Up to
+ * 60 on a laptop's GPU at 3x ran at 64 fps for minutes (#411), and
+ * simulated (a picture every 15 ms at the soonest beside 60 Hz vsyncs) at
+ * 60.9. While they turn more than a quarter of a refresh, the estimate
+ * stays where it was; a presenter's jitter, back and forth, adds up to
+ * less. */
+#define PICK_TURN_N 64
+static int64_t g_pick_step[PICK_TURN_N], g_pick_turn, g_pick_last = -1;
+static unsigned g_pick_n;
 #define VSYNC_LEAD   3000000ll
 #define VSYNC_STALE  200000000ull
 /* Push-buffer mode (hle_host_pb_mode): the HLE consumes channel 0's FIFO. */
@@ -729,6 +742,21 @@ void nc_dev_nv2a_display_pickup(uint64_t ns)
     int64_t off = ((int64_t)ns - (int64_t)vs) % pd;
     off = off < 0 ? off + pd : off;
     int64_t est = __atomic_load_n(&g_pick_off_ns, __ATOMIC_RELAXED);
+    const int64_t step = g_pick_last < 0 ? 0 : wrap_half(off - g_pick_last, pd);
+    g_pick_last = off;
+    g_pick_turn += step - g_pick_step[g_pick_n % PICK_TURN_N];
+    g_pick_step[g_pick_n++ % PICK_TURN_N] = step;
+    static bool s_turning;
+    const bool turning = g_pick_n >= PICK_TURN_N && llabs(g_pick_turn) > pd / 4;
+    if (turning != s_turning) {
+        s_turning = turning;
+        nc_log("xbased-native", "nv2a: the presenter's pickups %s (%.1f ms over the last %u)",
+               turning ? "turn round the refresh (it waits for its GPU): the vblank keeps its place" :
+                         "keep to the vsyncs again", g_pick_turn / 1e6, PICK_TURN_N);
+    }
+    if (turning && est >= 0) {
+        return;
+    }
     est = est < 0 ? off : est + wrap_half(off - est, pd) / 16;
     est = (est % pd + pd) % pd;
     __atomic_store_n(&g_pick_off_ns, est, __ATOMIC_RELAXED);
@@ -1345,15 +1373,32 @@ void nc_dev_nv2a_refresh(unsigned hz)
     }
 }
 
+static uint32_t g_av_mode;
+
+/* A standard-definition or 480p mode's width by its timing (the AV mode's
+ * bits 15:8), as titles' frame buffers show them: 640 at 0x01, 0x03, 0x05,
+ * 0x07 (480p), 0x0D - 0x0F; 720 at 0x02, 0x04, 0x08 (480p). 0 for the others
+ * (HD among them): the frame buffer's pitch tells. */
+static uint32_t av_mode_width(uint32_t mode)
+{
+    switch ((mode >> 8) & 0xFFu) {
+    case 0x01: case 0x03: case 0x05: case 0x07: case 0x0D: case 0x0E: case 0x0F:
+        return 640;
+    case 0x02: case 0x04: case 0x08:
+        return 720;
+    default:
+        return 0;
+    }
+}
+
 void nc_dev_nv2a_display_mode(uint32_t pitch, uint32_t xfmt, unsigned hz, uint32_t fb)
 {
-    hle_pb_display_mode(pitch, xfmt, hz);
+    hle_pb_display_mode(pitch, xfmt, hz, av_mode_width(__atomic_load_n(&g_av_mode, __ATOMIC_RELAXED)));
     if (fb) {
         hle_pb_display_fb(fb);
     }
 }
 
-static uint32_t g_av_mode;
 
 void nc_dev_nv2a_av_mode_set(uint32_t mode)
 {
@@ -1701,6 +1746,10 @@ bool nc_nv2a_state_load(NcRd *r, unsigned v)
     g_last_vblank_ns = now_ns();
     g_disp_vsync_ns = 0;
     g_pick_off_ns = -1;
+    memset(g_pick_step, 0, sizeof(g_pick_step));    /* the pickups' turn counted afresh */
+    g_pick_turn = 0;
+    g_pick_last = -1;
+    g_pick_n = 0;
     if (ld(NV_PTIMER_ALARM_0) || ld(NV_PTIMER_INTR_EN_0)) {
         alarm_set();                    /* due from the state's alarm, on its clock */
     }
