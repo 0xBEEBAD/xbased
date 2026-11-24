@@ -1,5 +1,17 @@
 # xbased changelog
 
+## 1.2.11 (2026-11)
+
+### Fixes
+- Frame rate limit: games that keep three frames ready, like Crash Bandicoot
+  The Wrath of Cortex, could go over the limit on a busy PC (64-65 fps at
+  Up to 60 on a laptop). Right after a frame went through, a second one could
+  be let through a millisecond later before the emulated GPU had moved on
+  (#411).
+- Games that flip in their own interrupt handler, like Star Wars Republic
+  Commando, went about one frame a second over the limit (61 fps at Up to 60):
+  a frame they flipped outside that handler didn't count against it.
+
 ## 1.2.10 (2026-11)
 
 ### Fixes

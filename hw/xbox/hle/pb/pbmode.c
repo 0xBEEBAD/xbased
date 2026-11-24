@@ -102,6 +102,7 @@ static struct {
     uint32_t trap_flips;                /* ... the flips counted as it came (pace_flip) */
     int64_t pace_until;                 /* a flip in a trap's handler: no further till then */
     int64_t pace_slot;                  /* ... the last one's slot on the limit's grid */
+    uint32_t pace_flips;                /* ... the flips counted by then (g_fl_flips) */
     uint64_t paced;                     /* ... holds */
     uint32_t sub_r[8][0x400 / 4];       /* the 2D objects' methods, by subchannel */
     uint32_t s2d[0x400 / 4];            /* the 2D surfaces' (one at a time in D3D) */
@@ -218,9 +219,20 @@ void hle_pb_overlay_changed(bool show)
     hle_pb_kick();
 }
 
+static bool flip_done(void);
+
+/* A frame waits for its flip: the decoder at a FLIP_STALL and no flip come
+ * for it yet. Not the decoder's flag alone: it holds until the decoder runs
+ * again after the flip, and the uncapped vblank thread (native/dev/nv2a.c
+ * wait_vblank), seeing the same stall still waiting a millisecond after its
+ * early vblank, took it for a presentation interval of 2 and sent another.
+ * A title with three buffers has a second frame done by then, and the
+ * vblank handler flipped it too: two frames in a millisecond. Crash
+ * Bandicoot at Up to 60 on a laptop ran at 64.5 fps (#411), at 120 here
+ * with the decoder made 1.5 ms late to go on after a flip. */
 bool hle_pb_flip_waiting(void)
 {
-    return __atomic_load_n(&g_pb.flip_wait, __ATOMIC_ACQUIRE);
+    return __atomic_load_n(&g_pb.flip_wait, __ATOMIC_ACQUIRE) && !flip_done();
 }
 
 /* FLIP_STALLs that waited: one a frame finished ahead of its flip */
@@ -970,9 +982,15 @@ static bool dma_object(uint32_t *base, uint32_t *limit, uint32_t *inst)
  * alike. The grid starts over after a long stop (a load). */
 #define PACE_RESTART 8
 
+/* A title that flips in a trap's handler flips a frame now and then outside
+ * one, in its vblank handler or its own code: that flip takes its slot too.
+ * Passed over, the frame after it went on at once and its trap's flip fell
+ * in the same slot: Republic Commando at Up to 60 ran at 60.6 to 61.4 fps,
+ * about one such flip a second, 1 to 2.5 ms past its slot (60.0 now). */
 static void pace_flip(void)
 {
     const int64_t every = hle_host_flip_min_ns(), now = hle_now_ns();
+    g_pb.pace_flips = __atomic_load_n(&g_fl_flips, __ATOMIC_ACQUIRE);
     if (every <= 0) {
         g_pb.pace_slot = 0;
         return;
@@ -1036,6 +1054,8 @@ static void consume_pass(void)
             pace_flip();                            /* its handler flipped */
             __atomic_store_n(&g_trap_flip_ns, hle_now_ns(), __ATOMIC_RELAXED);
         }
+    } else if (__atomic_load_n(&g_fl_flips, __ATOMIC_ACQUIRE) != g_pb.pace_flips && hle_pb_flips_in_traps()) {
+        pace_flip();                                /* a flip outside a trap (pace_flip) */
     }
     if (!fifo_open()) {
         hle_pbd_keep_stalled();
@@ -1769,11 +1789,12 @@ static void fl_scan(uint32_t put)
         return;
     }
     if (!g_fl.synced) {
-        if (!hle_pb_flip_waiting()) {
+        /* the decoder at the stall (its GET there), its flip come or not */
+        if (!__atomic_load_n(&g_pb.flip_wait, __ATOMIC_ACQUIRE)) {
             return;
         }
         uint32_t pos = hle_host_gpu_reg(NV_PFIFO_CACHE1_DMA_GET), ends = hle_pbd_frames_swapped();
-        if (!hle_pb_flip_waiting() || !fl_count(base, limit, &pos, put, &ends)) {
+        if (!__atomic_load_n(&g_pb.flip_wait, __ATOMIC_ACQUIRE) || !fl_count(base, limit, &pos, put, &ends)) {
             return;
         }
         g_fl.pos = pos;
