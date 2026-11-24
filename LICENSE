@@ -1,8 +1,7 @@
 xbased is free software: you can redistribute it and/or modify it under the
 terms of the GNU General Public License as published by the Free Software
 Foundation, either version 3 of the License, or (at your option) any later
-version. The full text is in COPYING. xbased started from hakuX's code, under the
-same license.
+version. The full text is in COPYING.
 
 xbased is distributed in the hope that it will be useful, but WITHOUT ANY
 WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
@@ -31,7 +30,7 @@ above:
   - BSD 3-Clause (licenses/adpcm-xq.license.txt): vp/adpcm.h, the ADPCM-XQ
     decoder (David Bryant).
   The rest of native/dev/apu (apu_base.h, out.c, state.c, vp/mix_inline.h,
-  vp/resample.*) is hakuX's own.
+  vp/resample.*) is under the license above.
 - native/kernel/xboxkrnl.exe.def comes from nxdk: CC0-1.0.
 - The window presenter's shaders (hw/xbox/hle/vk/swapchain.c): its FXAA is
   FXAA 3.11 Quality (Timothy Lottes) as PCSX2's fxaa.fx tunes it, GNU

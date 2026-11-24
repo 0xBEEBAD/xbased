@@ -502,8 +502,8 @@
   older GPUs that was the difference between full speed and half
   (Midnight Club 3 at 3x). Fast now costs the same as 1.0.104 or less.
 - Fast precision: stray lines over Vice City's buildings.
-- Log lines and environment variables say xbased (`XBASED_*`; the older
-  `HAKUX_*` names still work). For LAN play every machine needs 1.1.3.
+- Log lines and environment variables say xbased (`XBASED_*`). For LAN play
+  every machine needs 1.1.3.
 
 ## 1.1.2 (2026-11)
 
@@ -1735,7 +1735,7 @@ on a retail console (xemu pull request #3105):
 - Spikeout: Battle Street said its program was damaged and didn't start.
   Its executable has 398 sections and the loader took no more than 256; it
   now takes up to 512.
-- That error message said hakuX where it should say xbased.
+- That error message now names xbased.
 
 ## 1.0.33 (2026-11)
 
@@ -1947,8 +1947,8 @@ on a retail console (xemu pull request #3105):
 
 ### About
 - xbased is an original Xbox emulator for Windows and Linux, developed by
-  crazyriddler. Based on hakuX. The About screen, the executable's details
-  and the Linux menu entry say so.
+  crazyriddler. The About screen, the executable's details and the Linux
+  menu entry say so.
 
 ## 1.0.17 (2026-11)
 
@@ -2161,8 +2161,8 @@ on a retail console (xemu pull request #3105):
 ## 1.0.5 (2026-11)
 
 ### Credits
-- xbased is crazyriddler's Windows and Linux edition of hakuX by rfandango,
-  and now says so everywhere: the About screen (in every language, with
+- xbased is crazyriddler's Xbox emulator for Windows and Linux, and now says
+  so everywhere: the About screen (in every language, with
   github.com/crazyriddler/xbased), the README, the program's version
   information on Windows and its desktop entry on Linux.
 
@@ -2227,11 +2227,11 @@ or closed at start.
 
 ## 1.0 (2026-11)
 
-The first release of xbased, crazyriddler's Windows and Linux edition of
-[hakuX](https://github.com/rfandango/hakuX) by rfandango.
+The first release of xbased, crazyriddler's Xbox emulator for Windows and
+Linux.
 
 ### Emulation
-- hakuX's core on x86-64: the guest's code translated to native x86-64, its
+- The core on x86-64: the guest's code translated to native x86-64, its
   return addresses predicted, interrupts delivered at block boundaries.
 - The Xbox kernel's thread priority boosts, so games that lean on them
   (NightFire and others) keep their frame rate.

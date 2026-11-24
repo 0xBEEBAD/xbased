@@ -135,11 +135,10 @@ static void hello(void)
     g_lan.hello = time(NULL);
 }
 
-/* (an instance before 1.1.3 says "hakuX hello": both are peers) */
 static bool is_hello(const uint8_t *frame, size_t len)
 {
     return len >= 26 && frame[12] == (HELLO_TYPE >> 8) && frame[13] == (HELLO_TYPE & 0xff) &&
-           (!memcmp(frame + 14, "xbased hello", 12) || !memcmp(frame + 14, "hakuX hello", 11));
+           !memcmp(frame + 14, "xbased hello", 12);
 }
 
 static Station *station(const uint8_t *mac)

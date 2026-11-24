@@ -109,9 +109,9 @@ bool cfg_save(const Config *c)
     if (!f) {
         return false;
     }
-    /* the header (xbased's earlier one becomes xbased's) */
+    /* the header: the file's own comments, or xbased's */
     const char *head = "# xbased options, one a line (the command line's come after and win)\n";
-    fputs(c->comments[0] && strncmp(c->comments, "# hakuX options", 15) ? c->comments : head, f);
+    fputs(c->comments[0] ? c->comments : head, f);
     for (int i = 0; i < c->n; i++) {
         if (c->flag[i]) {
             fprintf(f, "%s\n", c->key[i]);

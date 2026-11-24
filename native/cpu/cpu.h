@@ -1,9 +1,10 @@
 /*
- * xbased native core — the guest CPU (FEXCore, fork branch hakuX).
+ * xbased native core — the guest CPU (the x86-32 to x86-64 translator,
+ * cpu/cpu_x86.cpp).
  *
- * C interface to the JIT for the rest of the core. One CPU runs the guest;
- * privileged and system instructions come back through a system-op callback
- * (FEX system mode), with the guest frame available through the accessors.
+ * C interface to it for the rest of the core. One CPU runs the guest;
+ * privileged and system instructions come back through a system-op callback,
+ * with the guest frame available through the accessors.
  */
 #ifndef NATIVE_CPU_CPU_H
 #define NATIVE_CPU_CPU_H

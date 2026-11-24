@@ -105,7 +105,7 @@ xbased doesn't include any copyrighted Xbox software.
   delete.
 - **Import from xemu**: xemu's saves copied in and re-signed so games accept
   them (Memory, Y).
-- **Broad compatibility** with many games, inherited from hakuX.
+- **Broad compatibility** with many games.
 
 </td>
 </tr>
@@ -364,8 +364,7 @@ More options (link-time optimization, the dependencies' location) are in
   BloodRayne 2, NFL Fever 2004, Panzer Dragoon Orta and more), internal
   resolution up to 8x, 5.1 audio, the automatic updates and every release
   ([CHANGELOG.md](CHANGELOG.md)).
-- **[hakuX](https://github.com/rfandango/hakuX)**, the emulator xbased started from. Its
-  README and changelog are in [docs/hakuX](docs/hakuX/).
+- **[hakuX](https://github.com/rfandango/hakuX)**, the emulator xbased started from.
 - Box art from the [libretro-thumbnails](https://github.com/libretro-thumbnails)
   project. Interface font: Play (SIL Open Font License).
 - SDL3, Zydis, libslirp, libchdr, xxHash, volk, Vulkan Memory Allocator, glslang,
@@ -403,7 +402,7 @@ it's here thanks to them:
 
 ## License
 
-xbased, like hakuX, is free software under the GNU General Public License,
+xbased is free software under the GNU General Public License,
 version 3 or later ([COPYING](COPYING)). The third-party components keep their
 own licenses ([LICENSE](LICENSE), [licenses/](licenses/)).
 

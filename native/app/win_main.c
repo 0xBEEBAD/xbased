@@ -1856,32 +1856,8 @@ static bool short_options(int *argc, char **argv)
     return true;
 }
 
-/* The environment's HAKUX_ names (before 1.1.3) as their XBASED_ ones, where
- * those are not set themselves. */
-static void env_legacy(void)
-{
-    char *names[256];
-    unsigned n = 0;
-    for (char **e = environ; e && *e && n < 256; e++) {
-        if (!strncmp(*e, "HAKUX_", 6) && strchr(*e, '=')) {
-            names[n++] = strdup(*e);
-        }
-    }
-    for (unsigned i = 0; i < n; i++) {
-        char *eq = strchr(names[i], '=');
-        char name[160];
-        *eq = 0;
-        snprintf(name, sizeof(name), "XBASED_%s", names[i] + 6);
-        if (!getenv(name)) {
-            setenv(name, eq + 1, 0);
-        }
-        free(names[i]);
-    }
-}
-
 int main(int argc, char *argv[])
 {
-    env_legacy();
 #ifdef _WIN32
     if (argc > 1 && !strcmp(argv[1], "frame")) {
         return nc_frame_main(argc, argv);      /* the game's frame (win_frame.h) */

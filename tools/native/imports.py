@@ -1,7 +1,7 @@
-"""Kernel import census from census.sh output.
+"""Kernel import census from logs.
 
-Reads the "== <image>" and "xbased-native-imports: title <id> <ordinals>"
-lines that tools/native/census.sh prints and writes a Markdown report: per
+Reads "== <image>" lines and the "xbased-native-imports: title <id> <ordinals>"
+lines of the runs' logs and writes a Markdown report: per
 title, how many kernel exports it imports and how many of those functions
 this kernel doesn't implement (nc_kernel_impl in native/); the union over a
 chosen set of titles, grouped by name prefix (subsystem); and the functions

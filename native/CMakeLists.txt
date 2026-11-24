@@ -1,8 +1,8 @@
-# xbased native core (QEMU-free): FEXCore fork + reimplemented Xbox kernel.
+# xbased native core (QEMU-free): its own x86 translator + reimplemented Xbox
+# kernel, for Windows x64 and Linux x86-64.
 #
 # xbased_native is the core library; xboxrun runs a title from the command
-# line on the device (adb shell) for the frontier loop. Cross-compiled with
-# the NDK into build/native/core; the steps are in android/README.md.
+# line (not part of the default build).
 cmake_minimum_required(VERSION 3.20)
 project(xbased_native C CXX)
 
@@ -10,10 +10,10 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# ThinLTO for Release builds of everything but FEX (its own ENABLE_LTO stays
-# off, fex.cmake): the decoder and the renderer ~2% lighter (the RP5, DOA2).
+# ThinLTO for Release builds: the decoder and the renderer ~2% lighter (the
+# RP5, DOA2).
 # The cache keeps relinking after a change to the files changed.
-option(XBASED_LTO "ThinLTO in Release builds (FEX excepted)" ON)
+option(XBASED_LTO "ThinLTO in Release builds" ON)
 # The dev tools' control of a run (app/win_devctl.c, hw/xbox/hle/vk/devcap.h;
 # a local tool drives it): off, and never in a release.
 option(XBASED_DEVCTL "the dev tools' control of a run (not for releases)" OFF)
@@ -39,11 +39,10 @@ if(NC_LINUX_X64)
   include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/linux.cmake")
 elseif(WIN32)
   # Windows x64: the guest CPU is the core's own x86-32 -> x86-64 translator
-  # (cpu/cpu_x86.cpp, on Zydis) instead of FEX; cmake/win.cmake.
+  # (cpu/cpu_x86.cpp, on Zydis); cmake/win.cmake.
   include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/win.cmake")
 else()
-  include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/fex.cmake")
-  set(NC_XXHASH_DIR "${XBASED_FEX_DIR}/External/xxhash")
+  message(FATAL_ERROR "xbased builds for Windows x64 and Linux x86-64")
 endif()
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/hle.cmake")
 
@@ -81,7 +80,7 @@ target_include_directories(nc_slirp PUBLIC "${CMAKE_BINARY_DIR}/slirp")
 target_link_libraries(nc_slirp PRIVATE nc_glib)
 target_compile_options(nc_slirp PRIVATE -w)
 if(NC_LINUX_X64)
-  target_compile_options(nc_slirp PRIVATE "SHELL:-include signal.h")   # misc.c's (Android's headers bring it)
+  target_compile_options(nc_slirp PRIVATE "SHELL:-include signal.h")   # misc.c's
 endif()
 
 if(NC_LINUX_X64)
@@ -89,14 +88,10 @@ if(NC_LINUX_X64)
       compat/linux/seh.c compat/linux/linux.c)
   set(NC_CPU_LIB nc_zydis)
   set(NC_SYS_LIBS pthread dl m)
-elseif(WIN32)
+else()
   set(NC_PLATFORM_SOURCES core/vm.c core/vm_win.cpp core/fault_win.c core/jmp_x64.c cpu/cpu_x86.cpp cpu/x64emu.cpp compat/win/win.c)
   set(NC_CPU_LIB nc_zydis)
   set(NC_SYS_LIBS ws2_32 iphlpapi winmm bcrypt dwmapi synchronization pthread)
-else()
-  set(NC_PLATFORM_SOURCES core/jmp.c core/vm.c cpu/cpu.cpp)
-  set(NC_CPU_LIB nc_fex)
-  set(NC_SYS_LIBS log)
 endif()
 
 add_library(xbased_native STATIC
@@ -151,7 +146,7 @@ add_library(xbased_native STATIC
   "${NC_REPO}/hw/xbox/hle/core/xbe.c"
 )
 target_include_directories(xbased_native PUBLIC "${NC_REPO}")
-# xxhash (single header, FEX's copy): the savestates' blob store (state/cache.c)
+# xxhash (single header): the savestates' blob store (state/cache.c)
 target_include_directories(xbased_native PRIVATE "${NC_XXHASH_DIR}")
 # The HLE layer's pure modules build without QEMU in this mode.
 target_compile_definitions(xbased_native PRIVATE HLE_HOST_TEST)
@@ -173,26 +168,13 @@ if(EXISTS "${NC_DEPS}/libchdr/CMakeLists.txt")
   target_compile_definitions(xbased_native PRIVATE NC_HAVE_CHD)
 endif()
 
-# xboxrun's custom Vulkan driver ("vkdriver="): the app's code for it
-# (native/app/vkdriver.c, vklayer.c), through adrenotools when NC_DEPS has it
-# (cmake/app.cmake).
-if(WIN32 OR NC_LINUX_X64)
-  add_executable(xboxrun EXCLUDE_FROM_ALL run/xboxrun.c run/capture.c)
-  target_link_libraries(xboxrun PRIVATE xbased_native xbased_hle z)
-else()
-  add_executable(xboxrun run/xboxrun.c run/capture.c app/vkdriver.c app/vklayer.c)
-  target_link_libraries(xboxrun PRIVATE xbased_native xbased_hle z log)
-endif()
+add_executable(xboxrun EXCLUDE_FROM_ALL run/xboxrun.c run/capture.c)
+target_link_libraries(xboxrun PRIVATE xbased_native xbased_hle z)
 target_link_libraries(xbased_hle PUBLIC xbased_native)
 target_link_libraries(nc_slirp PRIVATE xbased_native)   # nc_log
 
-# The xbased app's native core library (native/app, cmake/app.cmake); on
-# Windows the xbased executable (native/app/win_main.c, cmake/app_win.cmake).
-if(WIN32 OR NC_LINUX_X64)
-  include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/app_win.cmake")
-else()
-  include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/app.cmake")
-endif()
+# The xbased executable (native/app/win_main.c, cmake/app_win.cmake).
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/app_win.cmake")
 
 # Host tests of the PC's own code (not part of the default build):
 #   cputest: the translator (cpu/cpu_x86.cpp) against the host processor,
