@@ -1,7 +1,7 @@
 /*
  * xbased HLE GPU — Vulkan instance/device, floor + plus capability tiers.
  */
-#if defined(NC_DESKTOP) && !defined(_WIN32)
+#ifndef _WIN32
 #include <SDL3/SDL_vulkan.h>
 #endif
 #include "hw/xbox/hle/base.h"
@@ -16,10 +16,8 @@
 #include "hw/xbox/hle/vk/quirks.h"
 #include "hw/xbox/hle/vk/drvcrash.h"
 
-#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
-#include <sys/system_properties.h>
+#include "native/core/props.h"
 #include "hw/xbox/hle/prop.h"
-#endif
 
 HleVk g_hvk;
 static HleMutex g_queue_lock;
@@ -157,9 +155,7 @@ static char g_caps_v[96];
 static void caps_read(void)
 {
     g_caps_v[0] = 0;
-#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
     hle_prop_get("debug.xbased.caps", g_caps_v);
-#endif
     if (!g_caps_v[0] && getenv("XBASED_HLE_CAPS")) {
         snprintf(g_caps_v, sizeof(g_caps_v), "%s", getenv("XBASED_HLE_CAPS"));
     }
@@ -190,7 +186,6 @@ static void caps_override(HleCaps *c)
         { "cbc", offsetof(HleCaps, cbc) },           { "d24s8", offsetof(HleCaps, d24s8) },
         { "4444", offsetof(HleCaps, x4444) },        { "bindless", offsetof(HleCaps, bindless) },
         { "dclamp", offsetof(HleCaps, depth_clamp) }, { "v3", offsetof(HleCaps, vfmt3) },
-        { "bda", offsetof(HleCaps, bda) },           { "ahb", offsetof(HleCaps, ahb) },
         { "fbfetch", offsetof(HleCaps, fbfetch) },   { "vk13", offsetof(HleCaps, vk13) },
         { "dynrender", offsetof(HleCaps, dyn_render) }, { "sync2", offsetof(HleCaps, sync2) },
         { "eds1", offsetof(HleCaps, eds1) },         { "eds2", offsetof(HleCaps, eds2) },
@@ -261,7 +256,7 @@ int hle_vk_init(void)
     vkEnumerateInstanceExtensionProperties(NULL, &nie, iext);
     const char *iexts[8];
     uint32_t nix = 0;
-#if defined(NC_DESKTOP) && !defined(_WIN32)
+#ifndef _WIN32
     /* Linux: the window system's surface extensions as SDL asks for them
      * (X11's or Wayland's), when the instance has them all */
     Uint32 nsdl = 0;
@@ -274,14 +269,10 @@ int hle_vk_init(void)
         iexts[nix++] = sdl_ext[i];
     }
 #else
-#ifdef _WIN32
-#define NC_SURFACE_EXT VK_KHR_WIN32_SURFACE_EXTENSION_NAME
-#else
-#define NC_SURFACE_EXT VK_KHR_ANDROID_SURFACE_EXTENSION_NAME
-#endif
-    if (has_ext(iext, nie, VK_KHR_SURFACE_EXTENSION_NAME) && has_ext(iext, nie, NC_SURFACE_EXT)) {
+    if (has_ext(iext, nie, VK_KHR_SURFACE_EXTENSION_NAME) &&
+        has_ext(iext, nie, VK_KHR_WIN32_SURFACE_EXTENSION_NAME)) {
         iexts[nix++] = VK_KHR_SURFACE_EXTENSION_NAME;
-        iexts[nix++] = NC_SURFACE_EXT;
+        iexts[nix++] = VK_KHR_WIN32_SURFACE_EXTENSION_NAME;
     }
 #endif
     VkInstanceCreateInfo ici = {
@@ -295,7 +286,6 @@ int hle_vk_init(void)
         return -1;
     }
     volkLoadInstanceOnly(v->inst);
-#ifdef NC_DESKTOP
     /* a PC may have several: a discrete GPU first, then an integrated one
      * (XBASED_GPU=N picks the Nth as the loader lists them) */
     uint32_t n = 0;
@@ -327,14 +317,6 @@ int hle_vk_init(void)
         }
         v->phys = all[best];
     }
-#else
-    uint32_t n = 1;
-    vkEnumeratePhysicalDevices(v->inst, &n, &v->phys);
-    if (!n) {
-        hle_log("xbased-hle-back", "vk: no physical device");
-        return -1;
-    }
-#endif
     vkGetPhysicalDeviceProperties(v->phys, &v->props);
     vkGetPhysicalDeviceMemoryProperties(v->phys, &v->mem);
 
@@ -369,9 +351,6 @@ int hle_vk_init(void)
     bool e_4444 = has_ext(ext, ne, VK_EXT_4444_FORMATS_EXTENSION_NAME);
     bool e_iu8x = has_ext(ext, ne, "VK_EXT_index_type_uint8");
     bool e_iu8k = has_ext(ext, ne, "VK_KHR_index_type_uint8");
-    bool e_ahb = has_ext(ext, ne,
-                         VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME) &&
-                 has_ext(ext, ne, VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME);
     bool e_eds3 = has_ext(ext, ne, VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME);
     bool e_gpl = has_ext(ext, ne, VK_EXT_GRAPHICS_PIPELINE_LIBRARY_EXTENSION_NAME) &&
                  has_ext(ext, ne, VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME);
@@ -383,7 +362,6 @@ int hle_vk_init(void)
     const bool v13 = api >= VK_API_VERSION_1_3, v12 = api >= VK_API_VERSION_1_2;
     bool e_tl = v12 || has_ext(ext, ne, VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME);
     bool e_di = v12 || has_ext(ext, ne, VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME);
-    bool e_bda = v12 || has_ext(ext, ne, VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME);
     bool e_hqr = v12 || has_ext(ext, ne, VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME);
     bool e_s2 = has_ext(ext, ne, VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME);
     /* KHR_dynamic_rendering needs depth_stencil_resolve (and create_renderpass2) below 1.2 */
@@ -400,7 +378,7 @@ int hle_vk_init(void)
         v->inst = VK_NULL_HANDLE;
         return -2;
     }
-    {   /* debug: how guest RAM could be shared with the GPU */
+    {   /* the memory types (index:property flags), for reports */
         VkPhysicalDeviceMemoryProperties mp;
         vkGetPhysicalDeviceMemoryProperties(v->phys, &mp);
         char mt[160];
@@ -408,10 +386,7 @@ int hle_vk_init(void)
         for (uint32_t i = 0; i < mp.memoryTypeCount && o < (int)sizeof(mt) - 12; i++) {
             o += snprintf(mt + o, sizeof(mt) - (size_t)o, " %u:%x", i, mp.memoryTypes[i].propertyFlags);
         }
-        hle_log("xbased-hle-back", "vk: memory: host_ptr=%d dma_buf=%d fd=%d ahb=%d, types%s",
-                has_ext(ext, ne, "VK_EXT_external_memory_host"),
-                has_ext(ext, ne, "VK_EXT_external_memory_dma_buf"),
-                has_ext(ext, ne, "VK_KHR_external_memory_fd"), e_ahb, mt);
+        hle_log("xbased-hle-back", "vk: memory types%s", mt);
     }
 
     VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT q_vids = {
@@ -446,8 +421,6 @@ int hle_vk_init(void)
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES };
     VkPhysicalDeviceDescriptorIndexingFeatures q_di = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES };
-    VkPhysicalDeviceBufferDeviceAddressFeatures q_bda = {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES };
     VkPhysicalDeviceHostQueryResetFeatures q_hqr = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES };
     VkPhysicalDeviceSynchronization2Features q_s2 = {
@@ -462,7 +435,6 @@ int hle_vk_init(void)
     if (!v13) {
         if (e_tl) chain(&tail, &q_tl);
         if (e_di) chain(&tail, &q_di);
-        if (e_bda) chain(&tail, &q_bda);
         if (e_hqr) chain(&tail, &q_hqr);
         if (e_s2) chain(&tail, &q_s2);
         if (e_dr) chain(&tail, &q_dr);
@@ -515,9 +487,8 @@ int hle_vk_init(void)
                            : e_di && q_di.shaderSampledImageArrayNonUniformIndexing;
 
     /* The floor: what every path needs. What some drivers lack and the back
-     * end works without (Mali, Xclipse, PowerVR) is enabled where present,
-     * the device Adreno gets unchanged: logicOp, dualSrcBlend, BC, EDS2,
-     * provoking vertex, depth clip, uint8 indices, BDA, AHB, vertex input. */
+     * end works without is enabled where present: logicOp, dualSrcBlend, BC,
+     * EDS2, provoking vertex, depth clip, uint8 indices, vertex input. */
     memset(c, 0, sizeof(*c));
     c->floor_ok = true;
     need(c, v->qfam != UINT32_MAX, "graphics queue");
@@ -540,7 +511,7 @@ int hle_vk_init(void)
     c->sync2 = v13 || (e_s2 && q_s2.synchronization2);
     c->eds1 = v13 || (e_eds1 && q_eds1.extendedDynamicState);
     c->eds2 = v13 || (e_eds2 && q_eds2.extendedDynamicState2);
-    /* custom border colours and A4R4G4B4: substituted where missing (Mali's r26) */
+    /* custom border colours and A4R4G4B4: substituted where missing */
     c->cbc = e_cbc && q_cbc.customBorderColors;
     c->x4444 = e_4444 && q_4444.formatA4R4G4B4;
     if (!c->x4444 && v13) {             /* core in 1.3, its extension listed or not */
@@ -552,7 +523,7 @@ int hle_vk_init(void)
     }
     c->bc = q.features.textureCompressionBC;
     if (!c->bc) {
-        /* the formats without the feature (Xclipse; PowerVR's D-Series) */
+        /* the formats themselves, without the feature */
         static const VkFormat k_bc[3] = { VK_FORMAT_BC1_RGBA_UNORM_BLOCK, VK_FORMAT_BC2_UNORM_BLOCK,
                                           VK_FORMAT_BC3_UNORM_BLOCK };
         const VkFormatFeatureFlags want = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
@@ -571,8 +542,8 @@ int hle_vk_init(void)
     c->push_desc = e_pd;
     c->cbc_any = q_cbc.customBorderColorWithoutFormat &&
                  p_cbc.maxCustomBorderColorSamplers >= HLE_MAX_SAMPLERS;
-    {   /* D24S8, unless it can't be filtered and D32S8 can (PowerVR's shadow
-         * maps are gathered linearly, psh.c); Xclipse has no D24S8 at all */
+    {   /* D24S8, unless it can't be filtered and D32S8 can (shadow maps are
+         * gathered linearly, psh.c); AMD's drivers have no D24S8 at all */
         VkFormatProperties dp, fp;
         const VkFormatFeatureFlags ds = VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT |
                                         VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
@@ -583,8 +554,6 @@ int hle_vk_init(void)
                    ((dp.optimalTilingFeatures & lin) == lin || (fp.optimalTilingFeatures & lin) != lin);
     }
     c->vfmt3 = true;
-    c->bda = v13 ? q12.bufferDeviceAddress : e_bda && q_bda.bufferDeviceAddress;
-    c->ahb = e_ahb;
     c->max_lod_bias = v->props.limits.maxSamplerLodBias;
     c->max_aniso = v->props.limits.maxSamplerAnisotropy;
     /* (unused, enabled where present: on 1.3 only) */
@@ -636,7 +605,7 @@ int hle_vk_init(void)
     }
 
     /* Enable exactly the features used (never "everything supported"), and
-     * those the floor used to need where present (Adreno's device as before). */
+     * those the floor used to need where present. */
     const bool u_vids = e_vids && q_vids.vertexInputDynamicState;
     const bool u_eds2 = v13 ? e_eds2 && q_eds2.extendedDynamicState2 : c->eds2;
     const bool u_pv = e_pv && q_pv.provokingVertexLast;
@@ -680,7 +649,7 @@ int hle_vk_init(void)
      * them (Mesa's hasvk on Broadwell's HD 5500, #378) */
     VkPhysicalDeviceVulkan12Features f12 = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, .pNext = &f13,
-        .timelineSemaphore = VK_TRUE, .bufferDeviceAddress = c->bda,
+        .timelineSemaphore = VK_TRUE,
         .runtimeDescriptorArray = c->bindless, .descriptorBindingPartiallyBound = c->bindless,
         .descriptorBindingSampledImageUpdateAfterBind = c->bindless,
         .shaderSampledImageArrayNonUniformIndexing = c->bindless,
@@ -695,8 +664,6 @@ int hle_vk_init(void)
         .descriptorBindingPartiallyBound = VK_TRUE,
         .descriptorBindingSampledImageUpdateAfterBind = VK_TRUE,
         .shaderSampledImageArrayNonUniformIndexing = VK_TRUE };
-    VkPhysicalDeviceBufferDeviceAddressFeatures f_bda = {
-        .sType = q_bda.sType, .bufferDeviceAddress = VK_TRUE };
     VkPhysicalDeviceHostQueryResetFeatures f_hqr = {
         .sType = q_hqr.sType, .hostQueryReset = VK_TRUE };
     VkPhysicalDeviceSynchronization2Features f_s2 = {
@@ -725,7 +692,6 @@ int hle_vk_init(void)
     if (!v13) {
         chain(&tail, &f_tl);
         if (c->bindless) chain(&tail, &f_di);
-        if (c->bda) chain(&tail, &f_bda);
         if (c->host_query_reset) chain(&tail, &f_hqr);
         if (c->sync2) chain(&tail, &f_s2);
         if (c->dyn_render) chain(&tail, &f_dr);
@@ -750,7 +716,6 @@ int hle_vk_init(void)
         if (!v12) {                     /* core in 1.2 */
             exts[nx++] = VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME;
             if (c->bindless) exts[nx++] = VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME;
-            if (c->bda) exts[nx++] = VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME;
             if (c->host_query_reset) exts[nx++] = VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME;
         }
         if (c->sync2) exts[nx++] = VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME;
@@ -772,10 +737,6 @@ int hle_vk_init(void)
     if (u_dce) exts[nx++] = VK_EXT_DEPTH_CLIP_ENABLE_EXTENSION_NAME;
     if (u_4444) exts[nx++] = VK_EXT_4444_FORMATS_EXTENSION_NAME;
     if (u_iu8) exts[nx++] = e_iu8k ? "VK_KHR_index_type_uint8" : "VK_EXT_index_type_uint8";
-    if (c->ahb) {
-        exts[nx++] = VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME;
-        exts[nx++] = VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME;
-    }
     if (c->eds3) exts[nx++] = VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME;
     if (c->gpl) {
         exts[nx++] = VK_EXT_GRAPHICS_PIPELINE_LIBRARY_EXTENSION_NAME;
@@ -817,8 +778,6 @@ int hle_vk_init(void)
     hle_batch_install(&v->t);           /* strip batching sees every recorded command */
     g_hle_glsl_vk11 = !c->vk13;
     v->t.vkGetDeviceQueue(v->dev, v->qfam, 0, &v->queue);
-    v->get_ahb_props = c->ahb ? (PFN_vkGetAndroidHardwareBufferPropertiesANDROID)
-        vkGetDeviceProcAddr(v->dev, "vkGetAndroidHardwareBufferPropertiesANDROID") : NULL;
     hle_log("xbased-hle-back", "vk: device \"%s\" api %u.%u.%u driver 0x%x floor=ok "
             "plus: gpl=%d eds3=%d dbuf=%d m5=%d sscaled=%d local_read=%d fbfetch=%d cache_control=%d "
             "swapchain=%d legacy_vattr=%d",
@@ -828,9 +787,9 @@ int hle_vk_init(void)
             c->gpl, c->eds3, c->descriptor_buffer, c->maint5, c->sscaled,
             c->local_read, c->fbfetch, c->cache_control, c->swapchain, c->legacy_vattr);
     hle_log("xbased-hle-back", "vk: bc=%d vids=%d push=%d push_desc=%d cbc=%d cbc_any=%d "
-            "x4444=%d d24s8=%d bda=%d ahb=%d vk13=%d dyn_render=%d sync2=%d eds1=%d eds2=%d "
+            "x4444=%d d24s8=%d vk13=%d dyn_render=%d sync2=%d eds1=%d eds2=%d "
             "bindless=%d depth_clamp=%d (0: the substitute runs)", c->bc, c->vids, c->push,
-            c->push_desc, c->cbc, c->cbc_any, c->x4444, c->d24s8, c->bda, c->ahb, c->vk13,
+            c->push_desc, c->cbc, c->cbc_any, c->x4444, c->d24s8, c->vk13,
             c->dyn_render, c->sync2, c->eds1, c->eds2, c->bindless, c->depth_clamp);
     hle_quirks_init(v->phys);           /* what this driver needs worked around */
     hle_drvcrash_init(v->phys);         /* pipelines that crashed it before (drvcrash.h) */

@@ -21,7 +21,7 @@ typedef struct Buf {
     bool overflow;
 } Buf;
 
-static void put(Buf *b, const char *fmt, ...)
+static __attribute__((format(printf, 2, 3))) void put(Buf *b, const char *fmt, ...)
 {
     va_list ap;
     va_start(ap, fmt);
@@ -36,7 +36,6 @@ static void put(Buf *b, const char *fmt, ...)
 }
 
 bool g_hle_push_ssbo;                   /* ff.h */
-bool g_hle_glsl_zw;                     /* ff.h */
 bool g_hle_glsl_zclamp;                 /* ff.h */
 bool g_hle_glsl_fixed;                  /* ff.h */
 
@@ -328,9 +327,6 @@ size_t hle_ff_vs_glsl(const HleFfVsKey *k, char *buf, size_t cap)
     if (k->zclamp && g_hle_glsl_zclamp) {
         put(&b, HLE_ZCLAMP_GLSL);
     }
-    if (g_hle_glsl_zw) {
-        put(&b, HLE_ZW_NUDGE_GLSL);
-    }
     put(&b, "%s}\n", k->wbuf ? "  vW = gl_Position.w;\n" : "");
     return b.overflow ? 0 : b.len;
 }
@@ -436,7 +432,7 @@ static void op(Buf *b, unsigned s, uint32_t o, uint32_t a0, uint32_t a1, uint32_
         put(b, "("); A0; put(b, " + "); A1; put(b, " * "); A2; put(b, ")"); break;
     case TOP_LERP:
         put(b, "mix("); A2; put(b, ", "); A1; put(b, ", "); A0; put(b, ")"); break;
-    default:                            /* BUMPENVMAP*: P4 (texture modes) */
+    default:                            /* BUMPENVMAP*: the texture modes' */
         put(b, "%s", s ? "cur" : "vDiffuse");
         break;
     }
@@ -508,12 +504,9 @@ size_t hle_ff_ps_glsl(const HleFfPsKey *k, char *buf, size_t cap)
         put(&b, HLE_WBUF_IN_GLSL);
     }
     put(&b, "layout(location = 0) out vec4 oColor;\n" HLE_NVPROJ_GLSL);
-    if (k->sblend || (k->fbfetch & ~HLE_FB_ZEQ)) {
+    if (k->sblend || k->fbfetch) {
         put(&b, "layout(input_attachment_index = 0, set = 2, binding = 0) "
                 "uniform subpassInput uFb;\n");
-    }
-    if (k->fbfetch & HLE_FB_ZEQ) {
-        put(&b, HLE_ZEQ_DECL_GLSL);
     }
     put(&b, "void main() {\n  vec4 cur = vDiffuse, tmp = vec4(0.0), r;\n");
     if (k->wbuf) {
@@ -588,9 +581,6 @@ size_t hle_ff_ps_glsl(const HleFfPsKey *k, char *buf, size_t cap)
     if (k->alpha_test && k->alpha_func < 8) {
         put(&b, "  { float a = cur.a, r = pc.alpha_ref; if (!(%s)) discard; }\n",
             k_cmp[k->alpha_func]);
-    }
-    if (k->fbfetch & HLE_FB_ZEQ) {
-        put(&b, "%s", HLE_ZEQ_TEST_GLSL(k->fbfetch));
     }
     put(&b, "  oColor = %s;\n", k->out_bgra ? "cur.bgra" : "cur");
     if (k->sblend) {

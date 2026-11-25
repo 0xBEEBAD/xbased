@@ -278,8 +278,8 @@ void nc_irq_post_work(void)
     wake_idle();
 }
 
-/* The emulation paused (the activity paused: the device suspends, another
- * app in front): the guest's CPU stops at its next kernel entry
+/* The emulation paused (the front end's pause, the window minimized): the
+ * guest's CPU stops at its next kernel entry
  * (nc_kernel_pause_point), the devices that run on their own hold off. */
 static bool g_paused;
 /* g_pause_cv (above, on CLOCK_MONOTONIC: init_cv): nc_pause_quiesce's deadline is that clock's */
@@ -306,15 +306,13 @@ static int pause_slot(void)
     return -1;
 }
 
-#if defined(NC_DESKTOP) && !defined(_WIN32)
+#ifndef _WIN32
 void nc_win_thread_name(const char *name); /* compat/linux/linux.c */
 #endif
 
 void nc_pause_register(const char *name)
 {
-#ifdef NC_DESKTOP
     nc_win_thread_name(name);
-#endif
     pthread_once(&g_once, init_cv);
     pthread_mutex_lock(&g_mu);
     if (pause_slot() < 0 && g_npt < PAUSE_THREADS) {

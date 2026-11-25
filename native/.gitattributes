@@ -1,2 +1,0 @@
-# Shell scripts are pushed to Android; keep LF regardless of core.autocrlf.
-* text=auto eol=lf

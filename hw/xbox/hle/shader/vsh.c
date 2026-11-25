@@ -26,7 +26,7 @@ typedef struct Buf {
     bool overflow;
 } Buf;
 
-static void put(Buf *b, const char *fmt, ...)
+static __attribute__((format(printf, 2, 3))) void put(Buf *b, const char *fmt, ...)
 {
     va_list ap;
     va_start(ap, fmt);
@@ -365,9 +365,6 @@ static void tail(Buf *bp, const HleVshKey *k, bool fogw)
     put(&b, "  gl_Position = vec4(ndc * w, %s, w);\n", k->wbuf || k->zfree ? "0.0" : "zN * w");
     if (k->zclamp && g_hle_glsl_zclamp) {
         put(&b, HLE_ZCLAMP_GLSL);
-    }
-    if (g_hle_glsl_zw) {
-        put(&b, HLE_ZW_NUDGE_GLSL);
     }
     put(&b, "%s}\n", k->wbuf ? "  vW = w;\n" : "");
     *bp = b;

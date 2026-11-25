@@ -5,7 +5,7 @@
  * each disposition leads to. No guest code runs: the test stands in for the
  * handlers, returning to the dispatcher as they would.
  *
- *   clang -O1 -g -DNC_DESKTOP=1 -I<repo> tests/native/kernel/seh_test.c native/kernel/seh.c -o seh_test
+ *   clang -O1 -g -I<repo> tests/native/kernel/seh_test.c native/kernel/seh.c -o seh_test
  */
 #include "native/kernel/kernel.h"
 

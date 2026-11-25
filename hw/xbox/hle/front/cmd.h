@@ -1,5 +1,5 @@
 /*
- * xbased HLE GPU — front-end -> back-end commands (spec §5.3).
+ * xbased HLE GPU — front-end -> back-end commands.
  * Every record is { HleCmdHdr, payload } padded to 8 bytes.
  */
 #ifndef HW_XBOX_HLE_FRONT_CMD_H
@@ -84,8 +84,8 @@ typedef struct HleCmdStatePart {
  * count goes to the report, not to an index. */
 #define HLE_VIS_NO_INDEX 0xFFFFFFFFu
 
-/* The time stamp HLE reports for a finished test (the P2 constant: the
- * native call returned it under xemu). */
+/* The time stamp HLE reports for a finished test (the constant the native
+ * call returned under xemu). */
 #define HLE_VIS_TIMESTAMP 0x0011223344556677ull
 
 typedef struct HleCmdVis {
@@ -243,7 +243,7 @@ typedef struct HleCmdReadback {
  * (hle_tl_land_swz) */
 #define HLE_RB_PACKED 0xFFFFFFFEu
 
-/* ---- P3 draws ------------------------------------------------------------- */
+/* ---- draws ------------------------------------------------------------------ */
 
 #define HLE_RS_COUNT   166      /* 5659 D3DRS_MAX */
 #define HLE_TSS_STAGES 4
@@ -300,15 +300,13 @@ typedef struct HleCmdDraw {
                                    samples an A8R8G8B8 target of another (HLE_DRAW_ORD_*) */
     uint32_t tex_rect[HLE_TSS_STAGES];  /* a linear stage's own size, its IMAGE_RECT
                                            (width 28:16, height 12:0); 0 for the others */
-    /* vertex programs and declarations (P4, pulled forward) */
+    /* vertex programs and declarations */
     uint64_t vsh;               /* program hash (HLE_OP_VSH); 0 = fixed function */
     uint32_t consts_off;        /* program draws: arena, 192 vec4 constants */
     float zscale;               /* 1 / depth-buffer maximum (programs, W-buffering);
                                    2^-n for the integer formats (HLE_ZNORM_GLSL) */
-    uint32_t guest_vb;          /* read in place from guest RAM (offset = PA): bindings
-                                   (bit i), the FVF stream (HLE_DRAW_GUEST_FVF) */
     uint32_t nbind;             /* > 0: the layout below replaces fvf/vb_off/stride */
-    uint32_t bind_off[HLE_DRAW_MAX_BIND];       /* arena, or PA (guest_vb) */
+    uint32_t bind_off[HLE_DRAW_MAX_BIND];       /* arena */
     uint32_t bind_stride[HLE_DRAW_MAX_BIND];
     uint32_t attr[HLE_DRAW_ATTRS];  /* by location: NV2A format byte | binding << 8 |
                                        offset << 16; format count 0 = unbound */
@@ -324,7 +322,6 @@ typedef struct HleCmdDraw {
                                    far w (W-buffering stores w / wfar); 0 = keep z */
 } HleCmdDraw;
 
-#define HLE_DRAW_GUEST_FVF (1u << 31)
 #define HLE_DRAW_NO_UBO   0xFFFFFFFFu
 #define HLE_DRAW_LIT_DATA (1u << 31)
 /* tex_ord: 32-bit texel byte orders other than A8R8G8B8's (names MSB first) */

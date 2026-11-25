@@ -56,7 +56,5 @@ bool hle_gpl_on(void);
  * one at a time): a new pixel part built by a thread of its own meanwhile. */
 HlePbResult hle_gpl_build(const HleGplDesc *d, bool cache_only, bool side, VkPipeline *out,
                           double *built_ms);
-/* Parts kept, for the log */
-void hle_gpl_counts(unsigned *vi, unsigned *pre, unsigned *fs, unsigned *out);
 
 #endif

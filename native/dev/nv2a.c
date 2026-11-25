@@ -2,7 +2,7 @@
  * xbased native core — NV2A register space (0xFD000000, 16 MiB), first cut.
  *
  * A register file (reads return what was last written) plus the behavior the
- * XDK's D3D needs, added as the frontier shows it:
+ * XDK's D3D needs, added as titles showed it needed:
  *   PMC_BOOT_0      0x000000  chip identification
  *   PMC_INTR_0      0x000100  pending summary (bit 24 PCRTC, 20 PTIMER), read-only
  *   PMC_INTR_EN_0   0x000140  bit 0: interrupts to the CPU
@@ -23,7 +23,7 @@
  *                   FIFO's CACHE1 DMA_PUT/GET/REF; a DMA_PUT write in
  *                   push-buffer mode kicks the HLE's decoder (hle_pb_kick)
  * Vblank comes from the host clock at 60 Hz. The interrupt goes out on bus
- * level 3. Written from the register map, without the LLE device.
+ * level 3. Written from the register map.
  */
 #include "native/dev/dev.h"
 #include "hw/xbox/hle/host.h"
@@ -36,12 +36,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/system_properties.h>
+#include "native/core/props.h"
 #include "hw/xbox/hle/prop.h"
 #include <time.h>
 #ifdef _WIN32
 #include <windows.h>
-#elif defined(NC_DESKTOP)
+#else
 #include <linux/futex.h>
 #include <sys/syscall.h>
 #include <unistd.h>
@@ -105,11 +105,8 @@ static uint64_t g_last_vblank_ns;     /* when the last vblank came (the raster c
  * frames now and then fell in one refresh and one was never shown (JSRF at
  * 60 fps: one a second). Its phase: half a period from where the presenter
  * picks frames up (nc_dev_nv2a_display_pickup), the most either may jitter
- * before a frame is shown twice and the next never. The presenter's loop is
- * paced by its window's buffer queue, not the vsync: on the RP5 it picked up
- * 1-3 ms before vblanks set VSYNC_LEAD before the vsync, and one ~3 ms late
- * pickup skipped a frame (NGB at 60 fps: one every ~20 s). VSYNC_LEAD is the
- * phase until pickups are seen. */
+ * before a frame is shown twice and the next never. VSYNC_LEAD is the phase
+ * until pickups are seen. */
 static uint64_t g_disp_vsync_ns, g_disp_period_ns;
 /* The display mode's refresh period (nc_dev_nv2a_display_nominal; 0: not
  * known). The vsyncs seen apart from it aren't the panel's: a variable
@@ -966,7 +963,7 @@ static bool uncapped(void)
         cap = e ? atoi(e) : 0;
     }
     if (polls++ % 32 == 0) {
-        char v[PROP_VALUE_MAX] = "";
+        char v[NC_PROP_VALUE_MAX] = "";
         if (hle_prop_get("debug.xbased.uncap", v) > 0) {
             on = atoi(v) != 0;
         }
@@ -1075,7 +1072,6 @@ int64_t hle_host_flip_slot(int64_t want, int64_t every)
  * comes once the last one was handled; the frame rate then follows
  * rendering, as IMMEDIATE swaps do in D3D mode. Titles that count vblanks run fast, as frame-locked ones do
  * there. Returns when the vblank is due: next, or earlier. */
-#ifdef NC_DESKTOP
 /* Windows: the decoder's FLIP_STALL wakes the uncapped vblank thread at once
  * (WakeByAddress on the count) instead of at its next look, up to 250 us
  * later each frame: at 370 fps Conker's vCPU idled waiting for it. */
@@ -1101,7 +1097,6 @@ static void flip_waits(void)
     __atomic_add_fetch(&g_flip_waits, 1, __ATOMIC_RELEASE);
     WakeByAddressAll((void *)&g_flip_waits);
 }
-#endif
 
 /* A frame limit on the display's grid (wait_vblank): the vsync's place a
  * frame waiting at t flips at, the limit's refreshes after the last frame's
@@ -1166,9 +1161,7 @@ static uint64_t wait_vblank(uint64_t next, uint64_t last)
         bool gtimed;
         const bool aligned = cap_grid(&gvs, &gpd, &gat, &gtimed);
         for (uint64_t t = now_ns(); t < next; t = now_ns()) {
-#ifdef NC_DESKTOP
             const uint32_t seen = __atomic_load_n(&g_flip_waits, __ATOMIC_ACQUIRE);
-#endif
             const uint32_t stall = hle_pb_flip_stalls();
             const bool paced = !g_cap_ns || stall == s_stall || t - s_frame_t >= g_cap_ns;
             if (t - last >= EARLY_GAP_NS && hle_pb_flip_waiting() &&
@@ -1202,7 +1195,6 @@ static uint64_t wait_vblank(uint64_t next, uint64_t last)
                 clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, NULL);
                 continue;
             }
-#ifdef NC_DESKTOP
             /* waiting for a stall (not for the guest's handler to take the
              * last vblank: that it is polled for): until the stall, or a ms
              * short of the vblank due (its wait's timeout is in whole ms) */
@@ -1210,7 +1202,6 @@ static uint64_t wait_vblank(uint64_t next, uint64_t last)
                 WaitOnAddress((void *)&g_flip_waits, (void *)&seen, 4, (unsigned)((next - t - 500000) / 1000000));
                 continue;
             }
-#endif
             const uint64_t until = next < t + EARLY_POLL_NS ? next : t + EARLY_POLL_NS;
             const struct timespec ts = {(time_t)(until / 1000000000ull), (long)(until % 1000000000ull)};
             clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, NULL);
@@ -1345,7 +1336,7 @@ void nc_dev_nv2a_init(void)
     g_regs = calloc(1, NV2A_SIZE + 16); /* pages are touched only where the guest writes (a word of slack past the end) */
     nc_wr32(g_regs + NV_PMC_BOOT_0, 0x02A000A1u);
     nc_wr32(g_regs + NV_PFB_CSTATUS, 64u << 20);
-    char v[PROP_VALUE_MAX] = "";
+    char v[NC_PROP_VALUE_MAX] = "";
     hle_prop_get("debug.xbased.nvcensus", v);
     const char *e = getenv("NC_NV2A_CENSUS");
     g_census.on = !strcmp(v, "1") || (e && !strcmp(e, "1"));
@@ -1511,11 +1502,6 @@ uint64_t hle_host_vblank_count(void)
     return __atomic_load_n(&g_vblanks, __ATOMIC_RELAXED);
 }
 
-uint64_t hle_host_vblank_ns(void)
-{
-    return __atomic_load_n(&g_last_vblank_ns, __ATOMIC_ACQUIRE);
-}
-
 /* A flip's vblank, the one its frame is due on screen from: the last one's,
  * or the next one's for a flip in the last quarter of a frame, which on the
  * console is on screen whole from the next scan (a vblank handler's flip
@@ -1617,9 +1603,7 @@ void hle_host_gpu_irq_update(void)
 
 void hle_host_pb_mode(bool on)
 {
-#ifdef NC_DESKTOP
     hle_pb_on_flip_wait(flip_waits);
-#endif
     __atomic_store_n(&g_pbmode, on, __ATOMIC_RELEASE);
     nc_log("xbased-native", "nv2a: push-buffer mode %s", on ? "on" : "off");
 }

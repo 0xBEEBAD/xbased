@@ -20,10 +20,8 @@
 #include "hw/xbox/hle/hle.h"
 #include "hw/xbox/hle/vk/vkdev.h"
 
-#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
-#include <sys/system_properties.h>
+#include "native/core/props.h"
 #include "hw/xbox/hle/prop.h"
-#endif
 
 void hle_draw_ibuf_lost(void);
 
@@ -164,12 +162,10 @@ static bool batch_wanted(void)
     if (e) {
         return atoi(e) != 0;
     }
-#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
-    char v[PROP_VALUE_MAX] = "";
+    char v[NC_PROP_VALUE_MAX] = "";
     if (hle_prop_get("debug.xbased.batch", v) > 0 && v[0]) {
         return atoi(v) != 0;
     }
-#endif
     return true;
 }
 

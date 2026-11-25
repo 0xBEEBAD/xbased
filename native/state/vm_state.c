@@ -92,7 +92,7 @@ static void *ram_part(void *arg)
 }
 
 /* The blocks are deflated in parts, one a thread, while the guest waits:
- * on one, they were ~1.05 s of Halo 2's 1.2 s save (the Odin). As many
+ * on one, they were most of Halo 2's save. As many
  * parts as the CPU has threads, 4 to 16 (#401: 4 before); the parts' runs
  * one after another are the same bytes whatever their number. */
 #define RAM_PARTS 16

@@ -9,7 +9,7 @@
  * -32767..32767), times from the first report; "60f:a:2" counts frames
  * instead (frame 60, held for 2: the HLE GPU's swaps in this process, after
  * a savestate's load the frames since it), the same each run. "@path" reads
- * it from a file (debug.xbased.env holds 91 characters).
+ * it from a file (a long script).
  */
 #include "native/dev/usb.h"
 #include "native/core/irq.h"

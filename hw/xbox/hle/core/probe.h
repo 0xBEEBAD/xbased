@@ -4,8 +4,7 @@
  * XBASED_HLE_PROBE="va[:n],va[:n]..." (hex VAs, at most 8; n default 16):
  * each time execution reaches va, the registers and the top eight stack
  * words are logged (xbased-hle-probe) for the first n times and every
- * 1000th after, and the title's code runs on (set it through
- * debug.xbased.env).
+ * 1000th after, and the title's code runs on.
  */
 #ifndef HW_XBOX_HLE_CORE_PROBE_H
 #define HW_XBOX_HLE_CORE_PROBE_H

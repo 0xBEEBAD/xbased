@@ -500,11 +500,6 @@ void ui_shutdown(void)
     memset(&U, 0, sizeof(U));
 }
 
-SDL_Renderer *ui_renderer(void)
-{
-    return U.r;
-}
-
 void ui_begin(void)
 {
     if (U.ov) {

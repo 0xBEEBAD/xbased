@@ -1,7 +1,6 @@
 /*
  * xbased HLE GPU — NV2A vertex program (XDK xvs microcode) -> GLSL 4.50
- * (spec §5.8; pure). Decoding uses subprojects/nv2a_vsh_cpu; the GLSL is
- * HLE's own (independent of the LLE render path).
+ * (pure). Decoding uses subprojects/nv2a_vsh_cpu; the GLSL is xbased's own.
  *
  * Interface (shared with vk/draw.c and the pixel generators):
  * - inputs: layout(location = N) in vN_in for each bit of in_mask (vec4;

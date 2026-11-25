@@ -1,10 +1,9 @@
 # xbased native core on Windows x64 (MinGW-w64 clang, MSYS2 CLANG64).
 #
-# No FEX: the guest CPU is cpu/cpu_x86.cpp, which translates the title's
-# x86-32 code to x86-64 with Zydis (its decoder and encoder), from
-# NC_DEPS/zydis (v4.1.1). xxhash comes from NC_DEPS/xxhash (v0.8.3), the
-# header FEX's copy is on Android. SDL3 is added here, before the APU and the
-# front end link it.
+# The guest CPU is cpu/cpu_x86.cpp, which translates the title's x86-32
+# code to x86-64 with Zydis (its decoder and encoder), from NC_DEPS/zydis.
+# xxhash comes from NC_DEPS/xxhash. SDL3 is added here, before the APU and
+# the front end link it.
 set(NC_DEPS "${CMAKE_CURRENT_LIST_DIR}/../../../deps" CACHE PATH "native core third-party sources (tools/fetch_deps.sh)")
 
 set(ZYDIS_BUILD_SHARED_LIB OFF CACHE BOOL "" FORCE)
@@ -24,7 +23,7 @@ set(NC_XXHASH_DIR "${NC_DEPS}/xxhash")
 # code adds no base to guest addresses. Pointer arithmetic on that null base
 # is the core's everyday business: no optimization may assume otherwise.
 add_compile_options(-fno-delete-null-pointer-checks -msse4.1 -mpopcnt -g1)
-add_compile_definitions(_GNU_SOURCE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00 NC_DESKTOP=1)
+add_compile_definitions(_GNU_SOURCE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00)
 add_link_options(-Wl,--high-entropy-va -Wl,--dynamicbase -static)
 # POSIX headers the core includes that MinGW doesn't have (compat/win), for
 # the core's own targets only (nc_win_compat, at the end of CMakeLists.txt):

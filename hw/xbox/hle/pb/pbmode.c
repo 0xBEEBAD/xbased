@@ -16,10 +16,8 @@
 #include "hw/xbox/hle/vk/back.h"
 #include "hw/xbox/hle/vk/display.h"
 
-#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
-#include <sys/system_properties.h>
+#include "native/core/props.h"
 #include <time.h>
-#endif
 
 /* The NV2A's channel-0 FIFO registers and its instance memory. */
 #define NV_PFIFO_RAMHT               0x002210u  /* base 8:4 (4 KiB units), size 17:16 */
@@ -460,14 +458,12 @@ static __attribute__((unused)) void pblog_poll(void)
         const char *e = getenv("XBASED_HLE_PBLOG");
         g_pblog = e ? atoi(e) : 0;
     }
-#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
     static HleProp prop;
     static unsigned polls;
-    char v[PROP_VALUE_MAX];
+    char v[NC_PROP_VALUE_MAX];
     if ((polls++ & 255) == 0 && hle_prop_new(&prop, "debug.xbased.pblog", v)) {
         g_pblog = atoi(v);
     }
-#endif
 }
 
 static inline unsigned pblog_left(void)
@@ -1280,7 +1276,7 @@ static void scout_report(uint32_t v)
  * a frame), is noted as the words it will write. Read before the decoder
  * made it, the JUMP went back to the buffer's last run and the scout round
  * old commands to its budget at most PUTs: a third of Riddick's guest
- * thread on the RP5. */
+ * thread. */
 static void scout_blit(unsigned subch, uint32_t size)
 {
     static const uint8_t k_bpp[16] = { 0, 1, 2, 2, 2, 2, 4, 4, 4, 4, 4, 4 };
@@ -1896,37 +1892,6 @@ void hle_pb_get(void)
     g_fl.synced = false;
 }
 
-/* After a pass: up to ~200 us waiting for the next kick in WFE on the kick
- * count (hle_pb_kick's increment clears the exclusive monitor; interrupts
- * and the timer event stream bound each WFE), before sleeping on the
- * semaphore. A software trap's round trip is three guest writes (FIFO off,
- * INTR cleared, FIFO on), each a kick: asleep, each cost the guest a futex
- * wake and the decoder a wake-up before it went on, and Crimson Sea traps
- * ~5900 times a second. */
-static bool kick_wait_brief(uint32_t seen)
-{
-#if defined(__aarch64__)
-    uint64_t f, t0, t;
-    __asm__ volatile("mrs %0, cntfrq_el0" : "=r"(f));
-    __asm__ volatile("mrs %0, cntvct_el0" : "=r"(t0));
-    for (;;) {
-        uint32_t k;
-        __asm__ volatile("ldaxr %w0, [%1]" : "=r"(k) : "r"(&g_pb.kicks) : "memory");
-        if (k != seen || g_pb.stop) {
-            return true;
-        }
-        __asm__ volatile("wfe" ::: "memory");
-        __asm__ volatile("mrs %0, cntvct_el0" : "=r"(t));
-        if (t - t0 > f / 5000) {
-            return false;
-        }
-    }
-#else
-    (void)seen;
-    return false;
-#endif
-}
-
 /* Savestates (hle_pb_park): the decoder stops between passes, its state
  * whole: everything it took is in the GPU's hands, the GPU done with it and
  * the colour targets it drew back in guest memory (hle_pbd_park). */
@@ -2091,17 +2056,13 @@ static void *decode_thread(void *opaque)
             hle_sem_wait(&g_pb.kick);
         }
         hle_hitch_leave(pa);
-        while (!g_pb.stop) {
+        if (!g_pb.stop) {
             /* a pass reads the registers fresh: it covers every kick before it */
             while (hle_sem_trywait(&g_pb.kick)) {
             }
-            const uint32_t seen = __atomic_load_n(&g_pb.kicks, __ATOMIC_ACQUIRE);
             consume();
             if (park_due()) {
                 park();
-            }
-            if (!kick_wait_brief(seen)) {
-                break;
             }
         }
     }
@@ -2195,16 +2156,14 @@ void hle_pb_diag(void)
         g_pb.dumped = true;                 /* once a run */
         hle_host_gpu_trace_dump("flip stall over 100 ms", g_pb.flip_mark);
     }
-#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
     {   /* debug: a new value of debug.xbased.pbtrace dumps the last GPU events */
         static HleProp prop;
-        char v[PROP_VALUE_MAX];
+        char v[NC_PROP_VALUE_MAX];
         if (hle_prop_new(&prop, "debug.xbased.pbtrace", v)) {
             uint32_t now = hle_host_gpu_trace_mark();
             hle_host_gpu_trace_dump("on demand", now > 2000 ? now - 2000 + 150 : 0);
         }
     }
-#endif
     static uint32_t prev[8][PB_METHODS];
     static uint64_t prev_words, prev_heads;
     static uint32_t prev_kicks;
@@ -2242,8 +2201,8 @@ void hle_pb_diag(void)
     uint64_t vis_tests, vis_kicks;
     hle_pbd_vis_counts(&vis_tests, &vis_kicks);
     const HleDispStats ds = hle_disp_stats();
-    uint64_t vb_place, vb_copied, bnd_kicks, unindexed;
-    hle_pbd_vb_counts(&vb_place, &vb_copied, &bnd_kicks, &unindexed);
+    uint64_t vb_copied, bnd_kicks, unindexed;
+    hle_pbd_vb_counts(&vb_copied, &bnd_kicks, &unindexed);
     char wp[64] = "";
     {
         uint32_t pg[4];
@@ -2289,8 +2248,8 @@ void hle_pb_diag(void)
             "swaps %llu draws %llu ff %llu skipped %llu (%s) textures %llu rt uploads %llu blits %llu "
             "m2mf %llu copies "
             "skipped %llu vis %llu (kicks %llu) overlays %llu repeats %llu const reuses %llu "
-            "vb in place %llu copied %llu (barrier kicks %llu) unindexed %llu first writes %llu (armed %llu, waits %llu, "
-            "%.0f ms, pages%s) cache cleans %llu pages writebacks %llu "
+            "vb copied %llu (barrier kicks %llu) unindexed %llu first writes %llu (armed %llu, waits %llu, "
+            "%.0f ms, pages%s) writebacks %llu "
             "display written %llu presented %llu dropped %llu waits %llu%s | top%s", kicks - prev_kicks,
             (unsigned long long)(words - prev_words), (unsigned long long)(heads - prev_heads),
             (unsigned long long)total, g_pb.faults, g_pb.last_get,
@@ -2306,11 +2265,10 @@ void hle_pb_diag(void)
             (unsigned long long)vis_tests, (unsigned long long)vis_kicks,
             (unsigned long long)hle_pbd_overlays(),
             (unsigned long long)hle_pbd_display_repeats(),
-            (unsigned long long)hle_pbd_const_reuses(), (unsigned long long)vb_place,
+            (unsigned long long)hle_pbd_const_reuses(),
             (unsigned long long)vb_copied, (unsigned long long)bnd_kicks, (unsigned long long)unindexed,
             (unsigned long long)hle_barrier_stats().traps, (unsigned long long)hle_barrier_stats().armed,
             (unsigned long long)hle_barrier_stats().waits, hle_barrier_stats().wait_ns / 1e6, wp,
-            (unsigned long long)hle_barrier_stats().cleaned,
             (unsigned long long)hle_pbd_writebacks(), (unsigned long long)ds.written,
             (unsigned long long)ds.presented, (unsigned long long)ds.dropped,
             (unsigned long long)ds.write_waits, state, buf);

@@ -127,9 +127,9 @@ bool nc_option(NcOptions *o, const char *arg)
     } else if ((v = value(arg, "langfixed="))) {
         nc_kernel_set_language_fixed(atoi(v) != 0);     /* the game's own: kept on any disc */
     } else if ((v = value(arg, "clock="))) {
-        nc_kernel_set_clock(strtoll(v, NULL, 10));  /* none: the phone's time */
+        nc_kernel_set_clock(strtoll(v, NULL, 10));  /* none: the computer's time */
     } else if ((v = value(arg, "tz="))) {
-        nc_kernel_set_time_zone(atoi(v));           /* none: the phone's zone */
+        nc_kernel_set_time_zone(atoi(v));           /* none: the computer's zone */
     } else {
         return false;
     }

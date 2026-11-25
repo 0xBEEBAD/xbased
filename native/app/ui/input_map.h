@@ -105,12 +105,10 @@ void im_stick(float x, float y, float deadzone, float antidz, float range, bool 
 /* A trigger's travel (0..1) as the title gets it, 0..1: nothing up to the
  * dead zone, full from full on, in proportion between. */
 float im_trigger(float a, float deadzone, float full);
-/* Player p's state from its keyboard keys (keys: SDL_GetKeyboardState) and gamepad. */
-void im_read(const ImMap *m, int p, const bool *keys, SDL_Gamepad *pad, ImPad *out);
 
 /* The mouse held by the game's window (win_main.c): its moves (pixels,
  * raw), and its buttons (SDL_BUTTON_MASK) as they are now; held false lets
- * them go (the stick back to the centre, the buttons up). im_read gives
+ * them go (the stick back to the centre, the buttons up). im_read_mouse gives
  * them to the player it's called with mouse true for: the moves since its
  * last read as a speed, the stick pushed in proportion. */
 void im_mouse_move(float dx, float dy);

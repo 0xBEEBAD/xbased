@@ -7,8 +7,7 @@
  * which reaches the core as a system op; the kernel reads the arguments for
  * the export's calling convention, runs the implementation and returns to the
  * caller as `ret` would. Data exports are variables in the same area. Until
- * a function is implemented, a call to it stops the guest and reports it
- * (the frontier).
+ * a function is implemented, a call to it stops the guest and reports it.
  */
 #ifndef NATIVE_KERNEL_KERNEL_H
 #define NATIVE_KERNEL_KERNEL_H
@@ -468,11 +467,11 @@ void nc_kernel_set_audio(bool surround);
 void nc_kernel_set_pal60(bool on);
 
 /* The console's clock and time zone, before the title starts. ke.c: its
- * time at boot is the phone's (CLOCK_REALTIME) moved by offset_ms, the
- * distance the settings set it from the phone's (0: the phone's time); it
+ * time at boot is the computer's (CLOCK_REALTIME) moved by offset_ms, the
+ * distance the settings set it from the computer's (0: the computer's time); it
  * runs with the guest's time from there, and a savestate goes on from its
  * own. ex.c: the EEPROM's time zone, which XAPI's local time comes from: the
- * phone's offset from UTC, minutes east. */
+ * computer's offset from UTC, minutes east. */
 void nc_kernel_set_clock(int64_t offset_ms);
 void nc_kernel_set_time_zone(int minutes_east);
 void nc_kernel_apu_spin(NcKernel *k, NcFrame *f);
@@ -576,7 +575,7 @@ unsigned nc_ke_held(uint64_t *out_ns, uint64_t *max_ns);
  * wait's deadline): later by the time the emulation was paused or held;
  * while the time stands still, as if it went on now. */
 uint64_t nc_ke_host_ns(uint64_t guest_ns);
-/* The activity paused or resumed (NativeCoreActivity): see nc_pause_set. */
+/* The front end paused or resumed the emulation: see nc_pause_set. */
 void nc_kernel_set_paused(NcKernel *k, bool on);
 #ifdef XBASED_DEVCTL
 /* (dev builds) the running thread's frame while the guest's CPU waits paused

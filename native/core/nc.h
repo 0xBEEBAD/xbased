@@ -1,10 +1,9 @@
 /*
  * xbased native core — common definitions.
  *
- * The native core runs an Xbox title without QEMU: FEXCore (fork, branch
- * xbased) executes the 32-bit guest behind a guest memory base, and the Xbox
- * kernel is reimplemented in native/kernel. See
- * docs/superpowers/plans/2026-10-12-native-core-00-roadmap.md.
+ * The native core runs an Xbox title: the translator (native/cpu) runs the
+ * 32-bit guest code as x86-64 code, the guest's memory at host address 0,
+ * and the Xbox kernel is reimplemented in native/kernel.
  */
 #ifndef NATIVE_CORE_NC_H
 #define NATIVE_CORE_NC_H
@@ -21,7 +20,7 @@ extern "C" {
 
 #define NC_PAGE 4096u
 
-/* Log line to stderr and the Android log under the given tag. */
+/* Log line under the given tag (log.c). */
 void nc_log(const char *tag, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
 /* A report line ("tag: text\n") to fd, or with fd < 0 to the log (the app's
  * on-demand dumps). */

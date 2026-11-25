@@ -42,7 +42,7 @@ static void check_rect(uint32_t w, uint32_t h, uint32_t bpp, const HleXgRect *r,
 
 static void test_rects(void)
 {
-    check_rect(64, 64, 4, NULL, 0, 0);              /* NEON 4x4 path on arm64 */
+    check_rect(64, 64, 4, NULL, 0, 0);              /* the 4x4 block path */
     check_rect(32, 32, 2, NULL, 0, 0);
     check_rect(16, 8, 1, NULL, 0, 0);
     check_rect(128, 1, 4, NULL, 0, 0);              /* 1D */
@@ -52,7 +52,7 @@ static void test_rects(void)
     check_rect(64, 64, 4, &r4, 8, 12);              /* aligned sub-rect */
 }
 
-/* The fast unswizzle (NEON blocks on arm64) and the P8 one against texels
+/* The fast unswizzle (4x4 blocks) and the P8 one against texels
  * placed one by one, into a destination wider than the rect. */
 static uint8_t big_fast[1 << 17], big_ref[1 << 17];
 

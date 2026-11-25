@@ -86,4 +86,7 @@ distributions.
 | CMake option | Default | Meaning |
 | --- | --- | --- |
 | `NC_DEPS` | `../deps` | where the third-party sources are |
-| `XBASED_LTO` | `OFF` | link-time optimization |
+| `XBASED_LTO` | `ON` | ThinLTO in Release builds |
+| `XBASED_DEVCTL` | `OFF` | Windows: the development tools' control of a run (never in a release) |
+| `XBASED_DIAG` | `OFF` | the run's statistics and traces, for investigating a game (never in a release) |
+| `XBASED_CPU_DIAG` | `OFF` | the translator's diagnostics (never in a release) |

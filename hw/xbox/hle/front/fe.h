@@ -19,7 +19,7 @@ void hle_fe_commit(void);
  * (HLE_OP_STATE_PART). Reserved, not committed (the draw after it is).
  * Returns the runs sent. */
 unsigned hle_fe_state(const HleCmdState *st, HleCmdState *last, bool *sent);
-/* Next submission value (GPU time, spec §5.12). Monotonic. */
+/* Next submission value (GPU time). Monotonic. */
 uint64_t hle_fe_next_value(void);
 uint64_t hle_fe_last_value(void);
 

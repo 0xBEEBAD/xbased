@@ -31,7 +31,6 @@ typedef struct Snap {
     int64_t acc[HLE_HT_N][HLE_ACT_N];   /* in-progress spans included */
     uint32_t n[HLE_HT_N][HLE_ACT_N];
     uint64_t draws, swaps, vblanks, tl_sub, tl_done;
-    uint64_t dvd_ops, dvd_bytes, dvd_ns;
     unsigned jit;
     int64_t cpu_ns[HLE_HT_N];
 } Snap;
@@ -39,7 +38,7 @@ typedef struct Snap {
 typedef struct Eip {
     uint32_t eip[EIP_SLOTS], cnt[EIP_SLOTS];
     uint32_t n, halted;
-    uint32_t host_jit, host_call;       /* host code samples: FEX / kernel calls */
+    uint32_t host_jit, host_call;       /* host code samples: the translator / kernel calls */
 } Eip;
 
 typedef struct Last {
@@ -156,9 +155,6 @@ static void snap_take(Snap *s)
     s->vblanks = hle_host_vblank_count();
     s->tl_sub = hle_tl_submitted();
     s->tl_done = hle_tl_completed();
-    if (!hle_host_disc_stats(&s->dvd_ops, &s->dvd_bytes, &s->dvd_ns)) {
-        s->dvd_ops = s->dvd_bytes = s->dvd_ns = 0;
-    }
     s->jit = hle_host_code_flushes();
 }
 
@@ -271,8 +267,6 @@ static void explain(const Snap *a, const Snap *b, const Eip *e, double w, char *
     unsigned ncomp = b->n[HLE_HT_RENDER][HLE_ACT_COMPILE] - a->n[HLE_HT_RENDER][HLE_ACT_COMPILE];
     double vcpu = (b->cpu_ns[HLE_HT_VCPU] - a->cpu_ns[HLE_HT_VCPU]) / 1e6;
     double rcpu = (b->cpu_ns[HLE_HT_RENDER] - a->cpu_ns[HLE_HT_RENDER]) / 1e6;
-    unsigned dops = (unsigned)(b->dvd_ops - a->dvd_ops);
-    double dmb = (b->dvd_bytes - a->dvd_bytes) / 1048576.0, dms = (b->dvd_ns - a->dvd_ns) / 1e6;
     unsigned jit = b->jit - a->jit;
     bool gpu_stuck = b->tl_done == a->tl_done && a->tl_sub > a->tl_done;
     double halted = e->n ? 100.0 * e->halted / e->n : -1.0;
@@ -298,8 +292,6 @@ static void explain(const Snap *a, const Snap *b, const Eip *e, double w, char *
         snprintf(r, rn, "decoder waited %.0f ms on the guest's GPU interrupt handler", dtrap);
     } else if (dcpu >= 0.6 * w && didle < 0.2 * w) {
         snprintf(r, rn, "decoder busy: %.0f ms CPU decoding the push buffer", dcpu);
-    } else if (dops && (dms >= 0.25 * w || (halted >= 40.0))) {
-        snprintf(r, rn, "disc reads: %u, %.1f MB, %.0f ms", dops, dmb, dms);
     } else if (jit) {
         snprintf(r, rn, "JIT cache flush (%u)", jit);
     } else if (halted >= 50.0) {
@@ -307,7 +299,7 @@ static void explain(const Snap *a, const Snap *b, const Eip *e, double w, char *
     } else if (vcpu > 0 && vcpu < 0.5 * w) {
         snprintf(r, rn, "vCPU starved: %.0f ms CPU of %.0f (host)", vcpu, w);
     } else if (e->n >= 8 && e->host_jit * 100 >= 40u * e->n) {
-        snprintf(r, rn, "JIT compiling: %u%% of the vCPU in FEX", 100 * e->host_jit / e->n);
+        snprintf(r, rn, "JIT compiling: %u%% of the vCPU in the translator", 100 * e->host_jit / e->n);
     } else if (e0) {
         snprintf(r, rn, "%s: %s %08x (%u%%)", is_host(e0) ? "vCPU in host code" : "guest CPU-bound",
                  region(e0), shown(e0), e->n ? 100 * c0 / e->n : 0);
@@ -318,15 +310,15 @@ static void explain(const Snap *a, const Snap *b, const Eip *e, double w, char *
              "vCPU cpu %.0f ms halted %.0f%% | render cpu %.0f run %.0f idle %.0f "
              "compile %.0f (%u) submit %.0f (%u) gpu %.0f display %.0f | "
              "GPU %llu/%llu, last done %.0f ms ago | swaps %llu vblanks %llu draws %llu "
-             "| dvd %u ops %.1f MB %.0f ms | jit %u | eip %08x(%s) %u, "
-             "%08x %u, %08x %u of %u, host: FEX %u kernel %u | decoder cpu %.0f idle %.0f "
+             "| jit %u | eip %08x(%s) %u, "
+             "%08x %u, %08x %u of %u, host: translator %u kernel %u | decoder cpu %.0f idle %.0f "
              "flip %.0f trap %.0f ring %.0f arena %.0f gpu %.0f",
              vcpu, halted, rcpu, rrun, idle, comp, ncomp, sub,
              b->n[HLE_HT_RENDER][HLE_ACT_SUBMIT] - a->n[HLE_HT_RENDER][HLE_ACT_SUBMIT], rgpu,
              disp, (unsigned long long)b->tl_done, (unsigned long long)b->tl_sub, since_done,
              (unsigned long long)(b->swaps - a->swaps),
              (unsigned long long)(b->vblanks - a->vblanks),
-             (unsigned long long)(b->draws - a->draws), dops, dmb, dms, jit, shown(e0),
+             (unsigned long long)(b->draws - a->draws), jit, shown(e0),
              region(e0), c0, shown(e1), c1, shown(e2), c2, e->n, e->host_jit, e->host_call,
              dcpu, didle, dflip, dtrap, dring, darena, dgpu);
 }
@@ -786,42 +778,3 @@ void hle_hitch_frame(uint32_t id, int stage)
 
 /* ---- overlay ------------------------------------------------------------------- */
 
-static void ago(char *b, size_t n, int64_t us)
-{
-    int64_t s = us / 1000000;
-    if (s < 60) {
-        snprintf(b, n, "%llds", (long long)s);
-    } else if (s < 3600) {
-        snprintf(b, n, "%lldm%02llds", (long long)(s / 60), (long long)(s % 60));
-    } else {
-        snprintf(b, n, "%lldh%02lldm", (long long)(s / 3600), (long long)(s / 60 % 60));
-    }
-}
-
-bool hle_hitch_overlay(char *buf, size_t n)
-{
-    if (!g_hitch_on || !n) {
-        return false;
-    }
-    int64_t now = g_get_monotonic_time();
-    char a[24];
-    size_t o = 0;
-    hle_mutex_lock(&g_h.mx);
-    o += snprintf(buf + o, n - o, "stutters %u  |  hangs %u  |  dropped %u", g_h.stutters,
-                  g_h.hangs, g_h.dropped);
-    if (g_h.live && o < n) {
-        double el = t2ms(hle_prof_now() - g_h.win.t) / 1000.0;
-        o += snprintf(buf + o, n - o, "\nHANG NOW %.1fs: %s", el, g_h.live_reason);
-    } else if (g_h.last_hang.valid && o < n) {
-        ago(a, sizeof(a), now - g_h.last_hang.start_us);
-        o += snprintf(buf + o, n - o, "\nlast hang %.2fs, %s ago: %s", g_h.last_hang.ms / 1000.0,
-                      a, g_h.last_hang.reason);
-    }
-    if (g_h.last_stutter.valid && o < n) {
-        ago(a, sizeof(a), now - g_h.last_stutter.start_us);
-        o += snprintf(buf + o, n - o, "\nlast stutter %.0fms, %s ago: %s", g_h.last_stutter.ms,
-                      a, g_h.last_stutter.reason);
-    }
-    hle_mutex_unlock(&g_h.mx);
-    return true;
-}

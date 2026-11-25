@@ -1,105 +1,18 @@
 /*
- * xbased HLE GPU — guest RAM import (AHB) and upload-arena buffer.
+ * xbased HLE GPU — the upload arena and the readback landing buffer (guest
+ * RAM is copied in and out, never imported).
  */
 #include "hw/xbox/hle/base.h"
 
-#ifdef __ANDROID__
-#include <android/hardware_buffer.h>
-#endif
 #include "hw/xbox/hle/hle.h"
 #include "hw/xbox/hle/mem/guestmem.h"
-#include "hw/xbox/hle/uma/uma.h"
 #include "hw/xbox/hle/vk/guest_ram.h"
 
-HleVkGuestRam g_hram;
 HleVkArena g_harena;
 HleVkArena g_hland;
 bool g_hland_coherent;
 
 #define T (g_hvk.t)
-
-#ifdef __ANDROID__
-static bool import(AHardwareBuffer *ahb, bool bda)
-{
-    VkAndroidHardwareBufferPropertiesANDROID props = {
-        .sType = VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_PROPERTIES_ANDROID };
-    if (!g_hvk.get_ahb_props ||
-        g_hvk.get_ahb_props(g_hvk.dev, ahb, &props) != VK_SUCCESS) {
-        return false;
-    }
-    VkExternalMemoryBufferCreateInfo ext = {
-        .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO,
-        .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID };
-    VkBufferCreateInfo bci = {
-        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .pNext = &ext,
-        .size = g_hram.size,
-        .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
-                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                 VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT |
-                 VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-                 (bda ? VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT : 0),
-        .sharingMode = VK_SHARING_MODE_EXCLUSIVE };
-    if (T.vkCreateBuffer(g_hvk.dev, &bci, NULL, &g_hram.buf) != VK_SUCCESS) {
-        return false;
-    }
-    /* cached and coherent where the import allows it: the native core's RAM
-     * is CPU-cached (uma.c hle_uma_ram_fd). The driver doesn't make the GPU
-     * snoop an imported buffer through this type: the barrier cleans the
-     * CPU's lines over what the GPU uses in place (mem/barrier.c) */
-    int mt = hle_vk_memtype(props.memoryTypeBits,
-                            VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 0);
-    if (mt < 0) {
-        mt = hle_vk_memtype(props.memoryTypeBits, 0, 0);
-    }
-    VkMemoryDedicatedAllocateInfo ded = {
-        .sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO, .buffer = g_hram.buf };
-    VkImportAndroidHardwareBufferInfoANDROID imp = {
-        .sType = VK_STRUCTURE_TYPE_IMPORT_ANDROID_HARDWARE_BUFFER_INFO_ANDROID,
-        .pNext = &ded, .buffer = ahb };
-    VkMemoryAllocateFlagsInfo fl = {
-        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO, .pNext = &imp,
-        .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT };
-    VkMemoryAllocateInfo mai = {
-        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-        .pNext = bda ? (const void *)&fl : (const void *)&imp,
-        .allocationSize = props.allocationSize, .memoryTypeIndex = (uint32_t)mt };
-    if (mt < 0 || T.vkAllocateMemory(g_hvk.dev, &mai, NULL, &g_hram.mem) != VK_SUCCESS) {
-        T.vkDestroyBuffer(g_hvk.dev, g_hram.buf, NULL);
-        g_hram.buf = VK_NULL_HANDLE;
-        return false;
-    }
-    T.vkBindBufferMemory(g_hvk.dev, g_hram.buf, g_hram.mem, 0);
-    if (bda) {
-        VkBufferDeviceAddressInfo ai = {
-            .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = g_hram.buf };
-        g_hram.bda = T.vkGetBufferDeviceAddress(g_hvk.dev, &ai);
-    }
-    hle_log("xbased-hle-back", "guest RAM imported zero-copy: %llu MiB memtype %d "
-            "flags 0x%x (of types 0x%x) bda=%s", (unsigned long long)(g_hram.size >> 20), mt,
-            g_hvk.mem.memoryTypes[mt].propertyFlags, props.memoryTypeBits, bda ? "yes" : "no");
-    return true;
-}
-
-#endif
-
-int hle_vk_guest_ram_init(void)
-{
-#ifdef __ANDROID__
-    AHardwareBuffer *ahb = hle_uma_ahb();
-    g_hram.size = hle_ram_size();
-    g_hram.zero_copy = ahb && ((g_hvk.caps.bda && import(ahb, true)) || import(ahb, false));
-#else
-    /* a discrete GPU: guest RAM is copied in (the arena), not imported */
-    void *ahb = NULL;
-    g_hram.size = hle_ram_size();
-    g_hram.zero_copy = false;
-#endif
-    if (!g_hram.zero_copy) {
-        hle_log("xbased-hle-back", "guest RAM not imported (%s): copy fallback",
-                ahb ? "import failed" : "RAM is not an AHB");
-    }
-    return 0;
-}
 
 int hle_vk_arena_init(uint32_t size)
 {
@@ -123,11 +36,9 @@ int hle_vk_arena_init(uint32_t size)
      * held Conker's decoder to 225 fps uncapped, 317 from cached memory.
      * XBASED_HLE_ARENA=vram|sys|cached chooses (comparisons). */
     const char *ae = getenv("XBASED_HLE_ARENA");
-#ifdef NC_DESKTOP
     if (!ae) {
         ae = "cached";
     }
-#endif
     int mt = -1;
     if (ae && !strcmp(ae, "cached")) {
         mt = hle_vk_memtype(req.memoryTypeBits, hv | VK_MEMORY_PROPERTY_HOST_CACHED_BIT, 0);
@@ -153,9 +64,9 @@ int hle_vk_arena_init(uint32_t size)
 
 int hle_vk_land_init(uint32_t size)
 {
-    /* with zero-copy RAM too: rows go straight to guest RAM, but a swizzled
-     * target's texels are swizzled into it on the CPU (pb/pbdraw.c), read
-     * here rather than from the write-combined arena */
+    /* readbacks land here rather than in the write-combined arena (a
+     * swizzled target's texels are swizzled into guest RAM on the CPU,
+     * pb/pbdraw.c) */
     VkBufferCreateInfo bci = {
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = size,
         .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT, .sharingMode = VK_SHARING_MODE_EXCLUSIVE };

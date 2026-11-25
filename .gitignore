@@ -30,4 +30,5 @@ replay_pid*.log
 !/tools/mods/
 !/tools/release/
 !/tools/brand/
+!/tools/db/
 !/tools/fetch_deps.sh

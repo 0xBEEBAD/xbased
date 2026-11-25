@@ -1,5 +1,5 @@
 /*
- * xbased HLE GPU — on-disk shader and pipeline caches (P3 Task 13).
+ * xbased HLE GPU — on-disk shader and pipeline caches.
  * - SPIR-V: <base>/hle_spirv/<title id>.pack, the title's shaders in one file,
  *   each keyed by the GLSL's fnv64 with its length and a second hash so a
  *   collision reads as a miss; legacy.pack, the loose files of before
@@ -17,7 +17,7 @@
  *   with). A pipeline compiled since the last write and lost with the
  *   process is built again by the next start's prebuild (its record,
  *   pipeasync.c, is written apart). One cache for every title (until
- *   1.0.0's) grew to 515 MB on the RP5 over 45 titles: each game held all of
+ *   1.0.0's) grew to 515 MB over 45 titles: each game held all of
  *   it in memory and wrote all of it back.
  */
 #include "hw/xbox/hle/base.h"
@@ -47,7 +47,6 @@ static struct {
 } g_pc;
 
 static void spv_packs_open(void);
-static void spv_packs_close(void);
 
 static uint64_t fnv64(const void *p, size_t n, uint64_t h)
 {
@@ -180,25 +179,6 @@ void hle_pcache_save(bool force)
     }
     g_pc.saved = g_pc.added;
     g_pc.last_save = now;
-}
-
-void hle_pcache_destroy(void)
-{
-    if (g_pc.started) {
-        hle_atomic_set(&g_pc.stop, true);
-        hle_sem_post(&g_pc.go);
-        hle_thread_join(&g_pc.th);
-        g_pc.started = false;
-    }
-    hle_pcache_save(true);
-    if (g_pc.cache) {
-        T.vkDestroyPipelineCache(g_hvk.dev, g_pc.cache, NULL);
-        g_pc.cache = VK_NULL_HANDLE;
-    }
-    spv_packs_close();
-    g_free(g_pc.dir);
-    g_free(g_pc.blob);
-    g_pc.dir = g_pc.blob = NULL;
 }
 
 /* ---- SPIR-V packs ----
@@ -365,18 +345,6 @@ static void pack_add(Pack *p, uint64_t key, uint64_t check, uint32_t src_len, co
     }
 }
 
-static void pack_close(Pack *p)
-{
-    if (p->f) {
-        fclose(p->f);
-    }
-    g_free(p->data);
-    g_free(p->keys);
-    g_free(p->offs);
-    g_free(p->path);
-    memset(p, 0, sizeof(*p));
-}
-
 /* The loose files of before into legacy.pack, once (removed as they go in) */
 static void spv_migrate(const char *dir)
 {
@@ -432,14 +400,6 @@ static void spv_packs_open(void)
     pack_open(&g_title_pack, title);
     hle_log("xbased-hle-pipe", "spirv packs: %s %zu shaders, legacy %zu", title, g_title_pack.n,
             g_legacy_pack.n);
-}
-
-static void spv_packs_close(void)
-{
-    hle_mutex_lock(&g_pack_mx);
-    pack_close(&g_title_pack);
-    pack_close(&g_legacy_pack);
-    hle_mutex_unlock(&g_pack_mx);
 }
 
 /* src's SPIR-V from the packs, or NULL */

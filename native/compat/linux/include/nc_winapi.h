@@ -85,7 +85,6 @@ typedef struct EXCEPTION_POINTERS {
 typedef LONG (*PVECTORED_EXCEPTION_HANDLER)(PEXCEPTION_POINTERS);
 /* seh.c: the handlers, first ones in front; SIGSEGV and SIGBUS go to them */
 PVOID AddVectoredExceptionHandler(ULONG first, PVECTORED_EXCEPTION_HANDLER h);
-ULONG RemoveVectoredExceptionHandler(PVOID h);
 
 /* memory */
 #define MEM_COMMIT 0x1000

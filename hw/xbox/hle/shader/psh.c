@@ -28,7 +28,7 @@ typedef struct Buf {
     const char *half;                   /* the bias mappings' 0.5 (hle_psh_glsl) */
 } Buf;
 
-static void put(Buf *b, const char *fmt, ...)
+static __attribute__((format(printf, 2, 3))) void put(Buf *b, const char *fmt, ...)
 {
     va_list ap;
     va_start(ap, fmt);
@@ -460,7 +460,7 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             "layout(location = 4) in vec4 vTex2;\n"
             "layout(location = 5) in vec4 vTex3i;\n"
             "layout(location = 6) in float vFog;\n"
-            "%s%s%s"
+            "%s%s"
             "layout(location = 0) out vec4 oColor;\n"
             "vec4 col(uint c) { return unpackUnorm4x8(c).zyxw; }\n"
             HLE_NVPROJ_GLSL
@@ -510,10 +510,9 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             "void main() {\n"
             "  vec4 v0 = vDiffuse, v1 = vSpecular;\n"
             "  vec4 vTex3 = %s;\n", interp, interp, k->wbuf ? HLE_WBUF_IN_GLSL : "",
-        (k->fbfetch & ~HLE_FB_ZEQ) || k->sblend ?
+        k->fbfetch || k->sblend ?
             "layout(input_attachment_index = 0, set = 2, binding = 0) "
             "uniform subpassInput uFb;\n" : "",
-        k->fbfetch & HLE_FB_ZEQ ? HLE_ZEQ_DECL_GLSL : "",
         /* a linear texture kept to its own size (ff.h HLE_NVRECT_GLSL): the stage fog.w names */
         k->vol & (HLE_PSH_RECT | HLE_PSH_RECT4) ? HLE_NVRECT_GLSL : "",
         rect_code,
@@ -777,9 +776,6 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
     if (k->alpha_test && k->alpha_func < 8) {
         put(&b, "  { float a = outc.a, r = pc.alpha_ref; if (!(%s)) discard; }\n",
             k_cmp[k->alpha_func]);
-    }
-    if (k->fbfetch & HLE_FB_ZEQ) {
-        put(&b, "%s", HLE_ZEQ_TEST_GLSL(k->fbfetch));
     }
     static const char *const k_dbg[17] = {
         "outc", "t0", "v0", "r0", "vec4(vec3(fogf), 1.0)", "v1", "t3", "vec4(vec3(r0.a), 1.0)",

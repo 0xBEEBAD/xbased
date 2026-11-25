@@ -1,5 +1,5 @@
 /*
- * xbased HLE GPU — fixed-function shader generators (spec §5.8 FF; pure).
+ * xbased HLE GPU — fixed-function shader generators (pure).
  * Keys are built by the back end from the draw state (render/texture-state
  * arrays + FVF); the generators emit GLSL 4.50 for glslang.
  *
@@ -199,7 +199,7 @@ typedef struct HleFfPush {
     "  vec4 fog;\n  uint psc[20];\n  vec4 scr;\n  uvec4 bump;\n"
 #define HLE_PUSH_GLSL \
     "layout(push_constant, std430) uniform Push {\n" HLE_PUSH_MEMBERS_GLSL "} pc;\n"
-/* The same block where the push constants are smaller (Xclipse's 128 bytes):
+/* The same block where the push constants are smaller (128 bytes, Vulkan's minimum):
  * a storage buffer, std430 as well (vk/draw.c, set 3) */
 #define HLE_PUSH_SSBO_GLSL \
     "layout(set = 3, binding = 0, std430) readonly buffer Push {\n" HLE_PUSH_MEMBERS_GLSL "} pc;\n"
@@ -239,13 +239,7 @@ extern bool g_hle_push_ssbo;
     "}\n" \
     "vec2 nvrect(vec2 uv, float e) { return nvrectr(uv, floatBitsToUint(pc.fog.w), e); }\n"
 
-/* Mali (vk/quirks.h HLE_QUIRK_Z_EQ_W, set with g_hle_push_ssbo): a clip-space
- * z equal to w corrupts the depth buffer (PPSSPP's EQUAL_WZ_CORRUPTS_DEPTH,
- * ARMSX2): the vertex shaders end by moving such a vertex a hair inside. */
-extern bool g_hle_glsl_zw;
-#define HLE_ZW_NUDGE_GLSL "  if (gl_Position.z == gl_Position.w) gl_Position.z *= 0.999999;\n"
-
-/* No depthClamp (vk/vkdev.h HleCaps.depth_clamp off: Mali's Bifrost): a
+/* No depthClamp (vk/vkdev.h HleCaps.depth_clamp off): a
  * z-clamped draw's vertices (the key's zclamp) are clamped to the depth range
  * instead, so the near and far planes don't clip them; depth across a
  * primitive that crosses them comes from its clamped corners. */
@@ -253,8 +247,7 @@ extern bool g_hle_glsl_zclamp;
 #define HLE_ZCLAMP_GLSL \
     "  if (gl_Position.w > 0.0) gl_Position.z = clamp(gl_Position.z, 0.0, gl_Position.w);\n"
 
-/* No descriptor indexing (HleCaps.bindless off: Mali's Bifrost, PowerVR's
- * Rogue): a pixel shader's bindless arrays become the draw's own set (vk/draw.c
+/* No descriptor indexing (HleCaps.bindless off): a pixel shader's bindless arrays become the draw's own set (vk/draw.c
  * fixed_bind): sized (each stage's images, then the default sampler and each
  * stage's), indexed without nonuniformEXT (the push block's indices, the same
  * for the whole draw). g_hle_glsl_fixed: hle_glsl_fixed_slots rewrites the
@@ -293,25 +286,6 @@ static inline const char *hle_push_glsl(void)
     HLE_ZNORM_GLSL("wRaw", "wN") \
     "  float wDepth = clamp(wN, 0.0, 1.0);\n"
 #define HLE_WBUF_STORE_GLSL "  gl_FragDepth = wDepth;\n"
-
-/* EQUAL depth passes that do not write (vk/draw.c eq_tol) test LESSEQUAL a
- * step toward the eye, which passes everything in front of the stored depth
- * too: these shaders discard what is more than a few steps in front of it,
- * read as an input attachment (set 2, binding 1). Bits of the keys' fbfetch,
- * by the depth buffer's step: D24, D16. The declaration's input attachment
- * index (HLE_IA_DEPTH) is stripped from the SPIR-V (glsl_compile.c): one
- * without an index reads the depth attachment (local read's default map). */
-#define HLE_FB_ZEQ24 0x20u
-#define HLE_FB_ZEQ16 0x40u
-#define HLE_FB_ZEQ (HLE_FB_ZEQ24 | HLE_FB_ZEQ16)
-#define HLE_IA_DEPTH 7
-#define HLE_ZEQ_DECL_GLSL \
-    "layout(input_attachment_index = 7, set = 2, binding = 1) uniform subpassInput uZ;\n"
-/* after the alpha test (the derivatives' neighbours are still running) */
-#define HLE_ZEQ_TEST_GLSL(fb) \
-    (((fb) & HLE_FB_ZEQ16) ? \
-     "  if (gl_FragCoord.z < subpassLoad(uZ).r - 2.0 / 65535.0) discard;\n" : \
-     "  if (gl_FragCoord.z < subpassLoad(uZ).r - 4.0 / 16777215.0) discard;\n")
 
 /* NV2A's projective texture division: coordinates times 1/q, with 1/0 the
  * largest float and 0 times it 0, so q = 0 projects (0, 0, 0) to 0, never

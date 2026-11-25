@@ -1,7 +1,6 @@
 /*
- * xbased HLE GPU — first-write barrier (spec §4.10; P2 Decision 5): the
- * guest's first store to a page the HLE cleaned waits for the GPU work that
- * reads it.
+ * xbased HLE GPU — first-write barrier: the guest's first store to a page
+ * armed for GPU work waits for that work (a landing, a copy reading it).
  */
 #ifndef HW_XBOX_HLE_MEM_BARRIER_H
 #define HW_XBOX_HLE_MEM_BARRIER_H
@@ -10,28 +9,17 @@
 #include <stdint.h>
 
 void hle_barrier_init(uint64_t ram_size);
-/* GPU work up to `value` reads [pa, pa+len) in place: the first CPU write
- * waits, and the CPU cache lines of its pages written since they were last
- * cleaned go to memory first (the GPU doesn't snoop the CPU's caches over
- * the imported RAM). */
+/* GPU work up to `value` depends on [pa, pa+len): the first CPU write waits. */
 void hle_barrier_arm(uint32_t pa, uint32_t len, uint64_t value);
-/* GPU work up to `value` writes [pa, pa+len) in place (a readback into the
- * imported RAM): as hle_barrier_arm, and the range's CPU cache lines are
- * cleaned and invalidated, so neither a dirty line written back later nor a
- * stale clean one hides what the GPU wrote. */
-void hle_barrier_arm_landing(uint32_t pa, uint32_t len, uint64_t value);
 /* GPU work up to `value` (a landing, a copy that reads the range) has the
  * pages wholly inside [pa, pa+len) wait for it: the first CPU write waits
  * (an overlapped read into them too), their dirty bits kept for the
  * trackers (host.h hle_host_mem_rearm); a page the range shares, never (a
- * neighbour's stores there). gpu: the GPU writes the range in place (its
- * lines cleaned and invalidated). hle_mem_cache_inval: the range's CPU
- * cache lines cleaned and invalidated (after the GPU wrote it). */
-void hle_barrier_arm_keep(uint32_t pa, uint32_t len, uint64_t value, bool gpu);
+ * neighbour's stores there). */
+void hle_barrier_arm_keep(uint32_t pa, uint32_t len, uint64_t value);
 /* ... a copy queued to read [pa, pa+len) when it lands: every page of it
  * waits (no guard covers a copy's source) */
 void hle_barrier_arm_src(uint32_t pa, uint32_t len, uint64_t value);
-void hle_mem_cache_inval(uint32_t pa, uint32_t len);
 /* [pa, pa+len) is older than an image over it, until fill(pa, len) puts the
  * image there (push-buffer mode's frame on screen, which the GPU drew into
  * its own image): the guest's first access to a page of it, a read or a
@@ -79,17 +67,13 @@ void hle_barrier_guard_stats(uint64_t *neighbours, uint64_t *hot);
  * owner's from then on). */
 void hle_barrier_freed(uint32_t pa, uint32_t len);
 uint32_t hle_barrier_frees(uint32_t pa, uint32_t len);
-/* The host, at a guest access to a page without access (hle_barrier_set_stale,
- * a guard; write: a store, or not known): the image in, the access back. */
-void hle_mem_stale_access(uint32_t pa);
 void hle_mem_stale_access_rw(uint32_t pa, bool write);
 /* Guest RAM the host wrote through the RAM view (device models, HLE copies:
- * host.h hle_host_mem_set_dirty): its pages' cache lines are cleaned before
- * the GPU next reads them in place. */
+ * host.h hle_host_mem_set_dirty): counted as its pages' writes. */
 void hle_mem_host_wrote(uint32_t pa, uint32_t len);
 /* Was [pa, pa+len) written by the CPU since the last call (HLE dirty bits,
  * then cleared)? Texture snapshots use it to see writes made without Lock
- * (spec §5.5 "dirty bitmap over the object's range"). True when unknown. */
+ * (a dirty bitmap over the object's range). True when unknown. */
 bool hle_mem_written(uint32_t pa, uint32_t len);
 /* Guest RAM written by the emulated GPU (a copy the decode performs): the
  * next hle_mem_written() over it sees the write. */
@@ -106,15 +90,12 @@ uint64_t hle_mem_wseq_sum(uint32_t pa, uint32_t len, uint32_t *first, uint32_t *
 uint64_t hle_mem_wseq_blocks(uint32_t pa, uint32_t len);
 /* A count of the writes reported anywhere: unchanged, no sum above moved. */
 uint32_t hle_mem_write_epoch(void);
-/* GPU progress source (back end, Task 13). */
+/* GPU progress source (the back end's timeline). */
 void hle_barrier_set_waiter(uint64_t (*completed)(void), void (*wait)(uint64_t));
 /* Before a first write waits for `value`: the producer that may still hold
  * it open closes it (push-buffer mode's decode thread), else the wait could
  * outlast it. NULL: none. */
 void hle_barrier_set_flush(void (*flush)(uint64_t value));
-/* Whether a first write to a page of [pa, pa + len) had to wait for the GPU
- * (the CPU rewrites memory while the GPU still reads it). */
-bool hle_barrier_contended(uint32_t pa, uint32_t len);
 /* Push-buffer mode: [pa, pa + len) was just copied for a draw, and a later
  * draw the decoder hasn't reached may read it again. The guest's first
  * store into those bytes calls catch_up (hle_barrier_set_catch_up) on the
@@ -157,7 +138,6 @@ typedef struct HleBarrierStats {
     uint64_t traps, waits, wait_ns;
     uint64_t armed;                 /* traps on pages armed for GPU reads (else: dirty tracking) */
     uint64_t unarmed;               /* traps with nothing armed: always a bug */
-    uint64_t cleaned;               /* pages whose cache lines went to memory for the GPU */
 } HleBarrierStats;
 HleBarrierStats hle_barrier_stats(void);
 /* debug: the guest RAM pages (PA >> 12) whose first write waited, the last

@@ -89,15 +89,15 @@ static bool title_update(const NcDisc *disc, const char *path, char *out, size_t
         fclose(fp);
     }
     if (!read || !xbe_title(u, sizeof(u), &utid, &uver) || utid != tid || uver < ver) {
-        nc_log("xbased-native-frontier", "title update %s: not this title's newer version (title %08x version %x, "
+        nc_log("xbased-native", "title update %s: not this title's newer version (title %08x version %x, "
                "the disc's %08x %x): the disc's boots", out, read ? utid : 0, read ? uver : 0, tid, ver);
         return false;
     }
-    nc_log("xbased-native-frontier", "title update: %s (version %x, the disc's %x) boots for %s", out, uver, ver, path);
+    nc_log("xbased-native", "title update: %s (version %x, the disc's %x) boots for %s", out, uver, ver, path);
     return true;
 }
 
-/* The title can't start: why, for the activity's dialog (NC_FATAL_BOOT). */
+/* The title can't start: why, for the front end's message (NC_FATAL_BOOT). */
 static bool boot_failed(const char *why)
 {
     nc_hle_set_fatal(NC_FATAL_BOOT, why);
@@ -176,7 +176,7 @@ bool nc_core_boot(NcCore *c, int disc_fd)
     } else if (!g_dashboard && !g_loadstate[0]) {
         return boot_failed("The game's file can't be opened.");
     }
-    /* A relaunch (XLaunchNewImage, NativeCoreActivity starts the core again):
+    /* A relaunch (XLaunchNewImage, the front end starts the core again):
      * the XBE the saved launch data page names, and the page for the title. */
     static uint8_t page[NC_LAUNCH_PAGE];
     bool have_page = false;
@@ -200,7 +200,7 @@ bool nc_core_boot(NcCore *c, int disc_fd)
             snprintf(xbe_path, sizeof(xbe_path), "%s", info.xbe_path);
             snprintf(c->kernel.image_path, sizeof(c->kernel.image_path), "%s", info.xbe_path);
         }
-        nc_log("xbased-native-frontier", "savestate: booting %s for %s", xbe_path, g_loadstate);
+        nc_log("xbased-native", "savestate: booting %s for %s", xbe_path, g_loadstate);
     } else if (g_relaunch) {
         char file[512];
         nc_kernel_relaunch_file(file, sizeof(file));
@@ -212,13 +212,13 @@ bool nc_core_boot(NcCore *c, int disc_fd)
         }
         if (have_page && nc_kernel_launch_xbe(page, xbe_path, sizeof(xbe_path))) {
             snprintf(c->kernel.image_path, sizeof(c->kernel.image_path), "%s", xbe_path);
-            nc_log("xbased-native-frontier", "relaunch: %s (launch type %u)", c->kernel.image_path,
+            nc_log("xbased-native", "relaunch: %s (launch type %u)", c->kernel.image_path,
                    *(const uint32_t *)page);
         } else {
             have_page = false;
             snprintf(xbe_path, sizeof(xbe_path), "%s", g_dashboard ? NC_DASHBOARD_PATH : "\\default.xbe");
             snprintf(c->kernel.image_path, sizeof(c->kernel.image_path), "%s", g_dashboard ? NC_DASHBOARD_PATH : "");
-            nc_log("xbased-native-frontier", "relaunch: no launch data page, booting %s", xbe_path);
+            nc_log("xbased-native", "relaunch: no launch data page, booting %s", xbe_path);
         }
     }
     /* a disc XBE with a title update installed: the update (a savestate's
@@ -296,7 +296,7 @@ bool nc_core_boot(NcCore *c, int disc_fd)
     if (!g_boot) {
         return boot_failed("The emulated CPU couldn't start.");
     }
-    nc_log("xbased-native-frontier", "stage S1 entry %08x, stack %08x-%08x, fs %08x",
+    nc_log("xbased-native", "stage S1 entry %08x, stack %08x-%08x, fs %08x",
            c->xbe.info.entry, g_boot->stack_limit, g_boot->stack_base, c->kernel.kpcr_va);
 
     /* The HLE GPU layer: its hooks come from the title's signature scan. */
@@ -330,16 +330,16 @@ void nc_core_run(NcCore *c)
     nc_cpu_run(c->cpu, start ? start : &g_boot->ctx);
     const NcKernel *k = &c->kernel;
     if (k->stop) {
-        nc_log("xbased-native-frontier", "stop: %s", k->stop_reason);
+        nc_log("xbased-native", "stop: %s", k->stop_reason);
     } else {
-        nc_log("xbased-native-frontier", "stop: guest executed HLT");
+        nc_log("xbased-native", "stop: guest executed HLT");
     }
     unsigned threads = 0;
     for (unsigned i = 0; i < NC_MAX_THREADS; i++) {
         threads += k->threads[i].state != NC_T_FREE;
     }
     const NcKExport *first = nc_kernel_export(k->first_ordinal);
-    nc_log("xbased-native-frontier", "summary stage=%s kernel_calls=%llu first_call=%s threads=%u",
+    nc_log("xbased-native", "summary stage=%s kernel_calls=%llu first_call=%s threads=%u",
            k->first_ordinal ? "S2" : "S1", (unsigned long long)k->calls,
            first ? first->name : "-", threads);
 }
@@ -444,18 +444,15 @@ void nc_core_code_written(uint32_t pa)
 
 /* A fault in translated code the core can't take as the guest's: where the
  * guest was, and what it was doing, before the process goes down with it.
- * Faults elsewhere go on to ART's handlers unreported (its null checks). */
+ * Faults elsewhere are left to the process's own handling, unreported. */
 static bool fault_report(NcCore *c, uintptr_t pc, uint64_t va, const char *what)
 {
-    /* FEX maps a pc outside its code buffer to the vCPU's current EIP, not
-     * 0: every fault in the process took this for the guest's, ART's null
-     * checks on the UI thread too (a Galaxy Tab S9, Orta: the dumps, the UI
-     * thread with them, then an ANR). Only translated code's. */
+    /* only translated code's: a fault elsewhere in the process is not the guest's */
     uint32_t eip;
     if (!nc_cpu_sample_pc(c->cpu, pc, &eip) || !eip) {
         return false;
     }
-    nc_log("xbased-native-frontier", "host fault: %s at guest %08llx, eip %08x (host pc %p)", what,
+    nc_log("xbased-native", "host fault: %s at guest %08llx, eip %08x (host pc %p)", what,
            (unsigned long long)va, eip, (void *)pc);
     nc_kernel_dump_recent(-1);
     nc_kernel_dump_threads(&c->kernel, -1);
@@ -463,7 +460,7 @@ static bool fault_report(NcCore *c, uintptr_t pc, uint64_t va, const char *what)
 }
 
 /* bumped from the fault handlers of any thread (atomically), read by the stats */
-uint64_t g_nc_faults_callret, g_nc_faults_dirty, g_nc_faults_mmio, g_nc_faults_unaligned;
+uint64_t g_nc_faults_dirty, g_nc_faults_mmio;
 
 static struct {
     uint32_t eip, n;
@@ -505,36 +502,12 @@ unsigned nc_mmio_fault_top(uint32_t *eips, uint32_t *counts, unsigned max)
     return n;
 }
 
-void nc_mmio_fault_sites(char *buf, size_t len)
-{
-    size_t o = 0;
-    buf[0] = 0;
-    for (unsigned r = 0; r < 6 && o + 24 < len; r++) {
-        int best = -1;
-        for (unsigned k = 0; k < 16; k++) {
-            if (g_mfs[k].n && (best < 0 || g_mfs[k].n > g_mfs[best].n)) {
-                best = (int)k;
-            }
-        }
-        if (best < 0) {
-            break;
-        }
-        o += (size_t)snprintf(buf + o, len - o, " %08x:%u", g_mfs[best].eip, g_mfs[best].n * 64);
-        g_mfs[best].n = 0;
-    }
-    memset(g_mfs, 0, sizeof(g_mfs));
-}
-
 bool nc_core_fault(NcCore *c, int sig, siginfo_t *info, void *ucontext)
 {
     if (sig == SIGILL) {
         return false;
     }
-#if defined(__x86_64__)
     const uintptr_t pc = nc_cpu_context_pc(ucontext);
-#else
-    const uintptr_t pc = ((ucontext_t *)ucontext)->uc_mcontext.pc;
-#endif
     if (sig == SIGFPE) {
         /* A guest DIV/IDIV's divide error (fault_win.c): to the title's
          * handlers, as the Xbox kernel hands it (a divisor of zero, or a
@@ -549,19 +522,6 @@ bool nc_core_fault(NcCore *c, int sig, siginfo_t *info, void *ucontext)
             return true;
         }
         return fault_report(c, pc, 0, "divide error");
-    }
-    if (sig == SIGBUS && nc_cpu_unaligned_fault(c->cpu, info->si_code, ucontext)) {
-        /* Doom 3 keeps a critical section at 0x00BFD88E: RtlEnterCriticalSection's
-         * lock inc of its LockCount (0x00BFD89E) took the core down */
-        if (__atomic_fetch_add(&g_nc_faults_unaligned, 1, __ATOMIC_RELAXED) < 4) {
-            nc_log("xbased-native", "unaligned atomic at guest %08llx, eip %08x",
-                   (unsigned long long)nc_vm_guest_of(&c->vm, info->si_addr), nc_cpu_guest_eip_at(c->cpu, pc));
-        }
-        return true;
-    }
-    if (nc_cpu_callret_fault(c->cpu, (uintptr_t)info->si_addr, ucontext)) {
-        __atomic_fetch_add(&g_nc_faults_callret, 1, __ATOMIC_RELAXED);
-        return true;
     }
     {   /* NC_WATCHPA: a guest store to the watched RAM, with its EIP */
         const uint64_t gva = nc_vm_guest_of(&c->vm, info->si_addr);
@@ -635,7 +595,7 @@ bool nc_core_fault(NcCore *c, int sig, siginfo_t *info, void *ucontext)
         return false;
     }
     if (wrapped != UINT64_MAX) {
-        nc_log("xbased-native-frontier", "guest fault at %08x (wrapped address), eip %08x", (uint32_t)va,
+        nc_log("xbased-native", "guest fault at %08x (wrapped address), eip %08x", (uint32_t)va,
                nc_frame_eip(f));
     }
     if (!nc_kernel_page_fault(&c->kernel, f, (uint32_t)va, ro_store || nc_cpu_fault_is_write(ucontext))) {
@@ -650,7 +610,7 @@ bool nc_core_fault(NcCore *c, int sig, siginfo_t *info, void *ucontext)
         static unsigned told;
         if (told++ < 4) {
             /* the first few with what led to them: a title that goes on may still be lost */
-            nc_log("xbased-native-frontier", "guest access violation: %s of %08x at eip %08x, taken by the title's handlers",
+            nc_log("xbased-native", "guest access violation: %s of %08x at eip %08x, taken by the title's handlers",
                    write ? "write" : "read", (uint32_t)va, at);
             nc_kernel_dump_recent(-1);
         }

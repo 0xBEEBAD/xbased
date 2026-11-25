@@ -16,8 +16,6 @@ page's rest from the file, zeros there):
   the other frames the scheduler (its slot check at 0xFA467) skips the tasks
   that never drew: the logic keeps 60 updates a second, the tasks that draw
   run every frame.
-
-Where the work stands and what is next: HANDOFF.md, "DOA2 120 fps mod".
 """
 import struct
 import sys

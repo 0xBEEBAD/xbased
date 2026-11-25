@@ -26,7 +26,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* Sockets: descriptors on Android, Winsock SOCKETs on Windows (their own
+/* Sockets: descriptors on Linux, Winsock SOCKETs on Windows (their own
  * close, errors and non-blocking switch). */
 #ifdef _WIN32
 /* compat/win (nc_win_net.h, without Winsock's names here: SOCKET is an
@@ -89,12 +89,6 @@ size_t nc_net_peek(void);
 /* The NIC's thread waits for a received frame, at most timeout_ns. */
 void nc_net_wait_rx(uint64_t timeout_ns);
 
-/* A console with this one's MAC (its EEPROM a copy of this one's, the app's
- * hard disk copied from device to device), heard at ip (network order): the
- * two can't see each other. nc_net_take_twin, for the app: its address, once
- * each console; false when no new one. */
-void nc_net_twin(uint32_t ip);
-bool nc_net_take_twin(char *addr, size_t len);
 
 /* ---- backends (native/net/nat.c, lan.c) ---- */
 

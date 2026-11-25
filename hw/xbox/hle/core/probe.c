@@ -77,19 +77,17 @@ void hle_probe_hit(const HleCpu *c)
         e = getenv("XBASED_HLE_PROBE_WORD");
         word_va = e ? (uint32_t)strtoul(e, NULL, 16) : 0;
     }
-#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
     /* debug.xbased.probe, a new value: each probe logs its first hits again
      * (a scene reached after the boot spent them) */
     static HleProp prop;
     static unsigned polls;
-    char v[PROP_VALUE_MAX];
+    char v[NC_PROP_VALUE_MAX];
     if ((polls++ & 1023) == 0 && hle_prop_new(&prop, "debug.xbased.probe", v)) {
         for (unsigned i = 0; i < MAX_PROBES; i++) {
             g_probe[i].hits = 0;
         }
         hle_log("xbased-hle-probe", "re-armed (%s)", v);
     }
-#endif
     for (unsigned i = 0; i < MAX_PROBES; i++) {
         if (g_probe[i].va != va) {
             continue;

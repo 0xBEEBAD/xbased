@@ -141,11 +141,6 @@ void nc_cpu_invalidate(NcCpu *cpu, uint32_t va, uint32_t len);
  * invalidate its translations from a fault). */
 bool nc_cpu_on_own_thread(NcCpu *cpu);
 
-/* At the end of a system op: whether the running thread's x87 control word
- * selecting single precision made the translations change (true that once).
- * Always false on x86-64 hosts, whose x87 rounds as the control word says. */
-bool nc_cpu_x87_single_check(NcCpu *cpu);
-
 /* From any host thread: the guest leaves with NC_SYSOP_INTERRUPT at the start
  * of its next block (or the next system op sees it pending). */
 void nc_cpu_request_interrupt(NcCpu *cpu);
@@ -158,10 +153,6 @@ uint64_t nc_cpu_host_cycles(void);
  * left out), and setting it (a savestate's: the count goes on from there). */
 uint64_t nc_cpu_guest_cycles(NcCpu *cpu);
 void nc_cpu_guest_cycles_set(NcCpu *cpu, uint64_t ticks);
-/* Whether a thread selected x87 single precision (nc_cpu_x87_single_check),
- * and selecting it again in a new run (a savestate's). */
-bool nc_cpu_x87_single(NcCpu *cpu);
-void nc_cpu_x87_single_restore(NcCpu *cpu);
 /* Inside a system op: the request was taken. */
 void nc_frame_clear_interrupt(NcFrame *f);
 /* Inside an NC_SYSOP_HOOK: the hooked instruction at EIP runs next time. */
@@ -192,33 +183,20 @@ bool nc_cpu_sample_pc(NcCpu *cpu, uintptr_t host_pc, uint32_t *eip);
  * makes the guest run from it when the signal handler returns. */
 NcFrame *nc_cpu_fault_frame(NcCpu *cpu, void *ucontext);
 void nc_cpu_fault_resume(NcCpu *cpu, void *ucontext);
-/* The faulting access was a write (a data abort's WnR). */
+/* The faulting access was a write (the front end's exception handler noted it). */
 bool nc_cpu_fault_is_write(const void *ucontext);
 
-/* A SIGBUS (si_code code) in translated guest code from an atomic access the
- * host can't make at that alignment. True if handled (never on x86-64 hosts,
- * which make them). */
-bool nc_cpu_unaligned_fault(NcCpu *cpu, int code, void *ucontext);
-
-/* A fault in a call-ret shadow stack's guard pages (unbalanced guest
- * CALL/RET). True if handled (never: the x86-64 translator keeps none). */
-bool nc_cpu_callret_fault(NcCpu *cpu, uintptr_t fault_addr, void *ucontext);
-
-#if defined(__x86_64__) /* the x86-64 translator (Windows, Linux) */
 /* Windows (cpu_x86.cpp): the front end's exception handler notes whether
  * the access was a write before it hands the CONTEXT to the core; whether a
  * host pc is in the translator's code; the one CPU. */
 void nc_cpu_fault_note_write(int write);
 /* A fault's host pc (ucontext: the exception's CONTEXT). */
 uintptr_t nc_cpu_context_pc(const void *ucontext);
-bool nc_cpu_in_code(NcCpu *cpu, uintptr_t pc);
-NcCpu *nc_cpu_current(void);
 /* The profile (XBASED_PROF) from now, for secs seconds. */
 void nc_cpu_prof_start(unsigned secs);
 /* Builds made with NC_CPU_DIAG (the tests' cputest; never a release): the
  * translation buffer's size, to reach its flush with a small program. */
 void nc_cpu_set_code_limit(NcCpu *cpu, size_t bytes);
-#endif
 
 #ifdef __cplusplus
 }

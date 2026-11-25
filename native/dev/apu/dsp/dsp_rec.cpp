@@ -52,7 +52,7 @@ typedef ZydisRegister Reg;
 const Reg rAX = ZR(RAX), rCX = ZR(RCX), rDX = ZR(RDX), rBX = ZR(RBX), rSP = ZR(RSP), rBP = ZR(RBP),
           rSI = ZR(RSI), rDI = ZR(RDI), r8 = ZR(R8), r9 = ZR(R9), r10 = ZR(R10), r11 = ZR(R11),
           r12 = ZR(R12), r13 = ZR(R13), r14 = ZR(R14), r15 = ZR(R15);
-const Reg eAX = ZR(EAX), eCX = ZR(ECX), eDX = ZR(EDX), eSI = ZR(ESI), eDI = ZR(EDI), eBP = ZR(EBP),
+const Reg eAX = ZR(EAX), eCX = ZR(ECX), eDX = ZR(EDX), eSI = ZR(ESI), eDI = ZR(EDI),
           r8d = ZR(R8D), r9d = ZR(R9D), r10d = ZR(R10D), r11d = ZR(R11D), r12d = ZR(R12D),
           r13d = ZR(R13D);
 const Reg AL = ZR(AL), CL = ZR(CL), DL = ZR(DL);
@@ -100,7 +100,6 @@ int mode_of(const dsp_core_t *c) { return scale_of(c->registers[DSP_REG_SR]) | (
 
 int ROFF(int i) { return (int)(offsetof(dsp_core_t, registers) + 4 * (unsigned)i); }
 const int OFF_PC = offsetof(dsp_core_t, pc);
-const int OFF_IDLE = offsetof(dsp_core_t, is_idle);
 const int OFF_XRAM = offsetof(dsp_core_t, xram);
 const int OFF_YRAM = offsetof(dsp_core_t, yram);
 const int OFF_MIX = offsetof(dsp_core_t, mixbuffer);
@@ -225,13 +224,6 @@ struct Rec {
 };
 
 extern "C" {
-/* the compiled code goes on (after a fallback, a native stack op, a loop's
- * end): the state is one it runs in */
-static bool h_resume_ok(Ctx *x)
-{
-    return x->rec->clean();
-}
-
 static bool h_write_x(Ctx *x, uint32_t a, uint32_t v)
 {
     dsp_core_t *c = &x->rec->dsp->core;
@@ -727,7 +719,6 @@ Ins decode(const dsp_core_t *c, uint32_t pc, const uint8_t *la_cand)
     case T_MOVEP_EA: case T_MOVEP_QQ: case T_MOVEP_REG: {
         /* a peripheral and a register or memory (emu_movep_23, _x_qq, _0):
          * a write to one may start a DMA or end the frame, out there */
-        const bool W = (w >> 15) & 1;
         in.kind = K_MOVEP;
         in.fr = F_ALL;
         in.touch = 3;
@@ -2963,11 +2954,6 @@ extern "C" bool dsp_rec_available(DSPState *dsp)
     return rec_of(dsp) != nullptr;
 }
 
-extern "C" void dsp_rec_invalidate(DSPState *dsp)
-{
-    dsp->core.pram_gen++;
-}
-
 extern "C" void dsp_rec_destroy(DSPState *dsp)
 {
     Rec *r = (Rec *)dsp->rec;
@@ -3109,7 +3095,7 @@ uint32_t fz_word(Rng &g, uint32_t pc, uint32_t len, uint32_t *w2, int *nw)
         const uint32_t d = g.below(2), r3 = 2 + g.below(6), q3 = 2 + g.below(6);
         switch (g.below(16)) {
         case 0: return 0x014082 | (g.below(64) << 8) | (d << 3) | g.below(2);  /* or/eor #xx */
-        case 1: *nw = 2; *w2 = g.next() & 0xffffff; return 0x0140cb & ~8u | (d << 3); /* eor #xxxx */
+        case 1: *nw = 2; *w2 = g.next() & 0xffffff; return (0x0140cb & ~8u) | (d << 3); /* eor #xxxx */
         case 2: return 0x0c1e80 | (g.below(2) << 6) | (g.below(32) << 1) | d;   /* lsl/lsr #ii */
         case 3: return 0x0c1e10 | (g.below(2) << 5) | (r3 << 1) | d;            /* lsl/lsr S */
         case 4: return 0x0c1e40 | (g.below(2) << 5) | (g.below(2) << 4) | (r3 << 1) | d; /* asl/asr S1,S2 */

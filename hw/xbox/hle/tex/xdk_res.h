@@ -1,7 +1,7 @@
 /*
  * xbased HLE GPU — XDK resource model: formats, header encoding, sizes and
- * subresource offsets (spec §4.9 "compute size and alignment as the XDK
- * does ... write bit-exact XDK headers").
+ * subresource offsets, computed as the XDK does, its headers written bit for
+ * bit.
  */
 #ifndef HW_XBOX_HLE_TEX_XDK_RES_H
 #define HW_XBOX_HLE_TEX_XDK_RES_H

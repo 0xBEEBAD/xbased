@@ -1472,18 +1472,6 @@ const char *dsp56k_rec_opcode_template(int i)
     return nonparallel_opcodes[i].template;
 }
 
-const char *dsp56k_rec_opcode_name(int i)
-{
-    return nonparallel_opcodes[i].name;
-}
-
-/* any entry for the word (with an emu_func or not), -1 for none */
-int dsp56k_rec_opcode_any(uint32_t op)
-{
-    const OpcodeEntry *e = lookup_opcode(op);
-    return e == &undefined_opcode ? -1 : (int)(e - nonparallel_opcodes);
-}
-
 /* the word's entry in nonparallel_opcodes, -1 for none (or no emu_func) */
 int dsp56k_rec_opcode_index(uint32_t op)
 {
@@ -1497,11 +1485,6 @@ int dsp56k_rec_opcode_index(uint32_t op)
 void dsp56k_rec_update_rn(dsp_core_t *dsp, uint32_t numreg, uint32_t modifier)
 {
     emu_update_rn(dsp, numreg, (int16_t)modifier);
-}
-
-int dsp56k_rec_read_accu24(dsp_core_t *dsp, int numreg, uint32_t *dest)
-{
-    return emu_pm_read_accu24(dsp, numreg, dest);
 }
 
 void dsp56k_rec_stack_push(dsp_core_t *dsp, uint32_t curpc, uint32_t cursr)
@@ -1548,11 +1531,6 @@ void dsp56k_rec_loop_end(dsp_core_t *dsp)
     dsp->registers[DSP_REG_SR] &= ~(1u<<DSP_SR_LF);
     dsp->registers[DSP_REG_SR] |= saved_sr & (1<<DSP_SR_LF);
     dsp_stack_pop(dsp, &dsp->registers[DSP_REG_LA], &dsp->registers[DSP_REG_LC]);
-}
-
-void dsp56k_rec_write_reg(dsp_core_t *dsp, uint32_t numreg, uint32_t value)
-{
-    dsp_write_reg(dsp, numreg, value);
 }
 
 int dsp56k_rec_register_mask(int numreg)

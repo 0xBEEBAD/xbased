@@ -200,7 +200,7 @@ static void dxt_volume(uint32_t xfmt, const uint8_t *s, uint32_t w, uint32_t h, 
 }
 
 /* A4R4G4B4 -> A8R8G8B8 (bytes B, G, R, A), each 4-bit value n as n * 17, for a
- * GPU without the 4444 formats (Mali's r26: HleCaps.x4444 off) */
+ * GPU without the 4444 formats (HleCaps.x4444 off) */
 static void expand_4444(const uint16_t *s, size_t n, uint32_t *out)
 {
     for (size_t i = 0; i < n; i++) {
@@ -334,8 +334,7 @@ static bool tex_define(uint32_t id, const uint32_t h5[5], const HleResDesc *dp,
         return false;
     }
     /* P8 expands to A8R8G8B8 on the way into the arena, and so does DXT in a
-     * volume (dxt_volume) or on a GPU without BC (Mali, PowerVR's B-Series:
-     * one slice); a volume's levels are depth slices (3D swizzle, or DXT
+     * volume (dxt_volume) or on a GPU without BC (one slice); a volume's levels are depth slices (3D swizzle, or DXT
      * blocks in groups of four slices), depth halving per level */
     bool vol = d.kind == HLE_RK_VOLUME;
     bool dxtd = (fi->flags & HLE_FI_DXT) && (vol || !g_hvk.caps.bc);
@@ -448,15 +447,13 @@ static bool tex_define(uint32_t id, const uint32_t h5[5], const HleResDesc *dp,
             const char *e = getenv("XBASED_HLE_TEXDUMP");
             want = e ? atoll(e) : -1;
         }
-#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
         {   /* on demand: a new value of debug.xbased.texdump=<id>, its next upload */
             static HleProp prop;
-            char v[PROP_VALUE_MAX];
+            char v[NC_PROP_VALUE_MAX];
             if (hle_prop_new(&prop, "debug.xbased.texdump", v) && atoll(v) > 0) {
                 want = atoll(v);
             }
         }
-#endif
         if (want == id) {
             want = -1;
             g_autofree char *p = g_strdup_printf("%shle_shadow/tex_%u_f%x_%ux%u_l%u.bin",
@@ -606,7 +603,7 @@ void hle_draw_prim_indices(uint32_t pt, const uint16_t *in, uint32_t n, uint32_t
 void hle_res_upload(uint32_t id, uint32_t pa, uint32_t pitch, uint32_t n,
                     const HleRect *rects, const int32_t (*pts)[2])
 {
-    uint32_t lo = UINT32_MAX, hi = 0, i = 0;
+    uint32_t i = 0;
     while (i < n) {
         const uint32_t i0 = i, i1 = MIN(n, i0 + HLE_CMD_MAX_RECTS);
         uint32_t clo = UINT32_MAX, chi = 0;
@@ -614,26 +611,19 @@ void hle_res_upload(uint32_t id, uint32_t pa, uint32_t pitch, uint32_t n,
             clo = MIN(clo, pa + (uint32_t)MAX(rects[i].y1, 0) * pitch);
             chi = MAX(chi, pa + (uint32_t)MAX(rects[i].y2, 0) * pitch);
         }
-        /* guest RAM the GPU can't read (not imported), or rows the CPU
-         * rewrote while the GPU read them in place (a first write waited:
-         * a CPU-drawn target uploaded every frame made every frame's first
-         * write wait for the GPU, Midnight Club 3 ~40 waits a second): the
-         * rows, as they are now, through the arena (allocated before the
-         * command: a full arena kicks one) */
-        uint32_t arena = 0;
+        /* the rows, as they are now, through the arena (allocated before
+         * the command: a full arena kicks one) */
         const uint8_t *src = chi > clo ? hle_pa_ptr(clo, chi - clo) : NULL;
         if (!src) {
-            continue;                           /* rows that are not memory: none to read, either way */
+            continue;                           /* rows that are not memory: none to read */
         }
-        if (!g_hram.zero_copy || hle_barrier_contended(clo, chi - clo)) {
-            uint8_t *dst;
-            uint32_t off = hle_draw_arena_alloc(chi - clo, &dst);
-            if (off == HLE_ARENA_FULL) {
-                continue;                       /* cmd_upload would skip it too */
-            }
-            memcpy(dst, src, chi - clo);
-            arena = off + 1;
+        uint8_t *dst;
+        uint32_t off = hle_draw_arena_alloc(chi - clo, &dst);
+        if (off == HLE_ARENA_FULL) {
+            continue;                           /* cmd_upload would skip it too */
         }
+        memcpy(dst, src, chi - clo);
+        const uint32_t arena = off + 1;
         HleCmdUpload *c = hle_fe_begin(HLE_OP_UPLOAD, sizeof(*c));
         c->dst = id;
         c->pa = pa;
@@ -646,20 +636,13 @@ void hle_res_upload(uint32_t id, uint32_t pa, uint32_t pitch, uint32_t n,
             c->y[c->nrects++] = pts[i][1];
         }
         hle_fe_commit();
-        if (!arena) {
-            lo = MIN(lo, clo);
-            hi = MAX(hi, chi);
-        }
-    }
-    if (hi > lo) {          /* the GPU reads it at the submission: CPU writes wait */
-        hle_barrier_arm(lo, hi - lo, hle_fe_last_value() + 1);
     }
 }
 
 uint32_t hle_res_rb_fb(uint32_t len)
 {
     uint8_t *p;
-    if (g_hram.zero_copy || !len) {
+    if (!len) {
         return 0;
     }
     if (!g_hland.buf) {
@@ -670,11 +653,6 @@ uint32_t hle_res_rb_fb(uint32_t len)
      * GPU passes the value, after the landing read it */
     uint32_t off = ring_alloc(&g_hland.alloc, len, 256);
     return off == HLE_ARENA_FULL ? 0 : off + 1;
-}
-
-bool hle_res_ram_direct(void)
-{
-    return g_hram.zero_copy;
 }
 
 uint32_t hle_res_land_alloc(uint32_t len)

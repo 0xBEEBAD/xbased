@@ -31,9 +31,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef NC_DESKTOP
 #include <SDL3/SDL.h>
-#endif
 
 #define EP_OUT 4
 #define EP_IN  5
@@ -64,13 +62,11 @@ typedef struct Comm {
     unsigned rate;
     uint64_t in_frames, out_frames;     /* packets, for each one's share of the rate */
     uint64_t in_packets, out_packets, in_short;
-#ifdef NC_DESKTOP
     SDL_AudioStream *mic, *ear;
     bool opened;
     SDL_AudioSpec wav_spec;             /* NC_VOICE_IN_WAV: the file, looped through mic */
     uint8_t *wav;
     uint32_t wav_len;
-#endif
     FILE *out_raw;                      /* NC_VOICE_OUT_RAW */
 } Comm;
 
@@ -80,7 +76,6 @@ static unsigned frame_samples(unsigned rate, uint64_t n)
     return (unsigned)(((n + 1) * rate) / 1000 - (n * rate) / 1000);
 }
 
-#ifdef NC_DESKTOP
 static void streams_format(Comm *c)
 {
     const SDL_AudioSpec spec = {SDL_AUDIO_S16LE, 1, (int)c->rate};
@@ -147,7 +142,6 @@ static void streams_open(Comm *c)
         nc_log("xbased-native-usb", "communicator: no earpiece output (%s)", SDL_GetError());
     }
 }
-#endif
 
 static int comm_control(NcUsbDev *d, const uint8_t *setup, uint8_t *data, int len)
 {
@@ -160,10 +154,8 @@ static int comm_control(NcUsbDev *d, const uint8_t *setup, uint8_t *data, int le
         if (index == 0 && (value & 0xff) < 5) {
             c->rate = k_rates[value & 0xff];
             c->in_frames = c->out_frames = 0;
-#ifdef NC_DESKTOP
             streams_open(c);
             streams_format(c);
-#endif
             nc_log("xbased-native-usb", "communicator: %u Hz", c->rate);
             return 0;
         }
@@ -179,14 +171,11 @@ static int comm_control(NcUsbDev *d, const uint8_t *setup, uint8_t *data, int le
 static int comm_data(NcUsbDev *d, bool in, int ep, uint8_t *buf, int len)
 {
     Comm *c = d->opaque;
-#ifdef NC_DESKTOP
     streams_open(c);
-#endif
     if (in && ep == EP_IN) {
         int n = (int)frame_samples(c->rate, c->in_frames++) * 2;
         n = n > len ? len : n;
         int got = 0;
-#ifdef NC_DESKTOP
         if (c->mic) {
             if (c->wav && SDL_GetAudioStreamAvailable(c->mic) < n) {
                 SDL_PutAudioStreamData(c->mic, c->wav, (int)c->wav_len);    /* the file again */
@@ -198,7 +187,6 @@ static int comm_data(NcUsbDev *d, bool in, int ep, uint8_t *buf, int len)
             got = SDL_GetAudioStreamData(c->mic, buf, n);
             got = got < 0 ? 0 : got;
         }
-#endif
         if (got < n) {
             memset(buf + got, 0, (size_t)(n - got));
             c->in_short++;
@@ -214,14 +202,12 @@ static int comm_data(NcUsbDev *d, bool in, int ep, uint8_t *buf, int len)
         c->out_packets++;
         c->out_frames++;
         if (len > 0) {
-#ifdef NC_DESKTOP
             if (c->ear) {
                 if (SDL_GetAudioStreamQueued(c->ear) > (int)c->rate * 2 / 5) {
                     SDL_ClearAudioStream(c->ear);   /* 200 ms behind: caught up */
                 }
                 SDL_PutAudioStreamData(c->ear, buf, len);
             }
-#endif
             if (c->out_raw) {
                 fwrite(buf, 1, (size_t)len, c->out_raw);
             }
@@ -235,14 +221,12 @@ static void comm_reset(NcUsbDev *d)
 {
     Comm *c = d->opaque;
     c->in_frames = c->out_frames = 0;
-#ifdef NC_DESKTOP
     if (c->mic && !c->wav) {
         SDL_ClearAudioStream(c->mic);
     }
     if (c->ear) {
         SDL_ClearAudioStream(c->ear);
     }
-#endif
 }
 
 NcUsbDev *nc_comm_new(void)

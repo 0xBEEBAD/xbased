@@ -26,7 +26,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/system_properties.h>
+#include "native/core/props.h"
 
 void nc_audio_set_paused(bool on);
 void nc_present_stats(float *fps, float *avg_ms, float *last_ms);
@@ -546,16 +546,16 @@ static void command(char *c, Out *o)
         sscanf(c + 7, "%lx %lu", &va, &n);
         cmd_disasm(o, (uint32_t)va, (unsigned)n);
     } else if (!strncmp(c, "prop get ", 9)) {
-        char v[PROP_VALUE_MAX] = "";
-        __system_property_get(c + 9, v);
+        char v[NC_PROP_VALUE_MAX] = "";
+        nc_prop_get(c + 9, v);
         out(o, "{\"ok\":true,\"value\":");
         out_str(o, v);
         out(o, "}");
     } else if (!strncmp(c, "prop set ", 9)) {
-        char name[PROP_NAME_MAX] = "";
+        char name[NC_PROP_NAME_MAX] = "";
         int pos = 0;
         sscanf(c + 9, "%31s %n", name, &pos);
-        nc_win_prop_set(name, c[9 + pos] ? c + 9 + pos : NULL);
+        nc_prop_set(name, c[9 + pos] ? c + 9 + pos : NULL);
         out(o, "{\"ok\":true}");
     } else if (!strncmp(c, "capture ", 8)) {
         char path[512] = "";

@@ -50,17 +50,15 @@ enum {
 #define BOOT_FILETIME 0x01C0739BEB8F8000ull
 
 static uint64_t g_boot_ns;
-/* The console's clock at boot past BOOT_FILETIME (the phone's time, moved by
+/* The console's clock at boot past BOOT_FILETIME (the computer's time, moved by
  * the settings: clock_boot), and what NtSetSystemTime moved it since; 100 ns
  * (wraps for negative). A savestate keeps it. */
 static uint64_t g_time_offset;
 static int64_t g_clock_ms;      /* nc_kernel_set_clock */
 
-/* One clock read per kernel entry. On the RP5 a read traps to the host
- * kernel, which emulates the counter (~160 ns, CLOCK_MONOTONIC and
- * cntvct_el0 alike: a coarse read is 8 ns), and an entry made about a dozen
- * (timers, the slice, DPC and IRQ bookkeeping): a fifth of Crimson Sea's
- * guest thread in push-buffer mode. Within nc_kernel_sysop, on the guest's
+/* One clock read per kernel entry: an entry made about a dozen (timers, the
+ * slice, DPC and IRQ bookkeeping), a fifth of Crimson Sea's guest thread in
+ * push-buffer mode where a read was dear. Within nc_kernel_sysop, on the guest's
  * thread, the first read is kept for the entry; a wait that blocked drops it
  * (nc_ke_update_time follows each), and so does a tick of the coarse clock,
  * which bounds a blocking wait this misses to one tick (4 ms). Other threads
@@ -302,7 +300,7 @@ void nc_ke_publish_time(uint64_t guest_ns)
 }
 
 /* The published time, or 0 when there is none or the coarse clock says it
- * is stale (more than its tick, 4 ms on the RP5, without a publish: the
+ * is stale (more than its tick, a few ms, without a publish: the
  * clock thread held off). */
 uint64_t nc_ke_published_ns(void)
 {
@@ -342,7 +340,7 @@ void nc_ke_update_time(NcKernel *k)
 }
 
 /* A kernel entry's: the times from the published clock when it moved, as
- * nc_ke_update_time without its clock read (~160 ns on the RP5, one each
+ * nc_ke_update_time without its clock read (one each
  * entry). */
 void nc_ke_tick_time(NcKernel *k)
 {
@@ -1257,14 +1255,6 @@ static uint64_t KeDelayExecutionThread(NcKernel *k, NcFrame *f, const uint32_t *
             nc_irq_idle_wait(0, 20000);
             nc_ke_update_time(k);
         } else {
-#if defined(__aarch64__)
-            /* Polling: a pause of a few ISBs (a fraction of a microsecond)
-             * before the guest looks again, as a spin-wait hint, instead of
-             * re-entering the kernel back to back. */
-            for (int i = 0; i < 8; i++) {
-                __asm__ __volatile__("isb" ::: "memory");
-            }
-#endif
         }
         s_last = cur;
         s_last_ns = nc_ke_now_ns();
@@ -1593,7 +1583,7 @@ void nc_kernel_set_clock(int64_t offset_ms)
     g_clock_ms = offset_ms;
 }
 
-/* The console's clock at boot: the phone's time moved by the settings'
+/* The console's clock at boot: the computer's time moved by the settings'
  * offset, never before BOOT_FILETIME. */
 static void clock_boot(void)
 {
@@ -1607,7 +1597,7 @@ static void clock_boot(void)
     gmtime_r(&s, &tm);
     nc_log("xbased-native", "ke: console clock %04d-%02d-%02d %02d:%02d:%02d UTC, %s", tm.tm_year + 1900,
            tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec,
-           g_clock_ms ? "as set in the settings" : "the phone's time");
+           g_clock_ms ? "as set in the settings" : "the computer's time");
 }
 
 /* KeQueryInterruptTime() -> 100 ns since boot */

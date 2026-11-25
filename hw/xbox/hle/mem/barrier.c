@@ -31,22 +31,10 @@ static uint8_t *g_hot;              /* per page: hot beside guards (hle_mem_stal
 static uint16_t *g_nbr_n;           /* ... per page: accesses served since g_nbr_t (ms; stale lock) */
 static uint32_t *g_nbr_t;
 
-/* The GPU reads and writes guest RAM in place (the imported RAM buffer,
- * vk/guest_ram.c) without snooping the CPU's caches: the cached, coherent
- * memory type holds for the driver's own allocations, not for the imported
- * AHB. A store still in a CPU cache line is invisible to it: the movie
- * Oddworld draws on the CPU into its back buffer under the title menu,
- * uploaded in place at each draw, came out with 64-byte black dashes (lines
- * the CPU still held) in push-buffer mode. Each page counts the writes
- * reported to it (first-write faults, host writes through the RAM view);
- * arming a range for the GPU cleans the lines of its pages written since
- * their last clean, sampled before the arm protects them (a store after
- * that faults and counts). */
+/* Each page counts the writes reported to it (first-write faults, host
+ * writes through the RAM view): what changed since an earlier look
+ * (hle_mem_wseq_sum, hle_mem_wseq_blocks). */
 static uint32_t *g_wseq;            /* per page: writes reported */
-static uint32_t *g_cseq;            /* per page: g_wseq + 1 at its last clean */
-#if defined(__aarch64__)
-static uint32_t g_line = 64;        /* data cache line bytes (CTR_EL0.DminLine) */
-#endif
 
 static uint32_t g_wepoch;          /* writes reported anywhere (atomic): hle_mem_write_epoch */
 static uint32_t *g_bseq;            /* per WBLOCK pages: their writes reported (hle_mem_wseq_blocks) */
@@ -81,51 +69,6 @@ uint64_t hle_mem_wseq_blocks(uint32_t pa, uint32_t len)
     return s;
 }
 
-/* [pa, pa + len)'s cache lines to memory (inval: and out of the cache) */
-static void cache_lines(uint32_t pa, uint32_t len, bool inval)
-{
-#if defined(__aarch64__)
-    const uint8_t *p = hle_pa_ptr(pa, len);
-    if (!p) {
-        return;
-    }
-    const uintptr_t end = (uintptr_t)p + len;
-    for (uintptr_t a = (uintptr_t)p & ~(uintptr_t)(g_line - 1); a < end; a += g_line) {
-        if (inval) {
-            __asm__ volatile("dc civac, %0" : : "r"(a) : "memory");
-        } else {
-            __asm__ volatile("dc cvac, %0" : : "r"(a) : "memory");
-        }
-    }
-    __asm__ volatile("dsb sy" : : : "memory");
-#else
-    (void)pa;
-    (void)len;
-    (void)inval;
-#endif
-}
-
-/* The pages of [pa, pa + len) written since their last clean, as the span
- * [*p0, *p1] (now counted clean); false if none */
-static bool stale_pages(uint32_t pa, uint32_t len, uint32_t *p0, uint32_t *p1)
-{
-    uint32_t lo = UINT32_MAX, hi = 0;
-    if (!g_wseq) {
-        return false;
-    }
-    for (uint32_t p = pa >> 12, last = (pa + len - 1) >> 12; p <= last; p++) {
-        const uint32_t w = __atomic_load_n(&g_wseq[p], __ATOMIC_RELAXED) + 1;
-        if (g_cseq[p] != w) {
-            g_cseq[p] = w;
-            lo = MIN(lo, p);
-            hi = MAX(hi, p);
-        }
-    }
-    *p0 = lo;
-    *p1 = hi;
-    return lo <= hi;
-}
-
 void hle_barrier_init(uint64_t ram_size)
 {
     g_ram = ram_size;
@@ -134,20 +77,10 @@ void hle_barrier_init(uint64_t ram_size)
     g_contended = g_new0(uint32_t, (ram_size >> 12) / 32 + 1);
     g_cspan = g_new0(uint32_t, ram_size >> 12);
     g_hot = g_new0(uint8_t, ram_size >> 12);
-    if (!getenv("XBASED_HLE_NO_CLEAN")) {     /* debug: no cache cleaning (A/B) */
-        g_wseq = g_new0(uint32_t, ram_size >> 12);
-        g_cseq = g_new0(uint32_t, ram_size >> 12);
-        g_bseq = g_new0(uint32_t, (ram_size >> (12 + WBLOCK_SHIFT)) + 1);
-    }
+    g_wseq = g_new0(uint32_t, ram_size >> 12);
+    g_bseq = g_new0(uint32_t, (ram_size >> (12 + WBLOCK_SHIFT)) + 1);
     g_nbr_n = g_new0(uint16_t, ram_size >> 12);
     g_nbr_t = g_new0(uint32_t, ram_size >> 12);
-#if defined(__aarch64__)
-    {
-        uint64_t ctr;
-        __asm__ volatile("mrs %0, ctr_el0" : "=r"(ctr));
-        g_line = 4u << ((ctr >> 16) & 0xF);
-    }
-#endif
 }
 
 void hle_barrier_set_waiter(uint64_t (*completed)(void), void (*wait)(uint64_t))
@@ -186,19 +119,6 @@ void hle_barrier_arm_copied(uint32_t pa, uint32_t len)
      * finds its span */
     uint64_t lo = pa & ~4095u;
     hle_host_mem_test_and_clear(hle_ram_addr_base() + lo, ((end + 4095) & ~4095ull) - lo);
-}
-
-bool hle_barrier_contended(uint32_t pa, uint32_t len)
-{
-    if (!g_contended || !len || (uint64_t)pa + len > g_ram) {
-        return true;
-    }
-    for (uint32_t p = pa >> 12, last = (uint32_t)(((uint64_t)pa + len - 1) >> 12); p <= last; p++) {
-        if (__atomic_load_n(&g_contended[p >> 5], __ATOMIC_RELAXED) & (1u << (p & 31))) {
-            return true;
-        }
-    }
-    return false;
 }
 
 bool hle_mem_written(uint32_t pa, uint32_t len)
@@ -250,16 +170,10 @@ void hle_barrier_arm(uint32_t pa, uint32_t len, uint64_t value)
     if (!len || (uint64_t)pa + len > g_ram) {
         return;
     }
-    uint32_t p0, p1;
-    const bool stale = stale_pages(pa, len, &p0, &p1);     /* before the protection */
     hle_pageuse_mark(&g_pu, pa, len, value);
     uint64_t lo = pa & ~4095u;
     uint64_t hi = ((uint64_t)pa + len + 4095) & ~4095ull;
     hle_host_mem_test_and_clear(hle_ram_addr_base() + lo, hi - lo);
-    if (stale) {
-        cache_lines(p0 << 12, (p1 - p0 + 1) << 12, false);
-        g_st.cleaned += p1 - p0 + 1;
-    }
 }
 
 /* g_stale's range and its pages' access change together (the decode thread
@@ -280,7 +194,7 @@ static void stale_unlock(void)
 
 /* The ranges without guest access: frames that were on screen, kept so until
  * the guest touches them. A change of protection over a frame buffer is
- * ~90 us (the RP5: Forza, 1.2 MB a range); given back at each swap, the
+ * dear (Forza, 1.2 MB a range); given back at each swap, the
  * frames' were ~0.4 ms of every swap. Kept, a double-buffered title's two
  * frame buffers are protected after its first two swaps and no swap changes
  * any; a touch of one no longer on screen just gives its access back (no
@@ -312,16 +226,6 @@ static uint64_t (*g_guard_fill)(uint32_t pa, uint32_t len, bool read);
 static uint64_t g_nbr_served, g_nbr_hot;
 
 static bool rpt_page_shut(uint32_t pa);
-
-static int na_find(uint32_t pa, uint32_t len)
-{
-    for (unsigned i = 0; i < g_nna; i++) {
-        if (len ? g_na[i].pa == pa && g_na[i].len == len : pa - g_na[i].pa < g_na[i].len) {
-            return (int)i;
-        }
-    }
-    return -1;
-}
 
 /* The frame's (guard false) or the guard's (true) range [pa, pa + len) */
 static int na_find_kind(uint32_t pa, uint32_t len, bool guard)
@@ -882,11 +786,6 @@ void hle_barrier_report_stats(uint64_t *waits, uint64_t *ns, uint64_t *timeouts,
     *held = g_rpt.held;
 }
 
-void hle_mem_stale_access(uint32_t pa)
-{
-    hle_mem_stale_access_rw(pa, true);
-}
-
 void hle_mem_stale_access_rw(uint32_t pa, bool write)
 {
     if (rpt_access(pa)) {
@@ -968,15 +867,7 @@ void hle_mem_stale_access_rw(uint32_t pa, bool write)
     hle_host_guest_hold(false);
 }
 
-void hle_barrier_arm_landing(uint32_t pa, uint32_t len, uint64_t value)
-{
-    hle_barrier_arm(pa, len, value);
-    if (g_wseq && len && (uint64_t)pa + len <= g_ram) {
-        cache_lines(pa, len, true);
-    }
-}
-
-void hle_barrier_arm_keep(uint32_t pa, uint32_t len, uint64_t value, bool gpu)
+void hle_barrier_arm_keep(uint32_t pa, uint32_t len, uint64_t value)
 {
     if (!len || (uint64_t)pa + len > g_ram) {
         return;
@@ -988,9 +879,6 @@ void hle_barrier_arm_keep(uint32_t pa, uint32_t len, uint64_t value, bool gpu)
         hle_pageuse_mark(&g_pu, lo, hi - lo, value);
         hle_host_mem_rearm(lo, hi - lo);
     }
-    if (gpu && g_wseq) {
-        cache_lines(pa, len, true);
-    }
 }
 
 void hle_barrier_arm_src(uint32_t pa, uint32_t len, uint64_t value)
@@ -1001,13 +889,6 @@ void hle_barrier_arm_src(uint32_t pa, uint32_t len, uint64_t value)
     const uint32_t lo = pa & ~4095u, hi = (uint32_t)(((uint64_t)pa + len + 4095) & ~4095ull);
     hle_pageuse_mark(&g_pu, lo, hi - lo, value);
     hle_host_mem_rearm(lo, hi - lo);
-}
-
-void hle_mem_cache_inval(uint32_t pa, uint32_t len)
-{
-    if (g_wseq && len && (uint64_t)pa + len <= g_ram) {
-        cache_lines(pa, len, true);
-    }
 }
 
 void hle_mem_host_wrote(uint32_t pa, uint32_t len)

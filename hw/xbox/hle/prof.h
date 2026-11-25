@@ -31,17 +31,9 @@ extern double g_hle_prof_ns_per_tick;
  * capture slow the scene it measured. */
 static inline int64_t hle_prof_now(void)
 {
-#if defined(__aarch64__)
-    uint64_t t;
-    __asm__ volatile("mrs %0, cntvct_el0" : "=r"(t));
-    return (int64_t)t;
-#elif defined(__x86_64__)
     unsigned lo, hi;
     __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
     return (int64_t)((uint64_t)hi << 32 | lo);
-#else
-    return hle_now_ns();
-#endif
 }
 
 static inline int64_t hle_prof_begin(void)

@@ -1,14 +1,10 @@
 /*
- * xbased native core — logging to stderr and the Android log.
+ * xbased native core — logging (stderr, the log file).
  */
 #include "native/core/nc.h"
 
 #include <stdio.h>
 #include <unistd.h>
-
-#ifdef __ANDROID__
-#include <android/log.h>
-#endif
 
 void nc_log(const char *tag, const char *fmt, ...)
 {
@@ -18,9 +14,6 @@ void nc_log(const char *tag, const char *fmt, ...)
     vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
     fprintf(stderr, "%s: %s\n", tag, buf);
-#ifdef __ANDROID__
-    __android_log_write(ANDROID_LOG_INFO, tag, buf);
-#endif
 }
 
 void nc_dump_line(int fd, const char *line, size_t len)

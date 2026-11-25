@@ -1,5 +1,27 @@
 # xbased changelog
 
+## 1.2.13 (2026-11)
+
+A cleanup and optimization release: the same emulator, with less code.
+
+### Changes
+- The code is cleaned of everything that no longer served: the paths for
+  platforms xbased doesn't run on, the workarounds for graphics drivers no PC
+  has, old files, and functions nothing called any more. About 8,000 lines of
+  code less, the executable a little smaller, and nothing that changes how
+  games run.
+- Depth buffers are created only with the uses they have, which leaves the
+  driver more room to compress them.
+- The debug switches (props.ini) are read by one piece of code on Windows and
+  Linux alike.
+- The source repository is tidier: README, BUILDING and CHANGELOG at its root,
+  the build steps in one place, and every library built in listed with its
+  license.
+
+### Fixes
+- The Linux build compiles without warnings on Ubuntu 22.04 (a few
+  declarations its C library doesn't have).
+
 ## 1.2.12 (2026-11)
 
 ### New
@@ -1957,7 +1979,7 @@ on a retail console (xemu pull request #3105):
   stretched into spikes. Their vertices are 9 bytes, 16-bit values at odd
   offsets, and AMD's vertex fetch reads a value only at an offset its size
   divides (NVIDIA's reads them anywhere). Such vertices are now copied with
-  each value aligned, as they already were for Mali-G57.
+  each value aligned.
 - Windows: back from a game to the dashboard (the in-game menu's quit, or
   a game closing itself), the dashboard could still be left without the
   gamepad and keyboard until touched or clicked (an ROG Xbox Ally X). The

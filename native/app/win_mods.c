@@ -1,8 +1,7 @@
 /*
  * xbased (xbased for PC) — the run's mods and cheats (mods/README.md): the
  * manifest the core reads (native/core/mods.h), written from the mods
- * folder beside the executable as the Android app's ModRun writes it from
- * its assets.
+ * folder beside the executable.
  *
  * A disc's folders: mods/<TITLE ID>.<version> (its default.xbe's
  * certificate) and mods/<TITLE ID> (any release), beside the executable

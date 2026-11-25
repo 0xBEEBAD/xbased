@@ -1,6 +1,5 @@
 /*
- * xbased front end — discs and XPR images (xbox_data.h), as the Android
- * app's XboxDisc.kt and XprImage.kt read them.
+ * xbased front end — discs and XPR images (xbox_data.h).
  */
 #include "native/app/ui/xbox_data.h"
 #include "native/core/chd_image.h"

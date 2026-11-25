@@ -16,10 +16,8 @@
 #include <stdlib.h>
 #include <time.h>
 #include <unistd.h>
-#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
-#include <sys/system_properties.h>
+#include "native/core/props.h"
 #include "hw/xbox/hle/prop.h"
-#endif
 
 static const NcKExport k_exports[] = {
 #define NC_KEXPORT(o, n, a, b) {o, n, a, b},
@@ -820,7 +818,7 @@ static void stats_tick(NcKernel *k)
            g_nc_sched.dpc_wait_max_ns / 1e6, g_nc_sched.dpc_run_max_ns / 1e6,
            (unsigned long long)g_nc_sched.dpc_slow, holds, held_max_ns / 1e6, held_out_ns / 1e6, top);
     {
-        static uint64_t cr, di, mm, ua;
+        static uint64_t di, mm;
         char ms[240];
         uint32_t fe[6], fn[6];
         const unsigned nf = nc_mmio_fault_top(fe, fn, 6);
@@ -838,17 +836,12 @@ static void stats_tick(NcKernel *k)
         for (unsigned i = 0; i < nd && od < (int)sizeof(ds) - 24; i++) {
             od += snprintf(ds + od, sizeof(ds) - (size_t)od, " %05x000:%u", dp[i], dn[i]);
         }
-        const uint64_t ncr = __atomic_load_n(&g_nc_faults_callret, __ATOMIC_RELAXED),
-                       ndi = __atomic_load_n(&g_nc_faults_dirty, __ATOMIC_RELAXED),
-                       nmm = __atomic_load_n(&g_nc_faults_mmio, __ATOMIC_RELAXED),
-                       nua = __atomic_load_n(&g_nc_faults_unaligned, __ATOMIC_RELAXED);
-        nc_log("xbased-native-stats", "host faults per s: call-return %.0f dirty pages %.0f (pages%s) mmio %.0f "
-               "(eips%s) unaligned atomics %.0f", (double)(ncr - cr) / s, (double)(ndi - di) / s, ds,
-               (double)(nmm - mm) / s, ms, (double)(nua - ua) / s);
-        cr = ncr;
+        const uint64_t ndi = __atomic_load_n(&g_nc_faults_dirty, __ATOMIC_RELAXED),
+                       nmm = __atomic_load_n(&g_nc_faults_mmio, __ATOMIC_RELAXED);
+        nc_log("xbased-native-stats", "host faults per s: dirty pages %.0f (pages%s) mmio %.0f (eips%s)",
+               (double)(ndi - di) / s, ds, (double)(nmm - mm) / s, ms);
         di = ndi;
         mm = nmm;
-        ua = nua;
     }
     commits_seen = k->vm_commits;
     decommits_seen = k->vm_decommits;
@@ -871,15 +864,14 @@ static void stats_tick(NcKernel *k)
     g_kcalls = g_sysops = 0;
     memset(g_sysop_kind, 0, sizeof(g_sysop_kind));
     memset(&g_nc_sched, 0, sizeof(g_nc_sched));
-#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
     /* On demand (the app has no timeout report): a new value in the property
      * debug.xbased.ncdump logs the last kernel calls and the guest threads. */
     static bool dump_seen;
-    static char dump_last[PROP_VALUE_MAX];
-    char v[PROP_VALUE_MAX] = "";
+    static char dump_last[NC_PROP_VALUE_MAX];
+    char v[NC_PROP_VALUE_MAX] = "";
     hle_prop_get("debug.xbased.ncdump", v);
     if (dump_seen && strcmp(v, dump_last)) {
-        nc_log("xbased-native-frontier", "dump on demand (debug.xbased.ncdump=%s)", v);
+        nc_log("xbased-native", "dump on demand (debug.xbased.ncdump=%s)", v);
         nc_kernel_dump_recent(-1);
         nc_mmio_dump_stats(-1);
         dump_int_samples(k);
@@ -888,14 +880,13 @@ static void stats_tick(NcKernel *k)
     dump_seen = true;
     memcpy(dump_last, v, sizeof(dump_last));
     /* debug.xbased.ncresume=<id>[,salt], a new value: resume thread t<id> */
-    static char resume_last[PROP_VALUE_MAX];
+    static char resume_last[NC_PROP_VALUE_MAX];
     v[0] = 0;
     hle_prop_get("debug.xbased.ncresume", v);
     if (v[0] && strcmp(v, resume_last)) {
         nc_ps_debug_resume(k, (unsigned)atoi(v));
     }
     memcpy(resume_last, v, sizeof(resume_last));
-#endif
 }
 #endif
 
@@ -929,7 +920,7 @@ void nc_kernel_dump_recent(int fd)
         char result[16];
         snprintf(result, sizeof(result), g_recent[i].running ? "(running)" : "%08x", g_recent[i].result);
         int len = snprintf(line, sizeof(line),
-                           "xbased-native-frontier:   call t%u %s from %08x [%08x %08x %08x %08x %08x] -> %s\n",
+                           "xbased-native:   call t%u %s from %08x [%08x %08x %08x %08x %08x] -> %s\n",
                            g_recent[i].thread, e ? e->name : "?", g_recent[i].ret, g_recent[i].args[0],
                            g_recent[i].args[1], g_recent[i].args[2], g_recent[i].args[3], g_recent[i].args[4],
                            result);
@@ -988,8 +979,8 @@ static NcCpu *g_clock_cpu;
  * thread interrupts the guest for what is due (timers, wait timeouts, the
  * slice) and for the time alone when a period passed without a refresh: a
  * title polling KeTickCount without kernel calls sees it advance. Chaos
- * Theory waits ten ticks that way at boot; on the RP5 nothing else was due
- * and it spun for good. NC_CLOCK_TICK=0: the time only with what is due. */
+ * Theory waits ten ticks that way at boot; with nothing else due it spun
+ * for good. NC_CLOCK_TICK=0: the time only with what is due. */
 #define CLOCK_PERIOD_NS 1000000ull
 /* How far behind now the published time may be (its period, and the
  * thread's wake-up late): within this of a due time, an entry reads the
@@ -1194,9 +1185,8 @@ void nc_kernel_call_fault(NcKernel *k, uint32_t va, bool write)
 
 /* A kernel call that held the guest's CPU for over 8 ms: nothing else ran
  * meanwhile, interrupts included (a vblank taken late presents its frame
- * late). Up to 10 a second are logged. HLE hooks aren't timed: a clock read
- * takes ~130 ns on the RP5 (the bare counter as well), two a hook at ~840k
- * hooks a second (Blinx); a hook that holds the CPU shows as a late
+ * late). Up to 10 a second are logged. HLE hooks aren't timed: two clock
+ * reads a hook at ~840k hooks a second (Blinx) cost too much; a hook that holds the CPU shows as a late
  * interrupt, the guest CPU's thread running. */
 static void slow_note(const char *what, uint32_t at, const uint32_t *args, uint64_t ns)
 {
@@ -1302,7 +1292,7 @@ static void kcall(NcKernel *k, NcFrame *f, unsigned ordinal)
     k->calls++;
     if (!k->first_ordinal) {
         k->first_ordinal = ordinal;
-        nc_log("xbased-native-frontier", "stage S2 first kernel call: %s (%u) from %08x",
+        nc_log("xbased-native", "stage S2 first kernel call: %s (%u) from %08x",
                e->name, ordinal, ret);
     }
 
@@ -1519,12 +1509,9 @@ static uint32_t ring0_stack(NcKernel *k, NcFrame *f, uint32_t need, uint32_t *cs
  * gate of the IDT the title put its own handler in (as Fable does for page
  * faults, nc_kernel_page_fault): EFLAGS, CS and the EIP to return to pushed
  * as a ring-0 interrupt gate does, IF cleared. False when the gate is still
- * the kernel's, or the stack has no room. PC only: Android keeps the stop. */
+ * the kernel's, or the stack has no room. */
 bool nc_kernel_trap(NcKernel *k, NcFrame *f, unsigned vector, uint32_t ret_eip)
 {
-#ifndef NC_DESKTOP
-    return false;
-#else
     const uint8_t *gate = nc_vm_host(k->vm, k->idt_va + 8 * (vector & 0xFF));
     const uint32_t handler = (nc_rd32(gate + 4) & 0xFFFF0000u) | (nc_rd32(gate) & 0xFFFFu);
     if (handler == k->trap_va) {
@@ -1542,7 +1529,6 @@ bool nc_kernel_trap(NcKernel *k, NcFrame *f, unsigned vector, uint32_t ret_eip)
     nc_frame_set_if(f, false);
     nc_frame_set_eip(f, handler);
     return true;
-#endif
 }
 
 bool nc_kernel_page_fault(NcKernel *k, NcFrame *f, uint32_t va, bool write)
@@ -1635,7 +1621,7 @@ static void dump_int_samples(NcKernel *k)
         for (unsigned b = 0; b < 32 && nc_vm_phys(k->vm, eip + b) != UINT32_MAX; b++) {
             n += snprintf(code + n, sizeof(code) - (size_t)n, "%02x", *(const uint8_t *)nc_vm_host(k->vm, eip + b));
         }
-        nc_log("xbased-native-frontier", "guest at %08x: %u of %u interrupt exits | %s", eip, g_int_eips[best].count,
+        nc_log("xbased-native", "guest at %08x: %u of %u interrupt exits | %s", eip, g_int_eips[best].count,
                total, code);
         g_int_eips[best].count = 0;
     }
@@ -1713,12 +1699,12 @@ static void slow_sysop(NcKernel *k, enum NcSysOp op, uint32_t eip, uint16_t ordi
 
 void nc_kernel_set_paused(NcKernel *k, bool on)
 {
-    nc_log("xbased-native", "%s requested (the activity: paused, or its menu open)", on ? "pause" : "resume");
+    nc_log("xbased-native", "%s requested (the front end: paused, or its menu open)", on ? "pause" : "resume");
     nc_pause_set(on);
 }
 
-/* The emulation pauses with the activity (the device suspends, another app
- * comes in front), where the guest's CPU enters the kernel: its threads stop
+/* The emulation pauses with the front end (its pause, its menu, the window
+ * minimized), where the guest's CPU enters the kernel: its threads stop
  * there, the devices that run on their own hold off (nc_paused), and the
  * guest's time stands still (the kernel's, RDTSC's) so that it goes on where
  * it stopped: no time jump, no timers due at once. It went on running, the
@@ -1745,7 +1731,7 @@ void nc_kernel_pause_point(NcKernel *k, NcFrame *f, bool idle)
     const uint64_t c0 = nc_cpu_host_cycles();
     g_pause_c0 = c0;
     nc_log("xbased-native", "paused: the guest's CPU waits");
-    /* Paused, the guest's CPU still takes a savestate (nc_state_save):
+    /* Paused, the guest's CPU still takes a savestate (nc_state_save_begin):
      * here its frame is whole (a kernel entry: nothing of the call done
      * yet; idle: every thread switched out). */
 #ifdef XBASED_DEVCTL
@@ -1771,7 +1757,7 @@ void nc_kernel_pause_point(NcKernel *k, NcFrame *f, bool idle)
     nc_log("xbased-native", "resumed after %.1f s: the guest's time leaves it out", ns / 1e9);
 }
 
-/* The samplers tell a kernel call or an HLE hook (set) from FEX itself. */
+/* The samplers tell a kernel call or an HLE hook (set) from the translator itself. */
 bool nc_kernel_sysop(void *opaque, NcFrame *f, enum NcSysOp op, unsigned size)
 {
     g_nc_in_sysop = 1;
@@ -2014,12 +2000,6 @@ static bool sysop(void *opaque, NcFrame *f, enum NcSysOp op, unsigned size)
     if (k->hle_after_sysop) {
         k->hle_after_sysop(k);
     }
-    /* The first thread to select x87 single precision turns FEX's rounding
-     * to it on (a flush of the translations, once). */
-    if (k->cpu) {
-        nc_cpu_x87_single_check(k->cpu);
-    }
-
     /* Disc reads done meanwhile complete, and asserted lines are delivered,
      * on the way back to the guest. Not while the thread has just begun a
      * wait: a read completing now would wake it through its saved context

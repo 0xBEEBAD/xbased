@@ -1,5 +1,5 @@
 /*
- * xbased HLE GPU — back-end draws (P3, first slice): bindless descriptors,
+ * xbased HLE GPU — back-end draws: bindless descriptors,
  * texture images uploaded from the arena, samplers from texture-stage
  * state, fixed-function pipelines (shader/ff_gen.c), vertex programs
  * (shader/vsh.c; constants in the arena, set 1 dynamic uniform buffer) and
@@ -7,9 +7,7 @@
  */
 #include "hw/xbox/hle/base.h"
 #include <math.h>
-#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
-#include <sys/system_properties.h>
-#endif
+#include "native/core/props.h"
 
 #include "hw/xbox/hle/hle.h"
 #include "hw/xbox/hle/prop.h"
@@ -197,7 +195,7 @@ static struct {
     VkDescriptorPool cpool;
     VkDescriptorSet cset;
     VkDescriptorSet fset;               /* set 1 for FF draws: the FF uniform block */
-    /* Push constants smaller than the block (caps.push off: Xclipse): set 3,
+    /* Push constants smaller than the block (caps.push off): set 3,
      * the blocks in a host-visible ring of storage buffer windows, a part per
      * command buffer in flight (hle_draw_slot); set 2 empty without fbfetch */
     VkDescriptorSetLayout pdsl, edsl;
@@ -207,12 +205,12 @@ static struct {
     VkDeviceMemory pmem;
     uint8_t *pmap;
     uint32_t pbase, ppos;               /* the current part's start, its next free byte */
-    /* fbfetch without push descriptors (caps.push_desc off, or Mali's driver:
-     * HLE_QUIRK_NO_PUSH_DESC): set 2 from a pool per command buffer in flight */
+    /* fbfetch without push descriptors (caps.push_desc off): set 2 from a
+     * pool per command buffer in flight */
     bool fb_pooled;
     VkDescriptorPool fbpool[HLE_FRAMES];
     unsigned fbslot;
-    struct { VkImageView rt, z; VkImageLayout rl, zl; VkDescriptorSet set; } fblast;
+    struct { VkImageView rt; VkImageLayout rl; VkDescriptorSet set; } fblast;
     struct { uint64_t hash; uint32_t nslots; uint32_t *tok; } prog[HLE_MAX_PROGS];
     uint32_t nprog;
     int8_t vfmt[256];                   /* vertex-buffer support: 0 unknown, 1 yes, -1 no */
@@ -304,7 +302,7 @@ static bool tex_format(uint32_t x, TexFmt *o)
     }
     /* Two 8-bit channels: G8B8 is D3D's V8U8 (bump maps: the low byte B = du,
      * the high byte G = dv), R8B8 the low byte B and the high byte R. The
-     * other channel of each repeats as in LLE's map. */
+     * other channel of each repeats as in xemu's map. */
     case HLE_XFMT_G8B8: case HLE_XFMT_LIN_G8B8: {
         VkComponentMapping m = SW(R, G, R, G);
         o->fmt = VK_FORMAT_R8G8_UNORM; o->sw = m; return true;
@@ -741,7 +739,6 @@ int hle_draw_init(void)
                       sizeof(HleFfPush) != 256);
     HLE_BUILD_BUG_ON(sizeof(HleFfPush) != HLE_PUSH_BYTES);
     g_hle_push_ssbo = !g_hvk.caps.push;     /* before any shader is made */
-    g_hle_glsl_zw = hle_quirk(HLE_QUIRK_Z_EQ_W);
     g_hle_glsl_zclamp = !g_hvk.caps.depth_clamp;
     g_hle_glsl_fixed = !g_hvk.caps.bindless;
     if (g_hle_push_ssbo && !push_ring_init()) {
@@ -750,10 +747,11 @@ int hle_draw_init(void)
     }
     VkPushConstantRange pr = { VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                                0, sizeof(HleFfPush) };
-    /* set 2 (devices with fbfetch): the colour target and the depth buffer
-     * as input attachments, pushed, or from a pool where push descriptors
-     * can't be used (Arm's driver crashes in them: ARMSX2) */
-    g_dr.fb_pooled = !g_hvk.caps.push_desc || hle_quirk(HLE_QUIRK_NO_PUSH_DESC);
+    /* set 2 (devices with fbfetch): the colour target as an input
+     * attachment, pushed, or from a pool without push descriptors. Binding 1
+     * (a depth input attachment) is declared but no draw binds it: the layout
+     * stays as the drivers' pipeline caches know it. */
+    g_dr.fb_pooled = !g_hvk.caps.push_desc;
     if (g_hvk.caps.fbfetch) {
         VkDescriptorSetLayoutBinding fb[2] = {
             { 0, VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL },
@@ -828,8 +826,8 @@ int hle_draw_init(void)
     hle_glsl_init();
     pipe_async_init();                  /* before the caches: they read its nocache switch */
     hle_pcache_init();
-    /* glslang builds its per-stage built-in tables on first use (~120 ms on
-     * the Odin 3): pay it here, at device creation, not at the first draw */
+    /* glslang builds its per-stage built-in tables on first use (tens of
+     * ms): pay it here, at device creation, not at the first draw */
     static const char k_wvs[] = "#version 450\nvoid main() { gl_Position = vec4(0.0); }\n";
     static const char k_wfs[] = "#version 450\nlayout(location = 0) out vec4 o;\n"
                                 "void main() { o = vec4(1.0); }\n";
@@ -1364,59 +1362,16 @@ void hle_draw_rs_brief(uint32_t out[9])
     out[8] = rs[RS_BLENDCOLOR];
 }
 
-/*
- * EQUAL passes that do not write (eq_tol in hle_draw_cmd_draw) test
- * LESSEQUAL a step toward the eye, which also passes every fragment in front
- * of the stored depth. Chaos Theory draws its foliage's depth alpha-tested,
- * then its colour over it EQUAL with the alpha test off: the whole cards
- * passed over the sky and terrain behind the leaves, grey quads. Their
- * shaders read the stored depth (an input attachment) and discard what is
- * more than a few steps in front of it. Programs and FF draws on D24 / D16
- * buffers without W-buffering or a polygon offset (gl_FragCoord.z is the
- * depth without them); debug.xbased.eqtol=1 leaves the one-sided test.
- */
-/* debug.xbased.eqtol=0: EQUAL depth tests exact; 1: one-sided (LESSEQUAL a step
- * toward the eye, no shader test) */
-static bool g_eqtol_off, g_zeq_off;
 /* New at each hle_draw_psframe_poll that reads the properties (every 3
  * swaps): the draw path reads its own (skipvsh, vtok, psdbg) at its next draw */
 static unsigned g_prop_gen;
-unsigned g_hle_zeq;
-
-unsigned hle_draw_zeq(const HleCmdDraw *c, uint32_t ds_id)
-{
-    const uint32_t *rs = g_dr.st.rs;
-    if (!g_hvk.caps.fbfetch || !g_dr.st_valid || !hle_quirk(HLE_QUIRK_EQ_DEPTH_STEP) || g_eqtol_off ||
-        g_zeq_off || !ds_id ||
-        rs[RS_ZENABLE] != 1 || rs[RS_ZWRITEENABLE] || rs[RS_ZFUNC] != 0x202 ||
-        rs[RS_SOLIDOFFSETENABLE] || c->prim < VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST) {
-        return 0;
-    }
-    HleVkSurf *ds = hle_surf_get(ds_id);
-    if (!ds || ds->d.parent || !(ds->aspect & VK_IMAGE_ASPECT_DEPTH_BIT)) {
-        return 0;
-    }
-    switch (ds->fmt) {
-    case VK_FORMAT_D24_UNORM_S8_UINT: case VK_FORMAT_X8_D24_UNORM_PACK32:
-        return HLE_FB_ZEQ24;
-    case VK_FORMAT_D16_UNORM: case VK_FORMAT_D16_UNORM_S8_UINT:
-        return HLE_FB_ZEQ16;
-    default:
-        return 0;
-    }
-}
 
 /* fbfetch's set 2 without push descriptors: a set from the command buffer's
- * pool, the last one again while the attachments are the same */
-static void fb_bind_pooled(VkCommandBuffer cb, HleVkSurf *rt, VkImageView zv,
-                           const VkDescriptorImageInfo *ii, VkWriteDescriptorSet *w, unsigned nw)
+ * pool, the last one again while the target is the same */
+static void fb_bind_pooled(VkCommandBuffer cb, const VkDescriptorImageInfo *ii, VkWriteDescriptorSet *w)
 {
-    VkImageView rv = rt ? ii[0].imageView : VK_NULL_HANDLE;
-    VkImageLayout rl = rt ? ii[0].imageLayout : VK_IMAGE_LAYOUT_UNDEFINED;
-    VkImageLayout zl = zv ? ii[nw - 1].imageLayout : VK_IMAGE_LAYOUT_UNDEFINED;
     VkDescriptorSet set = g_dr.fblast.set;
-    if (!set || g_dr.fblast.rt != rv || g_dr.fblast.z != zv || g_dr.fblast.rl != rl ||
-        g_dr.fblast.zl != zl) {
+    if (!set || g_dr.fblast.rt != ii->imageView || g_dr.fblast.rl != ii->imageLayout) {
         VkDescriptorSetAllocateInfo ai = {
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
             .descriptorPool = g_dr.fbpool[g_dr.fbslot], .descriptorSetCount = 1,
@@ -1430,70 +1385,42 @@ static void fb_bind_pooled(VkCommandBuffer cb, HleVkSurf *rt, VkImageView zv,
             }
             return;
         }
-        for (unsigned i = 0; i < nw; i++) {
-            w[i].dstSet = set;
-        }
-        T.vkUpdateDescriptorSets(g_hvk.dev, nw, w, 0, NULL);
-        g_dr.fblast.rt = rv;
-        g_dr.fblast.z = zv;
-        g_dr.fblast.rl = rl;
-        g_dr.fblast.zl = zl;
+        w->dstSet = set;
+        T.vkUpdateDescriptorSets(g_hvk.dev, 1, w, 0, NULL);
+        g_dr.fblast.rt = ii->imageView;
+        g_dr.fblast.rl = ii->imageLayout;
         g_dr.fblast.set = set;
     }
     T.vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, g_dr.layout, 2, 1, &set, 0, NULL);
 }
 
-void hle_draw_fb_bind(VkCommandBuffer cb, HleVkSurf *rt, HleVkSurf *ds, VkImageView zv,
-                      bool zbar)
+void hle_draw_fb_bind(VkCommandBuffer cb, HleVkSurf *rt)
 {
     /* by region: each fragment reads its own pixel, as the earlier draws
      * left it */
-    VkMemoryBarrier2 mb[2];
-    unsigned nb = 0;
-    if (rt) {
-        mb[nb++] = (VkMemoryBarrier2){
-            .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
-            .srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-            .srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-            .dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-            .dstAccessMask = VK_ACCESS_2_INPUT_ATTACHMENT_READ_BIT };
-    }
-    if (zv && zbar) {
-        mb[nb++] = (VkMemoryBarrier2){
-            .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
-            .srcStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
-                            VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-            .srcAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-            .dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-            .dstAccessMask = VK_ACCESS_2_INPUT_ATTACHMENT_READ_BIT };
-    }
+    VkMemoryBarrier2 mb = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+        .srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        .srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+        .dstAccessMask = VK_ACCESS_2_INPUT_ATTACHMENT_READ_BIT };
     VkDependencyInfo di = {
         .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
         .dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT,
-        .memoryBarrierCount = nb, .pMemoryBarriers = mb };
-    if (nb && !g_hle_fbbar_off) {
+        .memoryBarrierCount = 1, .pMemoryBarriers = &mb };
+    if (!g_hle_fbbar_off) {
         T.vkCmdPipelineBarrier2(cb, &di);
     }
-    VkDescriptorImageInfo ii[2];
-    VkWriteDescriptorSet w[2];
-    unsigned nw = 0;
-    for (unsigned b = 0; b < 2; b++) {
-        if (b ? !zv : !rt) {
-            continue;
-        }
-        ii[nw] = b ? (VkDescriptorImageInfo){ .imageView = zv, .imageLayout = ds->layout }
-                   : (VkDescriptorImageInfo){ .imageView = rt->view, .imageLayout = rt->layout };
-        w[nw] = (VkWriteDescriptorSet){
-            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstBinding = b,
-            .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,
-            .pImageInfo = &ii[nw] };
-        nw++;
-    }
-    g_dr.fb_draws += rt != NULL;
+    VkDescriptorImageInfo ii = { .imageView = rt->view, .imageLayout = rt->layout };
+    VkWriteDescriptorSet w = {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstBinding = 0,
+        .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,
+        .pImageInfo = &ii };
+    g_dr.fb_draws++;
     if (g_dr.fb_pooled) {
-        fb_bind_pooled(cb, rt, zv, ii, w, nw);
+        fb_bind_pooled(cb, &ii, &w);
     } else {
-        T.vkCmdPushDescriptorSetKHR(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, g_dr.layout, 2, nw, w);
+        T.vkCmdPushDescriptorSetKHR(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, g_dr.layout, 2, 1, &w);
     }
     g_dr.emits[EM_FB]++;
 }
@@ -1758,10 +1685,10 @@ static uint32_t sampler_index(const uint32_t *tss, uint32_t lod_down, bool d16)
     memcpy(&bias, &bias_bits, 4);
     bias = isfinite(bias) ? MAX(MIN(bias, 15.0f), -15.0f) : 0.0f;
     bias -= lod_down / 16.0f;
-    const float lim = g_hvk.caps.max_lod_bias;          /* 15 on PowerVR */
+    const float lim = g_hvk.caps.max_lod_bias;
     bias = MAX(MIN(bias, lim), -lim);
-    /* Without format-less custom border colours for every sampler (PowerVR's
-     * B-Series), or any (Mali's r26): the nearest of Vulkan's three */
+    /* Without format-less custom border colours for every sampler, or any:
+     * the nearest of Vulkan's three */
     VkBorderColor border = VK_BORDER_COLOR_FLOAT_CUSTOM_EXT;
     if (!g_hvk.caps.cbc_any) {
         const float *f = cbc.customBorderColor.float32;
@@ -1908,8 +1835,8 @@ static const uint32_t *prog_find(uint64_t hash, uint32_t *nslots)
     return NULL;
 }
 
-/* Without VK_EXT_vertex_input_dynamic_state (caps.vids off: Mali before
- * r49, PowerVR's BXM): the draw's vertex layout, built into its pipeline;
+/* Without VK_EXT_vertex_input_dynamic_state (caps.vids off): the draw's
+ * vertex layout, built into its pipeline;
  * the strides stay dynamic (VERTEX_INPUT_BINDING_STRIDE) */
 typedef struct ViKey {
     _Alignas(8) uint8_t nbind, nattr;
@@ -3257,7 +3184,7 @@ static HlePbResult pipeline_build_now(const void *key, const uint32_t *tok, uint
             .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT };
         VkPipelineDepthStencilStateCreateInfo ds = {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-            /* all dynamic, but Turnip keys on the static masks: with zero
+            /* all dynamic, but a driver may key on the static masks: with zero
              * write masks DOA3's colour-masked stencil pass (planar shadows:
              * INVERT, then EQUAL) left the stencil unchanged */
             .front = { VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP,
@@ -3534,25 +3461,6 @@ static VkStencilOp stencil_op(uint32_t o)
 static VkCompareOp cmp_op(uint32_t f)
 {
     return (f >= 0x200 && f <= 0x207) ? (VkCompareOp)(f - 0x200) : VK_COMPARE_OP_ALWAYS;
-}
-
-/* The next draw runs without the driver's LRZ (quirks.h HLE_QUIRK_LRZ_CLEAR):
- * no depth test, a test LRZ does not keep (EQUAL, ALWAYS, NEVER, NOT_EQUAL),
- * or a stencil write when the depth test fails. */
-bool hle_draw_lrz_off(void)
-{
-    const uint32_t *rs = g_dr.st.rs;
-    if (!g_dr.st_valid || !rs[RS_ZENABLE] ||
-        (rs[RS_STENCILENABLE] && stencil_op(rs[RS_STENCILZFAIL]) != VK_STENCIL_OP_KEEP)) {
-        return true;
-    }
-    switch (cmp_op(rs[RS_ZFUNC])) {
-    case VK_COMPARE_OP_LESS: case VK_COMPARE_OP_LESS_OR_EQUAL:
-    case VK_COMPARE_OP_GREATER: case VK_COMPARE_OP_GREATER_OR_EQUAL:
-        return false;
-    default:
-        return true;
-    }
 }
 
 /* Vertex attributes for an FVF on binding 0. */
@@ -3952,7 +3860,7 @@ static void ff_vs_key(HleFfVsKey *v, const HleCmdState *s, const HleCmdDraw *c)
 
 /* Material dump: every distinct material (combiner program, stage textures,
  * constants) of one frame, with textures and samplers. XBASED_HLE_PSFRAME=
- * <swap> picks the frame; on demand, a new value of the Android property
+ * <swap> picks the frame; on demand, a new value of the debug switch
  * debug.xbased.psframe dumps the next frame (screenshot first, then set it),
  * debug.xbased.psmaxn=<n> keeps draws of at most n indices/vertices. */
 static int64_t g_psf_frame = -2;
@@ -4091,7 +3999,7 @@ static uint32_t rec_state_hash(void);
 
 /* Before draw c: its query index, or -1 when it is not probed. The recorded
  * state is hashed only for a probed program's draws: hashed for every draw
- * while any probe was set, it took half the RP5's render thread. */
+ * while any probe was set, it took half the render thread. */
 static int probe_begin(VkCommandBuffer cb, const HleCmdDraw *c, uint32_t vfirst, uint64_t pipe)
 {
     unsigned prog = 0;
@@ -4143,15 +4051,13 @@ static int probe_begin(VkCommandBuffer cb, const HleCmdDraw *c, uint32_t vfirst,
         f->d[i].ihash = f->d[i].vhash = 0;
         uint32_t stride = c->nbind ? c->bind_stride[0] : c->stride;
         uint32_t off0 = c->nbind ? c->bind_off[0] : c->vb_off;
-        bool guest = c->nbind ? (c->guest_vb & 1) : (c->guest_vb & HLE_DRAW_GUEST_FVF);
         if (c->ib_off != UINT32_MAX && stride) {
             const uint16_t *ix = (const uint16_t *)(g_harena.map + c->ib_off);
             f->d[i].ihash = probe_hash((const uint8_t *)ix, 2u * c->count);
             uint32_t h = 2166136261u;
             for (uint32_t j = 0; j < c->count; j++) {
                 uint32_t a = off0 + ix[j] * stride;
-                const uint8_t *p = guest ? hle_pa_ptr(a, stride) : g_harena.map + a;
-                h = (h ^ (p ? probe_hash(p, stride) : 0xdeadu)) * 16777619u;
+                h = (h ^ probe_hash(g_harena.map + a, stride)) * 16777619u;
             }
             f->d[i].vhash = h;
         }
@@ -4170,14 +4076,13 @@ void hle_draw_psframe_poll(uint64_t swap)
     }
     probe_log(swap);
     hle_quirks_poll();
-#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
     static int64_t next_poll;
     if ((int64_t)swap < next_poll) {
         return;
     }
     next_poll = swap + 3;   /* every 3 swaps: odd, so re-arming reaches either frame parity */
     g_prop_gen++;           /* and the draws' own properties at their next draw */
-    char v[PROP_VALUE_MAX] = "";
+    char v[NC_PROP_VALUE_MAX] = "";
     hle_prop_get("debug.xbased.norec", v);
     if ((unsigned)atoi(v) != g_norec) {
         g_norec = (unsigned)atoi(v);
@@ -4206,15 +4111,6 @@ void hle_draw_psframe_poll(uint64_t swap)
         }
     }
     v[0] = 0;
-    hle_prop_get("debug.xbased.eqtol", v);
-    if (g_eqtol_off != !strcmp(v, "0") || g_zeq_off != !strcmp(v, "1")) {
-        g_eqtol_off = !strcmp(v, "0");
-        g_zeq_off = !strcmp(v, "1");
-        hle_log("xbased-hle-pipe", "EQUAL depth tests: %s",
-                g_eqtol_off ? "exact" : g_zeq_off ? "a step behind, any in front" :
-                "a step behind, a few in front (the depth read)");
-    }
-    v[0] = 0;
     hle_prop_get("debug.xbased.probefocus", v);
     g_probe.focus = v[0] ? atoi(v) : -1;
     v[0] = 0;
@@ -4226,7 +4122,7 @@ void hle_draw_psframe_poll(uint64_t swap)
     }
     static HleProp psf_prop;
     if (hle_prop_new(&psf_prop, "debug.xbased.psframe", v)) {
-        char n[PROP_VALUE_MAX] = "";
+        char n[NC_PROP_VALUE_MAX] = "";
         hle_prop_get("debug.xbased.psmaxn", n);
         g_psf_maxn = (uint32_t)atoi(n);
         g_psf_frame = swap + 1;
@@ -4234,7 +4130,6 @@ void hle_draw_psframe_poll(uint64_t swap)
         hle_log("xbased-hle-pipe", "psframe armed for swap %llu (maxn %u)",
                 (unsigned long long)g_psf_frame, g_psf_maxn);
     }
-#endif
 }
 
 static void psframe_log(const HleCmdDraw *c, const HleCmdState *s, const HlePshKey *pk,
@@ -4311,9 +4206,8 @@ static void psframe_log(const HleCmdDraw *c, const HleCmdState *s, const HlePshK
         /* each binding's first two vertices (bytes) */
         for (unsigned b = 0; b < c->nbind && b < 6; b++) {
             uint32_t st = c->bind_stride[b], nb = MIN(st, 24u);
-            const uint8_t *vb = ((c->guest_vb >> b) & 1) ? hle_pa_ptr(c->bind_off[b], 2 * st)
-                                                          : g_harena.map + c->bind_off[b];
-            if (!vb || !st || st > 4096) {
+            const uint8_t *vb = g_harena.map + c->bind_off[b];
+            if (!st || st > 4096) {
                 continue;
             }
             char hex[2 * (2 * 24 + 2) + 1];
@@ -4324,8 +4218,7 @@ static void psframe_log(const HleCmdDraw *c, const HleCmdState *s, const HlePshK
                 }
                 m += snprintf(hex + m, sizeof(hex) - m, v ? "" : " | ");
             }
-            hle_log("xbased-hle-pipe", "  bind%u %s %08x stride %u: %s", b,
-                    ((c->guest_vb >> b) & 1) ? "pa" : "arena", c->bind_off[b], st, hex);
+            hle_log("xbased-hle-pipe", "  bind%u %08x stride %u: %s", b, c->bind_off[b], st, hex);
         }
     }
     for (unsigned i = 0; ((pk->shadow & 15) || c->count <= 6) && i < (pk->count & 0xFF) &&
@@ -4337,9 +4230,8 @@ static void psframe_log(const HleCmdDraw *c, const HleCmdState *s, const HlePshK
         hle_log("xbased-hle-pipe", "  attr: %x %x %x %x %x %x | bind0 off=%u stride=%u",
                 c->attr[0], c->attr[1], c->attr[2], c->attr[3], c->attr[4], c->attr[5],
                 c->bind_off[0], c->bind_stride[0]);
-        const uint8_t *vb = (c->guest_vb & 1) ? hle_pa_ptr(c->bind_off[0], 4 * 256)
-                                              : g_harena.map + c->bind_off[0];
-        for (unsigned v = 0; vb && v < 4 && c->bind_stride[0] && c->bind_stride[0] <= 256; v++) {
+        const uint8_t *vb = g_harena.map + c->bind_off[0];
+        for (unsigned v = 0; v < 4 && c->bind_stride[0] && c->bind_stride[0] <= 256; v++) {
             char hex[400];
             int m = 0;
             for (unsigned b = 0; b < MIN(c->bind_stride[0], 176u) && m < (int)sizeof(hex) - 3; b++) {
@@ -4626,8 +4518,7 @@ static void dc_detail(const HleCmdDraw *c, const PipeKey *k)
     for (unsigned i = 0; i < 16; i++) {
         fprintf(f, "%s%g", i % 4 ? " " : "\n  ", s->mvp[i]);
     }
-    fprintf(f, "\n\nvertex layout: nbind %u stride %u vb_off %u guest_vb 0x%x\n", c->nbind, c->stride,
-            c->vb_off, c->guest_vb);
+    fprintf(f, "\n\nvertex layout: nbind %u stride %u vb_off %u\n", c->nbind, c->stride, c->vb_off);
     for (unsigned b = 0; b < c->nbind && b < HLE_DRAW_MAX_BIND; b++) {
         fprintf(f, "  binding %u: off 0x%x stride %u\n", b, c->bind_off[b], c->bind_stride[b]);
     }
@@ -4809,8 +4700,6 @@ static struct {
     uint32_t cull, ff, topo, zt, zw, zop, bias_en, stn, sop[4], smask, swmask, sref;
     uint32_t sraw[4];               /* the registers sop was translated from */
     float bias[2], bc[4];
-    bool bc_lost;                   /* a pipeline without colour zeroed the driver's
-                                       blend constants (HLE_QUIRK_BLEND_CONST_RESET) */
     uint32_t nbd, nad;
     VkVertexInputBindingDescription2EXT bd[HLE_DRAW_MAX_BIND];
     VkVertexInputAttributeDescription2EXT ad[HLE_DRAW_ATTRS];
@@ -4844,7 +4733,6 @@ void hle_draw_rec_begin(VkCommandBuffer cb)
 void hle_draw_state_lost(void)
 {
     memset(&g_rec, 0, sizeof(g_rec));   /* also what a draw does not record */
-    g_rec.bc_lost = hle_quirk(HLE_QUIRK_BLEND_CONST_RESET);    /* whatever was bound */
 }
 
 /* A strip batch bound its own index buffer (batch.c). */
@@ -4994,9 +4882,9 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         static int64_t skip_n[8], skip_at[8];
         static int nskip = -1;
         static unsigned polled;
-        static char last[PROP_VALUE_MAX];
+        static char last[NC_PROP_VALUE_MAX];
         const char *e = NULL;
-        char v[PROP_VALUE_MAX];
+        char v[NC_PROP_VALUE_MAX];
         if (nskip < 0) {
             e = getenv("XBASED_HLE_SKIPVSH");
         }
@@ -5039,9 +4927,9 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         static uint64_t want;
         static unsigned polled;
         if (polled != g_prop_gen) {
-            static char last[PROP_VALUE_MAX];
+            static char last[NC_PROP_VALUE_MAX];
             polled = g_prop_gen;
-            char v[PROP_VALUE_MAX] = "";
+            char v[NC_PROP_VALUE_MAX] = "";
             if (hle_prop_get("debug.xbased.vtok", v) > 0 && strcmp(v, last)) {
                 snprintf(last, sizeof(last), "%s", v);
                 want = strtoull(v, NULL, 16);
@@ -5194,7 +5082,7 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         }
         for (unsigned st = 0; st < 4; st++) {
             /* the bound texture's dimensionality picks the fetch, as on the
-             * NV2A (and LLE): a volume under a 2D-coordinate mode is read in
+             * NV2A (and xemu): a volume under a 2D-coordinate mode is read in
              * 3D (Conker's menu: animated electricity, a 256 x 128 x 4 volume,
              * bump-env mapped), PROJECT3D on a 2D texture s/q, t/q */
             unsigned m = (k.pk.tex_modes >> (5 * st)) & 0x1F;
@@ -5273,21 +5161,19 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
             const char *e = getenv("XBASED_HLE_PSDBG");     /* debug: HlePshKey.debug */
             psdbg = e ? atoi(e) : 0;
         }
-#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
         {   /* on demand: debug.xbased.psdbg=<view> (0 = off) switches the combiner
              * debug view live; with pixhist.sh, a stage's value at a pixel. Polled
              * by program draws seen, not drawn: a view whose pipelines cannot be
              * made drops every draw, and must still be switched off. */
             static unsigned polled;
             if (polled != g_prop_gen) {
-                char v[PROP_VALUE_MAX] = "";
+                char v[NC_PROP_VALUE_MAX] = "";
                 polled = g_prop_gen;
                 if (hle_prop_get("debug.xbased.psdbg", v) > 0) {
                     psdbg = atoi(v);
                 }
             }
         }
-#endif
         k.pk.debug = psdbg;
         static int pbtint = -1;         /* debug: push-buffer runs' draws in magenta */
         if (pbtint < 0) {
@@ -5530,8 +5416,7 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
      * depth meets the programs' (Splinter Cell: FF world, program
      * characters); their pixel stage scale is 1 / wfar (c->wscale). */
     bool wff = !prog && !rhw && c->wscale > 0.0f;
-    bool wbuf = (prog || rhw || wff) && ds && s->rs[RS_ZENABLE] == 2 && !(dbgf & 8) &&
-                !hle_quirk(HLE_QUIRK_NO_WBUF);
+    bool wbuf = (prog || rhw || wff) && ds && s->rs[RS_ZENABLE] == 2 && !(dbgf & 8);
     /* NV2A ZCLAMP_EN CLAMP: depth past the near and far planes is clamped to
      * them instead of clipping the primitive (MechAssault 2's sky, drawn past
      * the far plane, was black): the rasterizer's depth clamp */
@@ -5584,27 +5469,6 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         zofs = (bias ? zofs : 0.0f) + (s->rs[RS_ZFUNC] == 0x203 ? -1.0f : 1.0f);
         bias = true;
     }
-    /* EQUAL passes that do not write need that depth bit for bit (Halo's
-     * lighting passes over its base pass). Turnip gives two programs with
-     * the same invariant position math a step apart when they run in
-     * different command buffers (a mid-frame kick between them; the stock
-     * Adreno driver does not), and the pass then misses whole triangles,
-     * which flash unlit. LESSEQUAL one step toward the eye passes a step
-     * either way and still fails hidden surfaces; the shader discards what
-     * is further in front (hle_draw_zeq, bound by back.c). Only on the drivers
-     * with HLE_QUIRK_EQ_DEPTH_STEP; debug.xbased.eqtol=0 turns it off (live). */
-    bool eq_tol = zt && tri && !(dbgf & 4) && !s->rs[RS_ZWRITEENABLE] &&
-                  s->rs[RS_ZFUNC] == 0x202 && hle_quirk(HLE_QUIRK_EQ_DEPTH_STEP) && !g_eqtol_off;
-    if (eq_tol) {
-        zslope = bias ? zslope : 0.0f;
-        zofs = (bias ? zofs : 0.0f) - 1.0f;
-        bias = true;
-        if (s->psh) {
-            k.pk.fbfetch |= (uint8_t)g_hle_zeq;
-        } else {
-            k.ps.fbfetch |= (uint8_t)g_hle_zeq;
-        }
-    }
     /* the slope is per guest pixel; the target has scale pixels to one */
     zslope *= (float)(rt ? rt->scale : ds->scale);
     if (wbuf && wff) {
@@ -5634,7 +5498,7 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
                            cull == ff ? VK_CULL_MODE_FRONT_BIT : VK_CULL_MODE_BACK_BIT;
     const uint32_t ffv = ff == 0x901 ? VK_FRONT_FACE_COUNTER_CLOCKWISE : VK_FRONT_FACE_CLOCKWISE;
     const uint32_t zwv = zt && s->rs[RS_ZWRITEENABLE];
-    uint32_t zopv = eq_tol ? VK_COMPARE_OP_LESS_OR_EQUAL : cmp_op(s->rs[RS_ZFUNC]);
+    uint32_t zopv = cmp_op(s->rs[RS_ZFUNC]);
     if (g_probe.zop && g_probe.nvsh) {  /* debug: the probed programs' depth test */
         for (unsigned i = 0; i < g_probe.nvsh; i++) {
             if (c->vsh == g_probe.vsh[i]) {
@@ -5702,10 +5566,7 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         if (hle_quirk(HLE_QUIRK_STATE_AFTER_PIPELINE)) {
             hle_draw_state_lost();      /* the driver keeps only the pipeline (quirks.h) */
             g_rec.pipe = p;
-        } else if (hle_quirk(HLE_QUIRK_VI_AFTER_PIPELINE)) {
-            g_rec.nbd = UINT32_MAX;     /* the vertex input is recorded again (quirks.h) */
         }
-        g_rec.bc_lost |= !k.cfmt && hle_quirk(HLE_QUIRK_BLEND_CONST_RESET);
     }
     if (!g_rec.valid) {                 /* the bindless set never changes */
         if (g_hvk.caps.bindless) {
@@ -5919,16 +5780,8 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
     }
     float bcf[4] = { ((bc >> 16) & 0xFF) / 255.0f, ((bc >> 8) & 0xFF) / 255.0f,
                      (bc & 0xFF) / 255.0f, (bc >> 24) / 255.0f };
-    /* HLE_QUIRK_BLEND_CONST_RESET: the first colour draw after a pipeline
-     * without colour sets other constants first, so its own are recorded */
-    bool bc_reset = g_rec.bc_lost && k.cfmt;
-    if (!g_rec.valid || memcmp(g_rec.bc, bcf, sizeof(bcf)) || bc_reset) {
+    if (!g_rec.valid || memcmp(g_rec.bc, bcf, sizeof(bcf))) {
         memcpy(g_rec.bc, bcf, sizeof(bcf));
-        if (bc_reset) {
-            const float other[4] = { bcf[0], bcf[1], bcf[2], bcf[3] == 0.0f ? 1.0f : 0.0f };
-            T.vkCmdSetBlendConstants(cb, other);
-            g_rec.bc_lost = false;
-        }
         T.vkCmdSetBlendConstants(cb, bcf);
         g_dr.emits[EM_DYN]++;
     }
@@ -5943,14 +5796,14 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         nb = MIN(c->nbind, (uint32_t)HLE_DRAW_MAX_BIND);
         for (uint32_t i = 0; i < nb; i++) {
             strides[i] = c->bind_stride[i];
-            bufs[i] = (c->guest_vb >> i) & 1 ? g_hram.buf : g_harena.buf;  /* in place */
+            bufs[i] = g_harena.buf;
             offs[i] = c->bind_off[i];
         }
     } else {
         nb = 1;
         strides[0] = c->stride;
         na = c->imm ? imm_attrs(k.vs.fvf, ad) : fvf_attrs(c->fvf, ad);
-        bufs[0] = (c->guest_vb & HLE_DRAW_GUEST_FVF) ? g_hram.buf : g_harena.buf;
+        bufs[0] = g_harena.buf;
         offs[0] = c->vb_off;
         if (cur_diffuse) {
             ad[na++] = (VkVertexInputAttributeDescription2EXT){
@@ -6105,7 +5958,7 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         g_dr.ff_blend += s->rs[RS_VERTEXBLEND] != 0;
         g_dr.ff_psprite += s->rs[RS_POINTSPRITEENABLE] && c->prim == 0;
     }
-    /* debug: the first point-list draws' state (point sprites, P3 Task 11) */
+    /* debug: the first point-list draws' state (point sprites) */
     static unsigned s_pts;
     if (c->prim == 0 && s_pts < 24 && pslog_on()) {
         s_pts++;

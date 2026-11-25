@@ -1,7 +1,7 @@
 /*
  * xbased native core — taking and restoring savestates (push-buffer mode).
  *
- * Save (nc_state_save, any thread but the guest CPU's): the decoder parks
+ * Save (nc_state_save_begin, any thread but the guest CPU's): the decoder parks
  * at the next flip stall (the frame before it complete, its targets written
  * back), the emulation pauses, and the guest CPU takes the state at its
  * pause point (nc_state_cpu_work) once the device threads are parked and
@@ -239,12 +239,6 @@ void nc_state_cpu_work(NcKernel *k, const NcFrame *f, bool idle)
     g_req.done = true;
     pthread_cond_broadcast(&g_req.cv);
     pthread_mutex_unlock(&g_req.mu);
-}
-
-const char *nc_state_save(const char *path)
-{
-    const char *err = nc_state_save_begin(path);
-    return err ? err : nc_state_save_finish();
 }
 
 const char *nc_state_save_finish(void)

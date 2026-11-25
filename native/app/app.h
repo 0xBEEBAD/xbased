@@ -9,14 +9,14 @@
 
 #include "native/core/nc.h"
 
-struct ANativeWindow;
+typedef struct HleWindow HleWindow;
 
 /* present.c — on the window's thread. */
 bool nc_present_init(void);
 /* Once per display refresh: the newest frame (or the last one) letterboxed
  * into win, waiting for the panel; false when nothing could be presented
  * (the HLE GPU not up yet, no window). */
-bool nc_present_frame(struct ANativeWindow *win);
+bool nc_present_frame(HleWindow *win);
 /* The picture's shape on screen: the frame's own (auto: 4:3 for 640x480),
  * 4:3, 16:9 (a widescreen title's anamorphic 640x480), or the whole window. */
 enum { NC_ASPECT_AUTO, NC_ASPECT_4_3, NC_ASPECT_16_9, NC_ASPECT_STRETCH };
@@ -41,8 +41,8 @@ void nc_present_set_show_fps(bool on);
  * AMD FidelityFX Super Resolution 1 (a larger one is always averaged down). */
 enum { NC_UPSCALE_BILINEAR, NC_UPSCALE_FSR, NC_UPSCALE_NEAREST };    /* swapchain.h HLE_UPSCALE_*'s */
 void nc_present_set_upscale(int mode);
-/* An "upscale=" value: "fsr", and "sgsr" (Snapdragon GSR, which FSR
- * replaced) as FSR; anything else bilinear. */
+/* An "upscale=" value: "fsr", and "sgsr" (an older setting FSR replaced) as
+ * FSR; anything else bilinear. */
 int nc_upscale_from_name(const char *v);
 /* Downsampling: the frame, drawn at the render scale, averaged to the
  * console's resolution times k (1, 2 or 4; 0 off) before it's scaled to the

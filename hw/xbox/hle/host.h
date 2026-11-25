@@ -90,7 +90,7 @@ void hle_host_mem_landed(uint32_t pa, uint32_t len);
  * they were. */
 void hle_host_mem_rearm(uint32_t pa, uint32_t len);
 /* [pa, pa + len)'s pages without guest access (on), reads included: the
- * guest's next access faults to hle_mem_stale_access (mem/barrier.c); off:
+ * guest's next access faults to hle_mem_stale_access_rw (mem/barrier.c); off:
  * back to what write tracking wants. The host's own view keeps its access. */
 void hle_host_mem_noaccess(uint32_t pa, uint32_t len, bool on);
 
@@ -98,9 +98,6 @@ void hle_host_mem_noaccess(uint32_t pa, uint32_t len, bool on);
 
 uint64_t hle_host_vblank_count(void);
 int64_t hle_host_vblank_period_ns(void);
-/* The time the last vblank was due (CLOCK_MONOTONIC, ns): the timer's own
- * instant, a period after the one before, not when its interrupt was taken. */
-uint64_t hle_host_vblank_ns(void);
 /* A flip's vblank, for when its frame is due on screen: the last one's, or
  * the next one's for a flip in the last quarter of a frame. */
 uint64_t hle_host_flip_vblank_ns(void);
@@ -207,8 +204,5 @@ int hle_host_anisotropy(void);
  * the system's), as a void pointer; NULL if none. */
 void *hle_host_vk_loader(void);
 
-/* Disc reads so far: operations, bytes and the time spent in them
- * (diagnostics: the hitch monitor); false if the host doesn't count them. */
-bool hle_host_disc_stats(uint64_t *ops, uint64_t *bytes, uint64_t *ns);
 
 #endif

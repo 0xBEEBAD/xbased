@@ -81,8 +81,8 @@ SDL_Gamepad *dash_active_pad(void)
 
 /* ------------------------------------------------------------ screens */
 
-/* Snapdragon GSR became AMD FSR 1 (1.0.11): a setting that chose it chooses FSR,
- * written so; true when it changed. */
+/* The old "sgsr" upscaler became AMD FSR 1 (1.0.11): a setting that chose it
+ * chooses FSR, written so; true when it changed. */
 static bool upscale_migrate(Config *c)
 {
     const char *v = cfg_get(c, "upscale");

@@ -28,10 +28,7 @@
 #include <sys/statvfs.h>
 #include <time.h>
 #include <unistd.h>
-#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
 #include "hw/xbox/hle/prop.h"
-
-#endif
 
 #define STATUS_NO_MORE_FILES          0x80000006u
 #define STATUS_INVALID_DEVICE_REQUEST 0xC0000010u
@@ -922,7 +919,7 @@ static void complete(NcKernel *k, const uint32_t *a)
 /* Console timing (the app's setting, nc_io_set_device_time): a read takes at
  * least a quarter of the time the console's drives take at their best (the
  * whole of it made loads too slow), and the thread that asked waits it
- * out. At the phone's speed a load ran without its
+ * out. At the host's speed a load ran without its
  * thread ever waiting, so the game's lower-priority threads didn't run
  * until it was done: Morrowind starts its loading screen's thread as a cell
  * load begins, and on the Xbox the thread sets up its first picture while
@@ -949,12 +946,10 @@ static void device_time(int mode)
     g_dev_disc = mode >= 2 ? (struct DevRate){500, 6900} : (struct DevRate){125, 27600};
     g_dev_hdd = mode >= 2 ? (struct DevRate){200, 20000} : (struct DevRate){50, 80000};
     const char *e = getenv("NC_DEVTIME");
-#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
-    char v[PROP_VALUE_MAX];
+    char v[NC_PROP_VALUE_MAX];
     if (!e && hle_prop_get("debug.xbased.devtime", v) > 0) {
         e = v;
     }
-#endif
     if (e) {
         sscanf(e, "%u,%u,%u,%u", &g_dev_disc.req_us, &g_dev_disc.kbps, &g_dev_hdd.req_us, &g_dev_hdd.kbps);
     }

@@ -7,7 +7,7 @@ set -euo pipefail
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
 BUILD=${1:-$REPO/../build/linux}
 OUT=${2:-$REPO/../dist}
-VERSION=${3:-1.0.35}
+VERSION=${3:-$(sed -n 's/^set(XBASED_VERSION \([0-9.]*\))$/\1/p' "$REPO/native/cmake/app_win.cmake")}   # the build's own
 APPDIR=$OUT/xbased.AppDir
 mkdir -p "$OUT"
 rm -rf "$APPDIR"
@@ -21,8 +21,7 @@ cp -r "$REPO/native/app/ui/fonts" "$APPDIR/usr/bin/fonts"
 cp -r "$REPO/mods" "$APPDIR/usr/bin/mods"
 cp -r "$REPO/cheats" "$APPDIR/usr/bin/cheats"
 mv "$APPDIR/usr/bin/mods/README.md" "$APPDIR/usr/share/doc/xbased/MODS.md"   # how to add patches
-README=$REPO/docs/README.md; [ -f "$README" ] || README=$REPO/README.md
-cp "$README" "$REPO/COPYING" "$REPO/LICENSE" "$APPDIR/usr/share/doc/xbased/"
+cp "$REPO/README.md" "$REPO/COPYING" "$REPO/LICENSE" "$APPDIR/usr/share/doc/xbased/"
 cp -r "$REPO/licenses" "$APPDIR/usr/share/doc/xbased/licenses"
 
 cat > "$APPDIR/usr/share/applications/xbased.desktop" <<EOF

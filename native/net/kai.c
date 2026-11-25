@@ -1,7 +1,7 @@
 /*
  * xbased native core — the XLink Kai backend (net=kai): system link over the
  * Internet through an XLink Kai engine on the local network (Windows, macOS,
- * Linux, a Raspberry Pi; it doesn't run on Android), port 34523.
+ * Linux, a Raspberry Pi), port 34523.
  *
  * The emulator protocol Dolphin speaks to the engine (its XLINK_KAI_BBA.cpp),
  * one UDP datagram each:

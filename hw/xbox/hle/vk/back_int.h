@@ -1,6 +1,5 @@
 /*
- * xbased HLE GPU — back-end internals shared by the vk/ sources (CONFIG_VULKAN
- * only).
+ * xbased HLE GPU — back-end internals shared by the vk/ sources.
  */
 #ifndef HW_XBOX_HLE_VK_BACK_INT_H
 #define HW_XBOX_HLE_VK_BACK_INT_H
@@ -13,12 +12,8 @@
 int hle_tl_init(void (*on_complete)(uint64_t completed));
 VkSemaphore hle_tl_sem(void);
 void hle_tl_signaled(uint64_t value);
-/* Wait for a timeline semaphore's value: the driver's host wait, or with
- * no_sem_wait a poll of the counter in userspace (quirks.c). */
+/* Wait for a timeline semaphore's value (the driver's host wait). */
 VkResult hle_tl_sem_wait(VkSemaphore sem, uint64_t value, uint64_t timeout_ns);
-/* Before each submit: the GPU left idle a moment when the app asked
- * (hle_tl_gap, back.h). */
-void hle_tl_gap_serve(void);
 
 /* Resolution scale (the surface_scale setting, 1-4, read at DEVICE_CREATE):
  * every render target and depth surface is rendered at d.w * scale by
@@ -110,8 +105,6 @@ bool hle_gamma_pass(VkCommandBuffer cb, unsigned slot, const uint8_t ramp[3][256
 const char *hle_zwrite_pass(VkCommandBuffer cb, unsigned slot, HleVkSurf *src, HleVkSurf *dst);
 const char *hle_zread_pass(VkCommandBuffer cb, unsigned slot, HleVkSurf *src, HleVkSurf *dst,
                            const uint8_t map[4]);
-/* Depth buffer s's depth-aspect view (VK_NULL_HANDLE: none). */
-VkImageView hle_zread_depth_view(HleVkSurf *s);
 bool hle_surf_read_pending(HleVkSurf *s, uint32_t rt_id);
 /* Readback of a scaled surface: subresource (level, layer) of owner o, in
  * layout, blitted down to w x h (guest size) into a scratch image left in
@@ -139,7 +132,7 @@ static inline bool hle_surf_out_bgra(VkFormat f)
     return f == VK_FORMAT_R8_UNORM || f == VK_FORMAT_R8G8_UNORM;
 }
 
-/* draw.c (P3) */
+/* draw.c */
 int hle_draw_init(void);
 /* Before the render thread starts (hle_back_start): the title's recorded
  * pipelines built (the "Build cached shaders before starting" setting). */
@@ -187,19 +180,9 @@ void hle_draw_rs_brief(uint32_t out[9]);
 bool hle_draw_snap_needed(const HleCmdDraw *c, uint32_t rt_id);
 void hle_draw_snap(VkCommandBuffer cb, HleVkSurf *rt);
 void hle_draw_snap_end(void);
-/* Draw c tests depth EQUAL without writing it: HLE_FB_ZEQ24 / ZEQ16
- * (shader/ff.h) by depth buffer ds_id's step, its fragments in front of the
- * stored depth discarded by reading it (set 2, binding 1); 0 = not. */
-unsigned hle_draw_zeq(const HleCmdDraw *c, uint32_t ds_id);
-/* The next draw runs without the driver's LRZ (vk/quirks.h HLE_QUIRK_LRZ_CLEAR). */
-bool hle_draw_lrz_off(void);
-/* What the next hle_draw_cmd_draw has bound of that (back.c): the bits, or 0. */
-extern unsigned g_hle_zeq;
-/* In the open pass: rt's view as input attachment 0 and depth view zv as the
- * depth one (set 2; either may be absent), after the earlier draws' writes
- * (the depth's: zbar). */
-void hle_draw_fb_bind(VkCommandBuffer cb, HleVkSurf *rt, HleVkSurf *ds, VkImageView zv,
-                      bool zbar);
+/* In the open pass: rt's view as input attachment 0 (set 2), after the
+ * earlier draws' writes. */
+void hle_draw_fb_bind(VkCommandBuffer cb, HleVkSurf *rt);
 extern bool g_hle_fbbar_off;            /* debug (debug.xbased.fbbar=0): no barrier */
 /* debug (debug.xbased.gpucut): 1 (frag) draws scissored to one pixel, 2 (draw)
  * the state recorded and no draw, 3 (pass) neither: the passes alone, 4 (tri)

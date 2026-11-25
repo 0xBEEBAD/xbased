@@ -1,6 +1,6 @@
 /*
- * xbased HLE GPU — render-target / depth surfaces (spec §5.5: HLE-owned
- * images; identity by front-end object id).
+ * xbased HLE GPU — render-target / depth surfaces (HLE-owned images;
+ * identity by front-end object id).
  */
 #include "hw/xbox/hle/base.h"
 
@@ -168,7 +168,7 @@ static VkFormat surf_format(uint32_t xfmt, VkImageAspectFlags *aspect, uint32_t 
     case HLE_XFMT_D24S8: case HLE_XFMT_LIN_D24S8:
         *aspect = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
         *bytes = 4;
-        /* D32S8 where D24S8 is no attachment (Xclipse) or can't be filtered (vkdev.c) */
+        /* D32S8 where D24S8 is no attachment (AMD) or can't be filtered (vkdev.c) */
         return g_hvk.caps.d24s8 ? VK_FORMAT_D24_UNORM_S8_UINT : VK_FORMAT_D32_SFLOAT_S8_UINT;
     case HLE_XFMT_F24S8: case HLE_XFMT_LIN_F24S8:
         *aspect = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
@@ -424,11 +424,10 @@ bool hle_surf_ensure(HleVkSurf *s)
         .format = s->fmt, .extent = { s->w, s->h, 1 }, .mipLevels = s->nlevels,
         .arrayLayers = s->nfaces, .samples = VK_SAMPLE_COUNT_1_BIT,
         .tiling = VK_IMAGE_TILING_OPTIMAL,
-        /* input attachments: colour for fbfetch, depth for EQUAL passes
-         * (vk/draw.c hle_draw_zeq) */
+        /* colour targets as input attachments too, for fbfetch */
         .usage = (depth ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
                         : VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) |
-                 (g_hvk.caps.fbfetch ? VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT : 0) |
+                 (g_hvk.caps.fbfetch && !depth ? VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT : 0) |
                  VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
                  VK_IMAGE_USAGE_SAMPLED_BIT,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,

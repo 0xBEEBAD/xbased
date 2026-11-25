@@ -1,7 +1,7 @@
 """The core's knobs, from its source: every environment variable it reads
-(getenv, the app passes them through debug.xbased.env) and every
-debug.xbased.* system property, with where each is read and the comment that
-says what it does (the nearest one naming it, else the one just above).
+(getenv) and every debug.xbased.* switch (native/core/props.h: props.ini or
+the environment), with where each is read and the comment that says what it
+does (the nearest one naming it, else the one just above).
 
 Usage: python knobs.py [--md]   (--md: a Markdown table)
 """

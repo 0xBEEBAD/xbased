@@ -2,8 +2,7 @@
  * xbased native core � setjmp/longjmp for the fault scopes (jmp.h), Windows
  * x64: the callee-saved registers of its ABI (rbx rbp rdi rsi r12-r15,
  * xmm6-xmm15), rsp and the return address, MXCSR and the x87 control word.
- * No unwinding: the jump leaves the vectored exception handler's frames
- * behind as the signal handler's were on Android.
+ * No unwinding: the jump leaves the exception handler's frames behind.
  * Layout: GPRs at 0x00..0x38, rsp 0x40, rip 0x48, xmm6-15 0x50..0xE0,
  * mxcsr 0xF0, fcw 0xF4.
  */

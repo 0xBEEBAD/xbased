@@ -3,9 +3,9 @@
  * the debug probes and the PC samplers. What the HLE asks of its host
  * (host.h) is host_native.c's.
  *
- * A probe's address is a FEX hook (NcCpuConfig.hook_query, a system op
- * before the instruction runs); the guest's registers go from the JIT frame
- * to the HLE's HleCpu for it. The title starts at boot, before any guest
+ * A probe's address is a translator hook (NcCpuConfig.hook_query, a system
+ * op before the instruction runs); the guest's registers go from the JIT
+ * frame to the HLE's HleCpu for it. The title starts at boot, before any guest
  * code is translated.
  */
 #include "native/hle/hle_native.h"
@@ -41,17 +41,12 @@ void nc_hle_set_pipeline_options(bool async, bool prebuild, bool hybrid)
     nc_crash_hook = hle_drvcrash_crashed;      /* a driver crash in a pipeline build: kept out next run */
 }
 
-void nc_hle_pipeline_progress(uint32_t *done, uint32_t *total)
-{
-    hle_pipe_progress(done, total);
-}
-
 /* ------------------------------------------------------------------ boot */
 
 static char g_fatal[384];  /* why the title can't run here (nc_hle_fatal) */
 static int g_fatal_kind;   /* NC_FATAL_* (nc_hle_fatal_kind) */
 
-/* The activity polls nc_hle_fatal from its own thread while this is set
+/* The front end polls nc_hle_fatal from its own thread while this is set
  * (a lost GPU device: the render thread's): the text goes first, its first
  * byte last. */
 void nc_hle_set_fatal(int kind, const char *why)
@@ -91,17 +86,13 @@ void nc_hle_boot(NcKernel *k, NcVm *vm, NcCpu *cpu, const NcCpuContext *boot)
     hle_init();
     k->hle_keep = keep;
     k->hle_keep_wait = keep_wait;
-    {   /* the last title's kept memory, restored by the host: the GPU reads it
-         * from memory, its cache lines cleaned first */
+    {   /* the last title's kept memory, restored by the host: its pages
+         * counted as written */
         uint32_t pa[8], len[8];
         const unsigned n = nc_mm_kept(pa, len, 8);
         for (unsigned i = 0; i < n; i++) {
             hle_host_mem_set_dirty(pa[i], len[i]);
         }
-    }
-    if (!hle_active()) {
-        nc_log("xbased-native-hle", "HLE GPU off (XBASED_HLE_MODE unset)");
-        return;
     }
     g_active = true;
 
@@ -138,19 +129,14 @@ int nc_hle_fatal_kind(void)
     return __atomic_load_n(&g_fatal[0], __ATOMIC_ACQUIRE) ? g_fatal_kind : NC_FATAL_NONE;
 }
 
-bool nc_hle_pb_active(void)
-{
-    return hle_pb_active();
-}
-
 /* ------------------------------------------------------- the PC samplers */
 
 /* The HLE's samplers (the stall monitor, the perf capture) read env->eip,
  * which here changes only at hooks and kernel calls: a long stretch of guest
  * code read as the last call's address (the DPC return stub, 80010f10). They
  * ask the vCPU thread instead: a SIGPROF there reads the host PC it stopped
- * at, a guest EIP in JIT code (FEX's block RIP table) or the offset in this
- * library in host code (addr2line on the unstripped libxbasedcore.so). */
+ * at, a guest EIP in JIT code (the translator's block map) or the offset in
+ * the executable in host code (addr2line on the unstripped build). */
 #define SMP_SIGNAL SIGPROF
 #define SMP_OUTSIDE 0x07FFFFFFu /* a host PC outside this library (libc, the driver) */
 
@@ -224,11 +210,7 @@ static void smp_setup(void)
 #else
 static void smp_signal(int sig, siginfo_t *si, void *uc)
 {
-#ifdef __x86_64__
     const uintptr_t pc = (uintptr_t)((ucontext_t *)uc)->uc_mcontext.gregs[REG_RIP];
-#else
-    const uintptr_t pc = (uintptr_t)((ucontext_t *)uc)->uc_mcontext.pc;
-#endif
     uint32_t eip;
     uint32_t v;
     if (g_nc_idle_waiting) {

@@ -138,10 +138,7 @@ static void write_peripheral(dsp_core_t* core, uint32_t address, uint32_t value)
 }
 
 
-void dsp_step(DSPState* dsp)
-{
-    dsp56k_execute_instruction(&dsp->core);
-}
+
 
 /* xbased: the GP's program compiled (dsp_rec.cpp) unless XBASED_DSP_REC=0 */
 static int dsp_rec_mode = -1;

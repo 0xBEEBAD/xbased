@@ -1,6 +1,6 @@
 /*
  * xbased native core — mods and cheats for the title (mods/README.md), from
- * the manifest the app writes for the run (NativeCoreActivity, "mods=<file>"):
+ * the manifest the front end writes for the run (app/win_mods.c, "mods=<file>"):
  *
  *   file  <TAB> <disc path> <TAB> <host file>      a disc file replaced or added
  *   patch <TAB> <XBE on the disc> <TAB> <mod> <TAB> <line of its mod.txt section>

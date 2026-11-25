@@ -48,8 +48,8 @@ No BIOS, MCPX ROM or hard-disk image is needed.
 
 | Platform | File | |
 |---|---|---|
-| **Windows** 10/11 (x64) | `xbased-1.2.12-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
-| **Linux** (x86-64) | `xbased-1.2.12-x86_64.AppImage` | `chmod +x` it and run. Ubuntu 22.04 or newer, or any distribution of the same age. |
+| **Windows** 10/11 (x64) | `xbased-1.2.13-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
+| **Linux** (x86-64) | `xbased-1.2.13-x86_64.AppImage` | `chmod +x` it and run. Ubuntu 22.04 or newer, or any distribution of the same age. |
 
 Get them from **[Releases](https://github.com/crazyriddler/xbased/releases/latest)**.
 
@@ -283,78 +283,9 @@ game. Only the Xbox dashboard's files go there.
 
 ## Building from source
 
-xbased builds with clang and CMake. The third-party sources are fetched at
-pinned versions by `tools/fetch_deps.sh` into a `deps` folder beside the
-repository:
-
-```
-<work>/
-  xbased/      this repository
-  deps/        third-party sources (tools/fetch_deps.sh)
-  build/       build trees
-```
-
-The executable is built from the `xbased` target and named `xbased`.
-
-### Windows (x64)
-
-1. Install [MSYS2](https://www.msys2.org/) and open the **MSYS2 CLANG64** shell.
-2. Install the toolchain:
-
-   ```bash
-   pacman -S --needed git mingw-w64-clang-x86_64-clang mingw-w64-clang-x86_64-lld \
-     mingw-w64-clang-x86_64-cmake mingw-w64-clang-x86_64-ninja mingw-w64-clang-x86_64-python
-   ```
-
-3. Get the source, fetch the dependencies and build:
-
-   ```bash
-   git clone https://github.com/crazyriddler/xbased
-   cd xbased
-   tools/fetch_deps.sh
-   cmake -S native -B ../build/win -G Ninja -DCMAKE_BUILD_TYPE=Release \
-     -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
-   cmake --build ../build/win --target xbased
-   ```
-
-`../build/win/xbased.exe` runs from the build folder (its fonts and mods are
-copied beside it). It imports only system DLLs, so it runs on any Windows
-10/11 x64 with a Vulkan driver. To make the release zip in `../dist`
-(PowerShell): `tools\release\package_windows.ps1`
-
-### Linux (x86-64)
-
-1. Install the packages (Ubuntu/Debian; on other distributions, the same
-   libraries' development packages):
-
-   ```bash
-   sudo apt install git clang lld cmake ninja-build pkg-config python3 zlib1g-dev \
-     libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxss-dev libxtst-dev libxfixes-dev \
-     libxkbcommon-dev libwayland-dev wayland-protocols libegl-dev libgl-dev libdecor-0-dev \
-     libdrm-dev libgbm-dev libasound2-dev libpulse-dev libpipewire-0.3-dev libudev-dev \
-     libdbus-1-dev libibus-1.0-dev
-   ```
-
-2. Get the source, fetch the dependencies and build:
-
-   ```bash
-   git clone https://github.com/crazyriddler/xbased
-   cd xbased
-   tools/fetch_deps.sh
-   cmake -S native -B ../build/linux -G Ninja -DCMAKE_BUILD_TYPE=Release \
-     -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
-   cmake --build ../build/linux --target xbased
-   ```
-
-`../build/linux/xbased` runs from the build folder. Settings, saves and states
-go to `~/.local/share/xbased` (or beside the executable when a `portable.txt`
-is there). SDL3 is linked statically; at run time the system needs glibc 2.35
-or newer and a Vulkan driver (Mesa or the GPU vendor's). To make the AppImage
-in `../dist`: `tools/release/package_linux.sh ../build/linux` (the release
-one is built on Ubuntu 22.04, so it runs there and on newer distributions).
-
-More options (link-time optimization, the dependencies' location) are in
-[BUILDING.md](BUILDING.md).
+xbased builds with clang and CMake on Windows (MSYS2 CLANG64) and Linux, its
+third-party sources fetched at pinned versions by `tools/fetch_deps.sh`. The
+steps, the packages and the options are in [BUILDING.md](BUILDING.md).
 
 ## Credits
 

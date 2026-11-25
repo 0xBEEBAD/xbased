@@ -269,7 +269,7 @@ static struct {
     uint32_t blk_off;
     bool blk_ok, blk_ff;
     uint64_t blk_reused;
-    uint64_t vb_place, vb_copied;       /* vertex ranges read in place, copied */
+    uint64_t vb_copied;                 /* vertex ranges copied */
     uint64_t seq_draws;                 /* DRAW_ARRAYS of one run in order, drawn without indices */
     uint64_t bnd_kicks;                 /* submissions closed for a barrier's waiter */
     uint64_t sent[SENT_SLOTS];              /* program hashes the back end has (a set; 0 free) */
@@ -452,9 +452,8 @@ uint64_t hle_pbd_writebacks(void)
     return g_pd.writebacks;
 }
 
-void hle_pbd_vb_counts(uint64_t *in_place, uint64_t *copied, uint64_t *bnd_kicks, uint64_t *unindexed)
+void hle_pbd_vb_counts(uint64_t *copied, uint64_t *bnd_kicks, uint64_t *unindexed)
 {
-    *in_place = g_pd.vb_place;
     *copied = g_pd.vb_copied;
     *bnd_kicks = g_pd.bnd_kicks;
     *unindexed = g_pd.seq_draws;
@@ -1224,7 +1223,7 @@ static void writeback(uint32_t id)
     rb->arena_off = HLE_RB_DIRECT;
     rb->rows = len / d->pitch;
     hle_res_rb_land(rb, fb, len, hle_fe_last_value() + 1);     /* the next submission */
-    hle_barrier_arm_landing(d->pa, len, hle_fe_last_value() + 1);
+    hle_barrier_arm(d->pa, len, hle_fe_last_value() + 1);
     hle_fe_commit();
     wb_note(d->pa, len, hle_fe_last_value() + 1);
     if (o) {
@@ -1240,8 +1239,7 @@ static void writeback(uint32_t id)
  * fades the dome by it through a texture); with the two images apart the
  * dome failed against an empty depth buffer, the sky stayed black and
  * geometry smeared over it. The back end converts the colour image into
- * the depth image (HLE_OP_ZWRITE) when the colour one was written later,
- * as D3D mode's depth views do. */
+ * the depth image (HLE_OP_ZWRITE) when the colour one was written later. */
 static void zwrite_from_colour(uint32_t ds)
 {
     const HleSurfDesc *d = object_desc(ds);
@@ -1857,8 +1855,8 @@ void hle_pbd_trap(void)
 
 static uint32_t object_at(uint32_t pa);
 
-/* A frame presented: the frame rate in the log every 5 s (perf A/B from
- * logcat: xbased-hle-fps). */
+/* A frame presented: the frame rate in the log every 5 s (perf A/B from the
+ * log: xbased-hle-fps). */
 static void fps_log(void)
 {
     static int64_t s_t0;
@@ -2559,7 +2557,7 @@ static bool face_target(const PbObj *o, uint32_t pa, uint32_t w, uint32_t bytes)
 
 /* A cube texture (format code, w x w) over the memory of six face targets
  * (pa + face * stride): an image of its own whose faces those targets
- * become, views into it (as D3D mode's cube render targets), so what the
+ * become, views into it, so what the
  * faces render is what the cube samples. Every target over a face's memory
  * becomes its view, whatever its layout, as a 2D texture over a target's
  * memory samples its image (texture). Made once; 0 when a face has no
@@ -3112,7 +3110,7 @@ static uint32_t zread(uint32_t pa, uint32_t w, uint32_t h, const uint8_t map[4],
  * pages wholly inside the span count by their dirty bits; the first and last
  * by the span's bytes on them against their hashes at definition. A dirty
  * edge page is left writable (no fault per write), and its bytes compared at
- * each use: XXH3 (NEON), as a serial multiply chain they were ~22% of the
+ * each use: XXH3 (SIMD), as a serial multiply chain they were ~22% of the
  * decoder in a Burnout 3 race. */
 static uint64_t span_hash(uint32_t pa, uint32_t len)
 {
@@ -3599,14 +3597,12 @@ static void state(void)
  * skinning mode and the first two attributes' formats (position, weights) */
 static void drawlog(const HleCmdDraw *d, bool ff)
 {
-#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
     static HleProp prop;
     static unsigned polls;
-    char v[PROP_VALUE_MAX];
+    char v[NC_PROP_VALUE_MAX];
     if ((polls++ & 255) == 0 && hle_prop_new(&prop, "debug.xbased.pbdraws", v)) {
         g_dlog_left = atoi(v);
     }
-#endif
     if (g_dlog_left <= 0) {
         return;
     }
@@ -3805,7 +3801,7 @@ static unsigned writeback_range(uint32_t pa, uint32_t end, bool gpu_newer, const
         rb->arena_off = HLE_RB_DIRECT;
         rb->rows = len / next->d.pitch;
         hle_res_rb_land(rb, fb, len, v);
-        hle_barrier_arm_landing(next->d.pa, len, v);
+        hle_barrier_arm(next->d.pa, len, v);
         hle_fe_commit();
         wb_note(next->d.pa, len, v);
         obj_landing_queued(next);
@@ -4176,22 +4172,6 @@ static void draw_inline(void)
     emit(&d);
 }
 
-/* Vertex arrays read in place: the GPU fetches them from guest RAM (the
- * imported RAM buffer, offset = PA) as the NV2A does, and the first CPU
- * write to their pages waits for the draws (the barrier); a range whose
- * pages made a write wait (the CPU rewrites them while the GPU reads) is
- * copied to the arena instead. Crimson Sea copied the same meshes about 2000
- * times a frame, a fifth of its decoder. XBASED_HLE_VB_COPY=1 keeps the
- * copies (A/B), as in D3D mode. */
-static bool vb_in_place(void)
-{
-    static int on = -1;
-    if (on < 0) {
-        on = g_hram.zero_copy && !getenv("XBASED_HLE_VB_COPY");
-    }
-    return on;
-}
-
 /* The decode thread, between methods: a guest store waits for `value` (the
  * barrier): the submission still open is closed and goes out at once. */
 void hle_pbd_boundary(uint64_t value)
@@ -4205,7 +4185,7 @@ void hle_pbd_boundary(uint64_t value)
     hle_back_urgent();
 }
 
-/* debug: XBASED_HLE_PB_VBRACE=1 (via debug.xbased.env), a vertex range copied
+/* debug: XBASED_HLE_PB_VBRACE=1, a vertex range copied
  * again in the same frame with other bytes than its last copy is logged
  * (xbased-hle-pb vbrace): the CPU rewrote vertices between two draws. posoff
  * is the position's offset in a vertex (-1: none), hashed apart: a changed
@@ -4427,13 +4407,6 @@ static void draw_arrays(void)
             }
             continue;
         }
-        if (src && vb_in_place() && !hle_barrier_contended(from, len)) {
-            hle_barrier_arm(from, len, hle_fe_last_value() + 1);
-            d.guest_vb |= 1u << b;
-            d.bind_off[b] = from;
-            g_pd.vb_place++;
-            continue;
-        }
         uint8_t *dst;
         uint32_t off = src ? arena(len, &dst) : HLE_ARENA_FULL;
         if (off == HLE_ARENA_FULL) {
@@ -4455,7 +4428,7 @@ static void draw_arrays(void)
      * back end joins such strips into one draw (vk/batch.c): Blinx draws its
      * snowy town as ~17k short strips a frame, which as indexed draws went to
      * the GPU one by one at ~1.7 us each, and the frame took the GPU 30 ms
-     * at 2x (26 fps; 30 at 3x in D3D mode, whose strips were joined). */
+     * at 2x (26 fps). */
     if (hi - lo + 1 == n && pt != NV2A_PRIM_QUADS && pt != NV2A_PRIM_LINE_LOOP &&
         pt != HLE_PT_QUADLIST_EDGES && pt != HLE_PT_QUADSTRIP_EDGES) {
         bool seq = true;
@@ -5111,8 +5084,7 @@ static void coh_landed(uint32_t token, bool landed)
         return;
     }
     if (landed && l->linear) {
-        hle_mem_cache_inval(l->pa, l->len);     /* the GPU wrote its rows in place: no stale line */
-        hle_mem_mark_landed(l->pa, l->len);     /* ... counted */
+        hle_mem_mark_landed(l->pa, l->len);     /* the rows it wrote, counted */
     }
     if (landed) {
         coh_snap_take(l->pa, l->len, &l->snap);
@@ -5201,22 +5173,19 @@ static uint64_t coh_land(PbObj *o)
                             o->mem_pitch && fi && o->mem_pitch == o->d.w * (fi->bpp / 8) &&
                             o->mem_pitch * o->d.h == len ? o->mem_pitch : 0;
     uint32_t fb = k < 0 ? 0 : lpitch ? hle_res_rb_fb(len) : hle_res_land_alloc(len);
-    for (int tries = 0; k >= 0 && !fb && (!lpitch || !hle_res_ram_direct()) && tries < 2; tries++) {
+    for (int tries = 0; k >= 0 && !fb && tries < 2; tries++) {
         /* the landing buffer full: the oldest landing's space first, else all */
         const uint64_t ov = tries ? 0 : hle_tl_land_oldest();
         coh_wait(ov ? ov : hle_fe_last_value() + 1);
         fb = lpitch ? hle_res_rb_fb(len) : hle_res_land_alloc(len);
     }
-    if (k < 0 || (!fb && (!lpitch || !hle_res_ram_direct()))) {
+    if (k < 0 || !fb) {
         static unsigned s_logged;
         if (s_logged++ < 8) {
             hle_log("xbased-hle-pb", "target %u (%08x): no room to land its image (%s)", o->id, o->d.pa,
                     k < 0 ? "landings" : "landing buffer");
         }
         return 0;
-    }
-    if (lpitch && !fb) {
-        coh_pend_wait_inplace(o->d.pa, len);    /* (before its readback is begun) */
     }
     CohLand *l = &g_coh.l[k];
     const uint32_t token = g_coh.gen * COH_SLOTS + (uint32_t)k;
@@ -5239,7 +5208,7 @@ static uint64_t coh_land(PbObj *o)
         rb->fb = fb;
         rb->w = o->d.w;
         rb->h = o->d.h;
-        hle_barrier_arm_keep(o->d.pa, len, v, false);
+        hle_barrier_arm_keep(o->d.pa, len, v);
         hle_fe_commit();
         queued = hle_tl_land_swz(v, fb - 1, o->d.pa, o->d.w, o->d.h, fi->bpp / 8, coh_landed, token);
     } else {
@@ -5249,7 +5218,7 @@ static uint64_t coh_land(PbObj *o)
         rb->arena_off = HLE_RB_DIRECT;      /* rows: guest RAM, or landed from fb */
         rb->rows = len / lpitch;
         hle_res_rb_land(rb, fb, len, v);
-        hle_barrier_arm_keep(o->d.pa, len, v, true);
+        hle_barrier_arm_keep(o->d.pa, len, v);
         hle_fe_commit();
         queued = hle_tl_land_note(v, coh_landed, token);
     }

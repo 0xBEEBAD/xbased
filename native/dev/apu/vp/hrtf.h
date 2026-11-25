@@ -17,7 +17,7 @@
  * License along with this library; if not, see <http://www.gnu.org/licenses/>.
  */
 /* xbased native core: the same filter (31-tap HRIR convolution per channel,
- * an interaural delay with linear interpolation), laid out for NEON. The
+ * an interaural delay with linear interpolation), laid out for SIMD. The
  * delay line holds its samples twice, so any delay's window is contiguous;
  * the coefficients are stored reversed and padded to 32 with a zero tap, so
  * the convolution is a dot product of two contiguous arrays. */
@@ -29,10 +29,6 @@
 #include <string.h>
 #include <stddef.h>
 #include <math.h>
-
-#if defined(__aarch64__)
-#include <arm_neon.h>
-#endif
 
 #include "native/dev/apu/apu_regs.h"
 
@@ -124,24 +120,6 @@ static inline float hrtf_dot(const float *c, const float *tar, float iw,
 {
     const bool interp = dfrac > 0.0f;
     const float w0 = 1 - dfrac;
-#if defined(__aarch64__)
-    float32x4_t a0 = vdupq_n_f32(0.0f), a1 = vdupq_n_f32(0.0f);
-    for (int m = 0; m < HRTF_TAPS_PADDED; m += 8) {
-        float32x4_t c0 = vld1q_f32(c + m), c1 = vld1q_f32(c + m + 4);
-        if (tar) {
-            c0 = vfmaq_n_f32(c0, vsubq_f32(vld1q_f32(tar + m), c0), iw);
-            c1 = vfmaq_n_f32(c1, vsubq_f32(vld1q_f32(tar + m + 4), c1), iw);
-        }
-        float32x4_t s0 = vld1q_f32(w + m), s1 = vld1q_f32(w + m + 4);
-        if (interp) {
-            s0 = vfmaq_n_f32(vmulq_n_f32(vld1q_f32(w + m - 1), dfrac), s0, w0);
-            s1 = vfmaq_n_f32(vmulq_n_f32(vld1q_f32(w + m + 3), dfrac), s1, w0);
-        }
-        a0 = vfmaq_f32(a0, c0, s0);
-        a1 = vfmaq_f32(a1, c1, s1);
-    }
-    return vaddvq_f32(vaddq_f32(a0, a1));
-#else
     float acc = 0.0f;
     for (int m = 0; m < HRTF_TAPS_PADDED; m++) {
         float cm = c[m];
@@ -155,7 +133,6 @@ static inline float hrtf_dot(const float *c, const float *tar, float iw,
         acc += cm * s;
     }
     return acc;
-#endif
 }
 
 /* When a voice's entry changes, its taps move from the last frame's to the

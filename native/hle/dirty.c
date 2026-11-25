@@ -193,8 +193,8 @@ static void make_dirty(uint32_t pa)
 /* A guest store's fault: only the view it came through (at) made writable,
  * then the page marked written (NC_WP_WRITTEN; writable first, as
  * nc_vm_protect_pages clears its flag after). Making a view of the shared
- * RAM writable is the dear part of a fault: all three views 13.5 us a fault
- * on the Odin 3, this one 6.5 (DOA2 takes ~10k a second). A store through
+ * RAM writable is the dear part of a fault: all three views cost twice this
+ * one (DOA2 takes ~10k a second). A store through
  * another view faults once more and opens that one. */
 static void open_view(uint32_t pa, void *at)
 {
@@ -247,7 +247,7 @@ void hle_host_mem_set_dirty(uint32_t pa, uint32_t len)
     if (!g_vm) {
         return;
     }
-    hle_mem_host_wrote(pa, len);        /* its cache lines, before the GPU reads them */
+    hle_mem_host_wrote(pa, len);        /* counted as its pages' writes */
     unguard_written(pa, len);
     protect_runs(pa, len, false);
 }

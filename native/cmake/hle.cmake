@@ -2,9 +2,8 @@
 # (hw/xbox/hle/host.h, native/hle) and the GLib subset (native/compat/glib);
 # the MCPX APU (native/dev/apu).
 #
-# Vulkan dependencies come from NC_DEPS (same revisions as the app build):
-#   volk, glslang, spirv_reflect, vma, root/subprojects/nv2a_vsh_cpu.
-set(NC_DEPS "D:/tools/native-deps" CACHE PATH "native core third-party sources")
+# Vulkan dependencies come from NC_DEPS (tools/fetch_deps.sh): volk,
+# glslang, spirv_reflect, Vulkan-Headers, root/subprojects/nv2a_vsh_cpu.
 
 add_library(nc_volk STATIC "${NC_DEPS}/volk/volk.c")
 target_include_directories(nc_volk PUBLIC "${NC_DEPS}/volk")
@@ -12,13 +11,11 @@ target_include_directories(nc_volk PUBLIC "${NC_DEPS}/volk")
 if(EXISTS "${NC_DEPS}/Vulkan-Headers/include/vulkan/vulkan.h")
   target_include_directories(nc_volk BEFORE PUBLIC "${NC_DEPS}/Vulkan-Headers/include")
 endif()
-if(NC_LINUX_X64)
-  # the window's surface comes from SDL (SDL_Vulkan_CreateSurface): no platform's headers needed
-  target_compile_definitions(nc_volk PUBLIC VK_NO_PROTOTYPES)
-elseif(WIN32)
+if(WIN32)
   target_compile_definitions(nc_volk PUBLIC VK_NO_PROTOTYPES VK_USE_PLATFORM_WIN32_KHR)
 else()
-  target_compile_definitions(nc_volk PUBLIC VK_NO_PROTOTYPES VK_USE_PLATFORM_ANDROID_KHR)
+  # Linux: the window's surface comes from SDL (SDL_Vulkan_CreateSurface)
+  target_compile_definitions(nc_volk PUBLIC VK_NO_PROTOTYPES)
 endif()
 
 add_library(nc_spirv_reflect STATIC "${NC_DEPS}/spirv_reflect/spirv_reflect.c")
@@ -69,7 +66,6 @@ add_library(xbased_hle STATIC
   ${NC_HLE}/shader/vsh.c
   ${NC_HLE}/tex/xdk_res.c
   ${NC_HLE}/tex/xg_swizzle.c
-  ${NC_HLE}/uma/uma.c
   ${NC_HLE}/util/thread.c
   ${NC_HLE}/vk/back.c
   ${NC_HLE}/vk/display.c
@@ -97,19 +93,12 @@ add_library(xbased_hle STATIC
   ${CMAKE_CURRENT_SOURCE_DIR}/hle/host_native.c
   ${CMAKE_CURRENT_SOURCE_DIR}/hle/dirty.c
 )
-target_include_directories(xbased_hle PUBLIC "${NC_REPO}" "${NC_DEPS}/root" "${NC_DEPS}/vma/include"
-                           "${NC_DEPS}/glslang")
-# xxhash (single header, FEX's copy): pb/pbdraw.c's span hashes
+target_include_directories(xbased_hle PUBLIC "${NC_REPO}" "${NC_DEPS}/root" "${NC_DEPS}/glslang")
+# xxhash (single header): pb/pbdraw.c's span hashes
 target_include_directories(xbased_hle PRIVATE "${NC_XXHASH_DIR}")
-target_compile_definitions(xbased_hle PUBLIC CONFIG_VULKAN=1 XBASED_HLE_GPU=1 XBASED_NATIVE_CORE=1)
-target_compile_options(xbased_hle PRIVATE -Wno-unused-parameter -Wno-unused-function -Wno-sign-compare)
-if(WIN32 OR NC_LINUX_X64)
-  set(NC_HLE_SYS_LIBS)
-else()
-  set(NC_HLE_SYS_LIBS android log)
-endif()
+target_compile_options(xbased_hle PRIVATE -Wno-unused-parameter -Wno-sign-compare)
 target_link_libraries(xbased_hle PUBLIC nc_glib nc_volk nc_spirv_reflect glslang SPIRV
-                      glslang-default-resource-limits ${NC_HLE_SYS_LIBS})
+                      glslang-default-resource-limits)
 
 # The MCPX APU: xemu's device (hw/xbox/mcpx/apu) ported onto the core's own
 # services (native/dev/apu/apu_base.h).
@@ -130,16 +119,10 @@ add_library(xbased_apu STATIC
 target_include_directories(xbased_apu PRIVATE "${NC_REPO}")
 target_compile_options(xbased_apu PRIVATE -Wno-unused-parameter -Wno-unused-function -Wno-sign-compare
                        -Wno-unused-variable)
-if(TARGET nc_zydis)
-  # the GP's program compiled to x86-64 (dsp/dsp_rec.cpp) with Zydis's encoder
-  target_link_libraries(xbased_apu PRIVATE nc_zydis)
-endif()
-if(WIN32 OR NC_LINUX_X64)
-  # the audio output on SDL3's audio streams (dev/apu/out.c)
-  target_link_libraries(xbased_apu PUBLIC xbased_hle SDL3::SDL3)
-else()
-  target_link_libraries(xbased_apu PUBLIC xbased_hle aaudio log)
-endif()
+# the GP's program compiled to x86-64 (dsp/dsp_rec.cpp) with Zydis's encoder
+target_link_libraries(xbased_apu PRIVATE nc_zydis)
+# the audio output on SDL3's audio streams (dev/apu/out.c)
+target_link_libraries(xbased_apu PUBLIC xbased_hle SDL3::SDL3)
 
 if(NC_LINUX_X64)
   # the window's Vulkan surface from SDL (vk/swapchain.c)

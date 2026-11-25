@@ -18,10 +18,8 @@
 #include "hw/xbox/hle/vk/pipeasync.h"
 #include "hw/xbox/hle/vk/vkdev.h"
 
-#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
-#include <sys/system_properties.h>
+#include "native/core/props.h"
 #include "hw/xbox/hle/prop.h"
-#endif
 #ifdef __linux__
 #include <sys/resource.h>
 #include <sys/syscall.h>
@@ -108,12 +106,10 @@ static int debug_switch(const char *env, const char *prop)
     if (e && *e) {
         return atoi(e) != 0;
     }
-#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
-    char v[PROP_VALUE_MAX] = "";
+    char v[NC_PROP_VALUE_MAX] = "";
     if (hle_prop_get(prop, v) > 0 && (v[0] == '0' || v[0] == '1')) {
         return v[0] == '1';
     }
-#endif
     return -1;
 }
 
@@ -604,11 +600,5 @@ void hle_pipe_prebuild(uint32_t max, void (*add)(uint64_t hash, VkPipeline p))
             "(%u failed)", ok, g_pa.nlist, (g_get_monotonic_time() - t0) / 1000.0, nth, failed);
     hle_atomic_set(&g_pa.pb_total, 0);
     hle_atomic_set(&g_pa.pb_done, 0);
-}
-
-void hle_pipe_progress(uint32_t *done, uint32_t *total)
-{
-    *total = hle_atomic_read(&g_pa.pb_total);
-    *done = *total ? hle_atomic_read(&g_pa.pb_done) : 0;
 }
 

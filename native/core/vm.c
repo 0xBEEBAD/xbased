@@ -3,7 +3,6 @@
  */
 #include <stdio.h>
 #include "native/core/vm.h"
-#include "hw/xbox/hle/uma/uma.h"
 
 #include <dlfcn.h>
 
@@ -72,7 +71,6 @@ bool nc_vm_init(NcVm *vm, uint32_t ram_size)
     }
     vm->ram_size = ram_size;
 #else
-#if defined(__x86_64__)
     /* x86-64 (the translator runs guest code at its own addresses): the
      * guest's 4 GiB at host address 0, from 0x10000 (the kernel keeps the
      * first 64 KiB, mmap_min_addr; no title maps there). A PIE executable
@@ -108,30 +106,12 @@ bool nc_vm_init(NcVm *vm, uint32_t ram_size)
         }
         nc_log("xbased-native", "vm: the 4 GiB above the guest's aren't free to keep empty");
     }
-#else
-    /* 4 GiB of guest address space with PROT_NONE guards on both sides. */
-    vm->reservation_len = (1ull << 32) + 2 * NC_GUARD;
-    void *r = mmap(NULL, vm->reservation_len, PROT_NONE,
-                   MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
-    if (r == MAP_FAILED) {
-        nc_log("xbased-native", "vm: reserve failed: %s", strerror(errno));
-        return false;
-    }
-    vm->reservation = r;
-    vm->base = (uint8_t *)r + NC_GUARD;
-#endif
 
-    /* Guest RAM is an AHB's memory when the platform gives its fd (the
-     * GPU imports the same buffer: vertices, uploads and readbacks in place,
-     * as UMA allows), else a memfd. NC_RAM_MEMFD=1: the memfd (A/B). */
-    const char *mf = getenv("NC_RAM_MEMFD");
-    vm->ram_fd = mf && atoi(mf) ? -1 : hle_uma_ram_fd(ram_size);
-    if (vm->ram_fd < 0) {
-        vm->ram_fd = memfd("xbased-ram");
-        if (vm->ram_fd < 0 || ftruncate(vm->ram_fd, ram_size) != 0) {
-            nc_log("xbased-native", "vm: guest RAM memfd failed: %s", strerror(errno));
-            return false;
-        }
+    /* Guest RAM: a memfd, mapped at every address the guest sees it */
+    vm->ram_fd = memfd("xbased-ram");
+    if (vm->ram_fd < 0 || ftruncate(vm->ram_fd, ram_size) != 0) {
+        nc_log("xbased-native", "vm: guest RAM memfd failed: %s", strerror(errno));
+        return false;
     }
     vm->ram_size = ram_size;
 #endif

@@ -19,7 +19,7 @@
 typedef struct NcKState {
     uint64_t boot_ns, time_offset, guest_ns;
     uint64_t guest_cycles;
-    bool x87_single;
+    bool x87_single;                /* always false (the field stays in the layout) */
     uint32_t av_saved;
     uint8_t isr_line;
     uint32_t irq_enabled, irq_lines;
@@ -66,7 +66,6 @@ bool nc_kern_state_save(NcBuf *b)
     nc_ke_state(&s.boot_ns, &s.time_offset, &s.guest_ns);
     /* RDTSC as the pause began: the time paused so far isn't the guest's */
     s.guest_cycles = nc_cpu_guest_cycles(k->cpu) - (nc_cpu_host_cycles() - nc_kernel_pause_cycles());
-    s.x87_single = nc_cpu_x87_single(k->cpu);
     s.av_saved = nc_kernel_av_saved();
     s.isr_line = nc_intr_isr_line();
     nc_irq_state(&s.irq_enabled, &s.irq_lines);
@@ -112,9 +111,6 @@ bool nc_kern_state_load(NcRd *r, unsigned v)
     k->nstack_free = 0;                 /* the boot's slots given back, not the state's */
     nc_ke_state_set(s.boot_ns, s.time_offset, s.guest_ns);
     nc_cpu_guest_cycles_set(k->cpu, s.guest_cycles);
-    if (s.x87_single) {
-        nc_cpu_x87_single_restore(k->cpu);
-    }
     nc_kernel_av_saved_set(s.av_saved);
     nc_intr_isr_line_set(s.isr_line);
     nc_irq_state_set(s.irq_enabled, s.irq_lines);

@@ -1,5 +1,5 @@
 /*
- * xbased HLE GPU — the display images (spec §5.11): the frames the render
+ * xbased HLE GPU — the display images: the frames the render
  * thread writes at its swaps, and the window's presenter (vk/swapchain.c)
  * shows. Slot states are shared by the render thread (write), the timeline
  * watcher (complete), the DPC on the vCPU thread (present) and the window's
@@ -19,7 +19,7 @@
 
 /* Once, before the presenter may come (hle_back_start). */
 void hle_disp_setup(void);
-/* Render thread (CONFIG_VULKAN builds only). */
+/* Render thread. */
 int hle_disp_init(uint32_t w, uint32_t h);
 int hle_disp_begin_write(uint32_t swap_id, uint64_t value);
 void hle_disp_size(uint32_t *w, uint32_t *h);

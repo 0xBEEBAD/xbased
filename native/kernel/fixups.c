@@ -24,7 +24,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <sys/system_properties.h>
+#include "native/core/props.h"
 #include "hw/xbox/hle/prop.h"
 
 #include "hw/xbox/hle/core/xbe.h"
@@ -36,7 +36,7 @@ static const uint8_t k_mailbox_wait[] = {0x05, 0x00, 0x08, 0x00, 0x00,  /* add e
 
 static bool apu_spin_on(void)
 {
-    char v[PROP_VALUE_MAX] = "";
+    char v[NC_PROP_VALUE_MAX] = "";
     hle_prop_get("debug.xbased.apuspin", v);
     return strcmp(v, "0") != 0;
 }
@@ -224,7 +224,7 @@ static uint32_t xmv_stub(NcKernel *k, uint32_t m)
 
 static bool xmv_wait_on(void)
 {
-    char v[PROP_VALUE_MAX] = "";
+    char v[NC_PROP_VALUE_MAX] = "";
     hle_prop_get("debug.xbased.xmvwait", v);
     return strcmp(v, "0") != 0;
 }
@@ -260,7 +260,7 @@ static const uint8_t k_timer_past_tail[] = {0x5F, 0x5E, 0x5D, 0xB8, 0x2A, 0x08, 
 
 static bool d3d_timer_on(void)
 {
-    char v[PROP_VALUE_MAX] = "";
+    char v[NC_PROP_VALUE_MAX] = "";
     hle_prop_get("debug.xbased.d3dtimer", v);
     return strcmp(v, "0") != 0;
 }

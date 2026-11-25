@@ -18,7 +18,7 @@
  * spans the decoder and the render thread mark at their rare transitions
  * (the flip, the guest's interrupt handler, the command ring, the arena,
  * the GPU, compiles, submits, sleeps; never per draw), GPU progress, disc
- * reads, JIT flushes and thread CPU time. Events go to logcat
+ * JIT flushes and thread CPU time. Events go to the log
  * (xbased-hle-hitch) and to the overlay.
  */
 #ifndef HW_XBOX_HLE_HITCH_H
@@ -114,17 +114,15 @@ enum { HLE_FR_SWAP, HLE_FR_WRITE, HLE_FR_READY, HLE_FR_FRONT, HLE_FR_SHOWN, HLE_
 void hle_hitch_frame(uint32_t id, int stage);
 /* the GPU timeline advanced (render / timeline thread) */
 void hle_hitch_gpu_done(void);
-/* overlay text (lines separated by '\n'); false = nothing to show */
-bool hle_hitch_overlay(char *buf, size_t n);
 
 /* The vCPU's PC for the samplers (stalls here, the perf capture in hle.c),
  * from a front end whose vCPU state is not first_cpu's env (the native core:
  * env only changes at hooks and kernel calls). True with *pc the guest EIP,
  * or HLE_PC_HOST | (host offset >> 4) while the vCPU runs host code, with
- * HLE_PC_SYSOP in a kernel call or hook (else FEX: the JIT compiler, the
- * dispatcher); false when no sample came. NULL: env. */
+ * HLE_PC_SYSOP in a kernel call or hook (else the translator: its compiler,
+ * the dispatcher); false when no sample came. NULL: env. */
 #define HLE_PC_HOST 0xF0000000u
-#define HLE_PC_SYSOP 0x08000000u    /* host code of a kernel call or hook (else FEX) */
+#define HLE_PC_SYSOP 0x08000000u    /* host code of a kernel call or hook (else the translator) */
 #define HLE_PC_IDLE 0xFFFFFFFFu     /* the vCPU waits for an interrupt (halted) */
 extern bool (*g_hle_pc_sampler)(uint32_t *pc);
 

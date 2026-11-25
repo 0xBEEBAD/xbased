@@ -287,8 +287,7 @@ static void apu_mmio_write(void *opaque, uint32_t off, uint64_t value, unsigned 
 /* A VOICE_OFF's notification waits at most 64 frames (vp.c voice_off). */
 #define OFF_WAIT_US (64 * GP_FRAME_US)
 
-/* Microsecond sleeps (millisecond waits are too coarse on Android), the lock
- * released meanwhile like a timed wait would. */
+/* Microsecond sleeps, the lock released meanwhile like a timed wait would. */
 static void sleep_until(MCPXAPUState *d, int64_t deadline_us)
 {
     while (!apu_ld(&d->exiting)) {
@@ -547,14 +546,14 @@ static void monitor_fit(MCPXAPUState *d, int drain_bytes)
  * it to four callbacks and paces itself in real time above two: 21 to 43 ms
  * queued (monitor_fit). Callbacks of 2048 queued ~128 ms (~130 ms from the
  * guest to the speaker); with the callback non-blocking (fill), 512 and 256
- * ran a minute of Halo 2 on the Odin 3 without a short callback.
+ * ran a minute of Halo 2 without a short callback.
  *
  * Linux: 2048. Asked for 512, PulseAudio (PipeWire's) set its buffer as
  * small and ran the stream every 128 frames (2.7 ms): an audio thread a
  * little late and the server ran dry, crackles with the ring never empty
  * (Forza Motorsport on a Linux user's machine, #82/#122). 2048 was almost
  * clean there, 4096 clean (a 3008-frame period, ~200 ms of delay in all). */
-#if defined(__linux__) && !defined(__ANDROID__)
+#ifdef __linux__
 #define APU_SAMPLES_DEFAULT 2048
 #else
 #define APU_SAMPLES_DEFAULT 512
@@ -644,7 +643,7 @@ static void *mcpx_apu_frame_thread(void *arg)
     MCPXAPUState *d = arg;
     int64_t off_since_us = 0;   /* the frames stopped, VOICE_OFFs waiting: since */
 
-    /* Paused (a savestate, the activity): parked between frames, the lock
+    /* Paused (a savestate, the front end's pause): parked between frames, the lock
      * free for the state to be taken or replaced. Running on, it wrote guest
      * RAM after a save had taken RAM and before it took the APU. */
     nc_pause_register("apu");
@@ -821,27 +820,7 @@ void nc_dev_apu_init(NcVm *vm)
 void nc_dev_apu_spin_wait(const uint32_t *word)
 {
     mcpx_apu_spin_wait(); /* GP frames run to completion meanwhile */
-#if defined(__aarch64__)
-    /* WFE on the word: the APU thread's store clears the exclusive monitor
-     * (the event stream bounds each wait otherwise). */
-    uint64_t f, t0, t;
-    __asm__ volatile("mrs %0, cntfrq_el0" : "=r"(f));
-    __asm__ volatile("mrs %0, cntvct_el0" : "=r"(t0));
-    for (;;) {
-        uint32_t v;
-        __asm__ volatile("ldaxr %w0, [%1]" : "=r"(v) : "r"(word) : "memory");
-        if (!v) {
-            break;
-        }
-        __asm__ volatile("wfe" ::: "memory");
-        __asm__ volatile("mrs %0, cntvct_el0" : "=r"(t));
-        if (t - t0 > f / 1000) {
-            break;
-        }
-    }
-#else
     for (int i = 0; i < 1000 && __atomic_load_n(word, __ATOMIC_ACQUIRE); i++) {
         usleep(1);
     }
-#endif
 }

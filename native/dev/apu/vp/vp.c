@@ -544,9 +544,6 @@ static bool voice_spin_lock(MCPXAPUState *d, uint16_t v, bool may_retry)
         }
         const int64_t t0 = apu_host_us();
         for (unsigned i = 1;; i++) {
-#if defined(__aarch64__)
-            __asm__ __volatile__("yield" ::: "memory");
-#endif
             if (!__atomic_load_n(&d->vp.voice_spinlocks[v].v, __ATOMIC_RELAXED) &&
                 apu_spin_trylock(&d->vp.voice_spinlocks[v])) {
                 return true;
@@ -1185,9 +1182,8 @@ void mcpx_apu_vp_write(void *opaque, uint32_t addr, uint64_t val, unsigned int s
     }
 }
 
-/* xbased: VP addresses are guest controlled. With AHB guest RAM an
- * out-of-range read faults instead of reading adjacent heap (Phase 0
- * finding); clamp and count. */
+/* xbased: VP addresses are guest controlled: an out-of-range one is clamped
+ * to guest RAM and counted, never read past it. */
 uint32_t g_vp_oob_clamps;
 
 static inline uint64_t vp_ram_addr(MCPXAPUState *d, uint64_t addr, size_t n)
@@ -2646,9 +2642,6 @@ static VoiceTake voice_take(MCPXAPUState *d, uint8_t *c, uint16_t v)
                     }
                     apu_spin_unlock(s);
                 } else if (us < HELD_SPIN_US) {
-#if defined(__aarch64__)
-                    __asm__ __volatile__("yield" ::: "memory");
-#endif
                 } else {
                     usleep(HELD_NAP_US);
                 }
@@ -2821,21 +2814,17 @@ static int mcpx_apu_default_vp_worker_count(void)
     int cpu_count = MAX(1, (int)sysconf(_SC_NPROCESSORS_ONLN));
 
     /*
-     * Two shares: the frame thread's and one helper's. A helper costs a
-     * wake, a wait and a mixbin merge per GP frame (1500 a second), and on
-     * big.LITTLE SoCs the third and fourth run on the little cores beside
-     * the JIT and the renderers: on the RP5 (Forza's race start, slot 3)
-     * four workers took 37% of a core where two took 27% and one 25%, when
-     * the frame thread only waited for them. NC_APU_WORKERS overrides
-     * (g_apu_config).
+     * Windows: two shares, the frame thread's and one helper's, with more
+     * than two cores. A helper costs a wake, a wait and a mixbin merge per
+     * GP frame (1500 a second). NC_APU_WORKERS overrides (g_apu_config).
      *
-     * Desktop Linux: one, the frame thread alone. The helper's wake and wait
+     * Linux: one, the frame thread alone. The helper's wake and wait
      * cost more there than its share of the voices: a race in Forza
      * Motorsport (5.1) kept the frame thread busy 19% of the time with two
      * and 7% with one (Windows on the same machine: 8% with two, 11% with
      * one), and on a slower laptop busy enough to run the output dry.
      */
-#if defined(NC_DESKTOP) && !defined(_WIN32)
+#ifndef _WIN32
     (void)cpu_count;
     return 1;
 #else
@@ -2877,23 +2866,6 @@ static void voice_work_init(MCPXAPUState *d)
     pthread_mutex_unlock(&vwd->lock);
 }
 
-static void voice_work_finalize(MCPXAPUState *d)
-{
-    VoiceWorkDispatch *vwd = &d->vp.voice_work_dispatch;
-
-    pthread_mutex_lock(&vwd->lock);
-    vwd->workers_should_exit = true;
-    for (int i = 0; i < vwd->num_workers; i++) {
-        pthread_cond_signal(&vwd->workers[i].cond);
-    }
-    pthread_mutex_unlock(&vwd->lock);
-    for (int i = 1; i < vwd->num_workers; i++) {
-        pthread_join(vwd->workers[i].thread, NULL);
-    }
-    free(vwd->workers);
-    vwd->workers = NULL;
-}
-
 /* Voice v on one of the SE's lists now (their links as the guest's methods
  * left them) */
 static bool voice_listed(MCPXAPUState *d, uint16_t v)
@@ -2921,7 +2893,7 @@ static bool voice_listed(MCPXAPUState *d, uint16_t v)
  * MechAssault stops a three-voice stream before a mission and waits for it
  * to stop playing; with its first voice reported every frame and ignored,
  * the group was never released and the game spun in GetStatus, loading,
- * where the guest turned the three off within one frame (the Odin 3). */
+ * where the guest turned the three off within one frame. */
 static void idle_report(MCPXAPUState *d, const uint16_t *idle, unsigned n)
 {
     unsigned k = 0;
@@ -3081,14 +3053,6 @@ void mcpx_apu_vp_init(MCPXAPUState *d)
     d->vp.ssl_cache = NULL;
 
     voice_work_init(d);
-}
-
-void mcpx_apu_vp_finalize(MCPXAPUState *d)
-{
-    voice_work_finalize(d);
-
-    d->vp.voice_cache = NULL;
-    d->vp.ssl_cache = NULL;
 }
 
 void mcpx_apu_vp_reset(MCPXAPUState *d)

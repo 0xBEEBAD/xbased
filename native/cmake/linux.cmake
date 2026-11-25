@@ -1,8 +1,7 @@
 # xbased's core on Linux x86-64 (clang): the guest CPU is cpu/cpu_x86.cpp
 # as on Windows (Zydis), the few Windows APIs it uses come from
-# compat/linux (nc_winapi.h, seh.c: vectored handlers over SIGSEGV), and
-# what Android's libc has and glibc hasn't (system properties) from
-# compat/linux too. SDL3 is built here for the APU's output and the front end.
+# compat/linux (nc_winapi.h, seh.c: vectored handlers over SIGSEGV). SDL3
+# is built here for the APU's output and the front end.
 set(NC_DEPS "${CMAKE_CURRENT_LIST_DIR}/../../../deps" CACHE PATH "native core third-party sources")
 
 set(ZYDIS_BUILD_SHARED_LIB OFF CACHE BOOL "" FORCE)
@@ -29,11 +28,9 @@ set(NC_LINUX_COMPAT_INC "${CMAKE_CURRENT_LIST_DIR}/../compat/linux/include")
 function(nc_linux_compat)
   foreach(t ${ARGN})
     target_include_directories(${t} BEFORE PRIVATE "${NC_LINUX_COMPAT_INC}")
+    target_compile_options(${t} PRIVATE "SHELL:-include nc_linux_compat.h")
   endforeach()
 endfunction()
-
-# both PC platforms' code paths (SDL audio, the props shim, ...): NC_DESKTOP
-add_compile_definitions(NC_DESKTOP=1)
 
 set(SDL_SHARED OFF CACHE BOOL "" FORCE)
 set(SDL_STATIC ON CACHE BOOL "" FORCE)

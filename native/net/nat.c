@@ -7,10 +7,10 @@
  * leases from 10.0.2.15. The DNS server DHCP gives is the configured one
  * itself (dns=, Insignia's by default), outside that network: the queries
  * leave as any UDP does, so libslirp never looks for the host's resolver
- * (Android has no /etc/resolv.conf) and the console needs no settings. One
+ * and the console needs no settings. One
  * host socket serves each port the console sends from, whoever it sends to,
  * and takes datagrams from anyone (Xbox Live's peer-to-peer traffic on UDP
- * 3074). The phone's own loopback stays out of reach.
+ * 3074). The computer's own loopback stays out of reach.
  *
  * Everything runs on the network thread: libslirp's descriptors join its
  * poll (fill/poll), its timers are checked there, and the guest's frames are

@@ -45,7 +45,7 @@ static void test_linear_surface(void)
     HT_EQ_U32(ri.pitch, 2560);
     HT_EQ_U32(ri.bytes, 1228800);
     HT_EQ_U32(ri.size, 0x271DF27F);
-    HT_EQ_U32(ri.format, 0x00011E29);   /* PGR2's native back buffer (P2 Task 11 dump) */
+    HT_EQ_U32(ri.format, 0x00011E29);   /* PGR2's native back buffer (a dump) */
     HT_EQ_U32(ri.common, 0x01050001);
     HT_EQ_INT(ri.hdr_bytes, 24);
     HleResDesc back;

@@ -21,7 +21,6 @@
 #include <dlfcn.h>
 #include <sys/mman.h>
 #include <sys/statvfs.h>
-#include <sys/system_properties.h>
 #include "nc_win_net.h"
 
 /* ---------------------------------------------------------------- clock */
@@ -337,15 +336,6 @@ size_t nc_strlcpy(char *dst, const char *src, size_t size)
     return n;
 }
 
-size_t nc_strlcat(char *dst, const char *src, size_t size)
-{
-    const size_t d = strnlen(dst, size);
-    if (d == size) {
-        return size + strlen(src);
-    }
-    return d + nc_strlcpy(dst + d, src, size - d);
-}
-
 static void thread_describe(HANDLE h, const char *name)
 {
     typedef HRESULT(WINAPI * SetDesc)(HANDLE, PCWSTR);
@@ -652,152 +642,6 @@ int nc_cond_timedwait(pthread_cond_t *c, pthread_mutex_t *m, const struct timesp
     return pthread_cond_timedwait_relative_np(c, m, &rel);
 }
 
-/* ----------------------------------------------------------- properties */
-
-/* props.ini beside the executable: name=value lines ('#' comments). Read
- * again when its time changes, looked at no more than every 100 ms. */
-static SRWLOCK g_props_lock = SRWLOCK_INIT;
-static char *g_props;           /* the file's text, lines NUL-separated */
-static size_t g_props_len;
-static FILETIME g_props_time;
-static ULONGLONG g_props_checked;
-
-static void props_path(char *out, size_t n)
-{
-    char exe[MAX_PATH];
-    DWORD len = GetModuleFileNameA(NULL, exe, sizeof(exe));
-    while (len && exe[len - 1] != '\\' && exe[len - 1] != '/') {
-        len--;
-    }
-    exe[len] = 0;
-    snprintf(out, n, "%sprops.ini", exe);
-}
-
-static void props_refresh(void)
-{
-    const ULONGLONG now = GetTickCount64();
-    if (g_props_checked && now - g_props_checked < 100) {
-        return;
-    }
-    g_props_checked = now;
-    char path[MAX_PATH + 16];
-    props_path(path, sizeof(path));
-    WIN32_FILE_ATTRIBUTE_DATA fa;
-    if (!GetFileAttributesExA(path, GetFileExInfoStandard, &fa)) {
-        free(g_props);
-        g_props = NULL;
-        g_props_len = 0;
-        return;
-    }
-    if (g_props && !CompareFileTime(&fa.ftLastWriteTime, &g_props_time)) {
-        return;
-    }
-    FILE *f = fopen(path, "rb");
-    if (!f) {
-        return;
-    }
-    char *buf = malloc(64 * 1024);
-    size_t n = buf ? fread(buf, 1, 64 * 1024 - 1, f) : 0;
-    fclose(f);
-    if (!buf) {
-        return;
-    }
-    buf[n] = 0;
-    for (size_t i = 0; i < n; i++) {
-        if (buf[i] == '\r' || buf[i] == '\n') {
-            buf[i] = 0;
-        }
-    }
-    free(g_props);
-    g_props = buf;
-    g_props_len = n;
-    g_props_time = fa.ftLastWriteTime;
-}
-
-/* values the front end sets while running (fast forward's debug.xbased.uncap),
- * over the file's */
-static struct {
-    char name[PROP_NAME_MAX];
-    char value[PROP_VALUE_MAX];
-} g_prop_set[16];
-
-void nc_win_prop_set(const char *name, const char *value)
-{
-    AcquireSRWLockExclusive(&g_props_lock);
-    int free_slot = -1;
-    for (int i = 0; i < 16; i++) {
-        if (!strcmp(g_prop_set[i].name, name)) {
-            free_slot = i;
-            break;
-        }
-        if (!g_prop_set[i].name[0] && free_slot < 0) {
-            free_slot = i;
-        }
-    }
-    if (free_slot >= 0) {
-        snprintf(g_prop_set[free_slot].name, PROP_NAME_MAX, "%s", value ? name : "");
-        snprintf(g_prop_set[free_slot].value, PROP_VALUE_MAX, "%s", value ? value : "");
-    }
-    ReleaseSRWLockExclusive(&g_props_lock);
-}
-
-int __system_property_get(const char *name, char *value)
-{
-    value[0] = 0;
-    AcquireSRWLockExclusive(&g_props_lock);
-    for (int i = 0; i < 16; i++) {
-        if (g_prop_set[i].name[0] && !strcmp(g_prop_set[i].name, name)) {
-            snprintf(value, PROP_VALUE_MAX, "%s", g_prop_set[i].value);
-            ReleaseSRWLockExclusive(&g_props_lock);
-            return (int)strlen(value);
-        }
-    }
-    props_refresh();
-    const size_t nl = strlen(name);
-    for (size_t i = 0; g_props && i < g_props_len;) {
-        const char *line = g_props + i;
-        const size_t ll = strlen(line);
-        while (*line == ' ' || *line == '\t') {
-            line++;
-        }
-        if (line[0] != '#' && !strncmp(line, name, nl)) {
-            const char *p = line + nl;
-            while (*p == ' ' || *p == '\t') {
-                p++;
-            }
-            if (*p == '=') {
-                p++;
-                while (*p == ' ' || *p == '\t') {
-                    p++;
-                }
-                snprintf(value, PROP_VALUE_MAX, "%s", p);
-                size_t vl = strlen(value);
-                while (vl && (value[vl - 1] == ' ' || value[vl - 1] == '\t')) {
-                    value[--vl] = 0;
-                }
-                ReleaseSRWLockExclusive(&g_props_lock);
-                return (int)vl;
-            }
-        }
-        i += ll + 1;
-    }
-    ReleaseSRWLockExclusive(&g_props_lock);
-    /* the environment: DEBUG_XBASED_PERF for debug.xbased.perf */
-    char env[PROP_NAME_MAX * 2 + 8];
-    size_t k = 0;
-    for (; name[k] && k < sizeof(env) - 1; k++) {
-        const char c = name[k];
-        env[k] = c == '.' ? '_' : (c >= 'a' && c <= 'z') ? (char)(c - 32) : c;
-    }
-    env[k] = 0;
-    const char *e = getenv(env);
-    if (e) {
-        snprintf(value, PROP_VALUE_MAX, "%s", e);
-        return (int)strlen(value);
-    }
-    return 0;
-}
-
 /* --------------------------------------------------------------- memory */
 
 static DWORD win_prot(int prot)
@@ -865,54 +709,7 @@ int nc_mprotect(void *addr, size_t len, int prot)
     return 0;
 }
 
-int nc_madvise(void *addr, size_t len, int advice)
-{
-    if (advice == MADV_DONTNEED) {
-        /* the pages' contents may go: anonymous memory reads back as zeros */
-        MEMORY_BASIC_INFORMATION mbi;
-        if (VirtualQuery(addr, &mbi, sizeof(mbi)) && mbi.Type == MEM_PRIVATE) {
-            VirtualAlloc(addr, len, MEM_RESET, PAGE_NOACCESS);
-        }
-    }
-    return 0;
-}
-
-int nc_msync(void *addr, size_t len, int flags)
-{
-    return FlushViewOfFile(addr, len) ? 0 : -1;
-}
-
 /* ----------------------------------------------------------- libraries */
-
-static __thread char g_dlerr[128];
-
-void *dlopen(const char *file, int mode)
-{
-    HMODULE m = file ? LoadLibraryA(file) : GetModuleHandleA(NULL);
-    if (!m) {
-        snprintf(g_dlerr, sizeof(g_dlerr), "LoadLibrary(%s): error %lu", file, GetLastError());
-    }
-    return m;
-}
-
-void *dlsym(void *handle, const char *name)
-{
-    void *p = (void *)GetProcAddress(handle ? (HMODULE)handle : GetModuleHandleA(NULL), name);
-    if (!p) {
-        snprintf(g_dlerr, sizeof(g_dlerr), "%s: not found", name);
-    }
-    return p;
-}
-
-int dlclose(void *handle)
-{
-    return FreeLibrary((HMODULE)handle) ? 0 : -1;
-}
-
-const char *dlerror(void)
-{
-    return g_dlerr[0] ? g_dlerr : NULL;
-}
 
 int dladdr(const void *addr, Dl_info *info)
 {

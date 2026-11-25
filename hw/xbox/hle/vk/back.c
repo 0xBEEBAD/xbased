@@ -1,12 +1,10 @@
 /*
  * xbased HLE GPU — render thread: consumes the command ring, records clears
  * into lazily opened dynamic-rendering passes, submits at FENCE/SWAP/KICK/
- * READBACK with the front end's timeline value (spec §5.3, §5.10-5.12).
+ * READBACK with the front end's timeline value.
  */
 #include "hw/xbox/hle/base.h"
-#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
-#include <sys/system_properties.h>
-#endif
+#include "native/core/props.h"
 
 #include "hw/xbox/hle/hle.h"
 #include "hw/xbox/hle/prop.h"
@@ -44,8 +42,6 @@ static struct {
     bool recording;
     uint32_t rt, ds;
     bool pass_open;
-    uint64_t zeq_wgen;          /* the depth buffer's wgen at the open pass's last
-                                   depth read barrier (hle_draw_zeq); 0 none yet */
     bool pend_clear;
     uint32_t pend_flags, pend_s;
     VkClearColorValue pend_color;
@@ -373,7 +369,7 @@ static void gput_collect(unsigned slot)
 
 static void gput_begin(VkCommandBuffer cb, unsigned slot)
 {
-    if (!g_hle_prof_on || g_gput.failed || hle_quirk(HLE_QUIRK_NO_TIMESTAMPS)) {
+    if (!g_hle_prof_on || g_gput.failed) {
         return;
     }
     if (!g_gput.pool) {
@@ -436,7 +432,7 @@ static struct {
 static void pt_slot_begin(VkCommandBuffer cb, unsigned slot)
 {
     g_pt.n[slot] = 0;
-    if (!g_hle_prof_on || g_pt.failed || hle_quirk(HLE_QUIRK_NO_TIMESTAMPS)) {
+    if (!g_hle_prof_on || g_pt.failed) {
         return;
     }
     if (!g_pt.pool) {
@@ -622,9 +618,7 @@ static VkClearColorValue color_of(uint32_t argb)
  * one (the draw merge count, hle_draw_ff_diag). */
 uint64_t hle_back_breaks;
 
-/* lrz_off: the pass's first draw runs without the driver's LRZ
- * (hle_draw_lrz_off; true when not known) */
-static bool open_pass(bool lrz_off)
+static bool open_pass(void)
 {
     hle_back_breaks++;
     HleVkSurf *rt = hle_surf_get(g_back.rt), *ds = hle_surf_get(g_back.ds);
@@ -644,10 +638,9 @@ static bool open_pass(bool lrz_off)
     VkRenderingAttachmentInfo da = ca, sa = ca;
     uint32_t w = rt ? rt->w : ds->w, h = rt ? rt->h : ds->h;
     if (rt) {
-        /* nothing written yet and no clear: zeros, not what an attachment
-         * compressor left (quirks.h) */
-        const bool cfresh = rt->layout == VK_IMAGE_LAYOUT_UNDEFINED && !(pf & HLE_CLEAR_TARGET) &&
-                            hle_quirk(HLE_QUIRK_FRESH_CLEAR);
+        /* nothing written yet and no clear: zeros, not the image's undefined
+         * contents (what an attachment compressor left) */
+        const bool cfresh = rt->layout == VK_IMAGE_LAYOUT_UNDEFINED && !(pf & HLE_CLEAR_TARGET);
         hle_surf_transition(cb, rt, rt->local_read ? VK_IMAGE_LAYOUT_RENDERING_LOCAL_READ_KHR
                                                    : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
         hle_surf_written(rt);           /* HLE_OP_ZWRITE compares it with a depth buffer's */
@@ -658,7 +651,6 @@ static bool open_pass(bool lrz_off)
         ca.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
         ca.clearValue.color = cfresh ? (VkClearColorValue){ .float32 = { 0 } } : g_back.pend_color;
     }
-    VkImageAspectFlags in_pass_clear = 0;   /* HLE_QUIRK_DS_SAME_LOAD */
     bool stencil = ds && (ds->aspect & VK_IMAGE_ASPECT_STENCIL_BIT);
     if (ds) {
         w = MIN(w, ds->w);
@@ -681,24 +673,7 @@ static bool open_pass(bool lrz_off)
             }
             pf |= HLE_CLEAR_ZBUFFER | (stencil ? HLE_CLEAR_STENCIL : 0);
         }
-        hle_surf_transition(cb, ds, ds->local_read ? VK_IMAGE_LAYOUT_RENDERING_LOCAL_READ_KHR
-                                                   : VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
-        /* A pass clearing depth that opens on a draw without LRZ: an empty
-         * pass of one pixel clears it first, and its end stores the driver's
-         * cleared LRZ state, which the pass falls back to (quirks.h). */
-        if ((pf & HLE_CLEAR_ZBUFFER) && lrz_off && hle_quirk(HLE_QUIRK_LRZ_CLEAR)) {
-            VkRenderingAttachmentInfo za = {
-                .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO, .imageView = ds->view,
-                .imageLayout = ds->layout, .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-                .storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-                .clearValue.depthStencil.depth = g_back.pend_z };
-            VkRenderingInfo zi = { .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-                                   .renderArea = { { 0, 0 }, { 1, 1 } }, .layerCount = 1,
-                                   .pDepthAttachment = &za };
-            T.vkCmdBeginRendering(cb, &zi);
-            T.vkCmdEndRendering(cb);
-            hle_img_barrier(cb, ds->img, ds->aspect, ds->layout, ds->layout);
-        }
+        hle_surf_transition(cb, ds, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
         if (title_pf & (HLE_CLEAR_ZBUFFER | HLE_CLEAR_STENCIL)) {
             hle_surf_written(ds);       /* else its draws say (draw.c), when they write it */
         }
@@ -712,12 +687,6 @@ static bool open_pass(bool lrz_off)
         sa = da;
         sa.loadOp = (pf & HLE_CLEAR_STENCIL) ? VK_ATTACHMENT_LOAD_OP_CLEAR
                                              : VK_ATTACHMENT_LOAD_OP_LOAD;
-        if (stencil && da.loadOp != sa.loadOp && hle_quirk(HLE_QUIRK_DS_SAME_LOAD)) {
-            /* both loaded, the cleared aspect cleared once the pass begins */
-            in_pass_clear = da.loadOp == VK_ATTACHMENT_LOAD_OP_CLEAR ? VK_IMAGE_ASPECT_DEPTH_BIT
-                                                                     : VK_IMAGE_ASPECT_STENCIL_BIT;
-            da.loadOp = sa.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-        }
     }
     VkRenderingInfo ri = {
         .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
@@ -726,14 +695,7 @@ static bool open_pass(bool lrz_off)
         .pDepthAttachment = ds ? &da : NULL, .pStencilAttachment = stencil ? &sa : NULL };
     pt_pass_begin(cb, w, h, rt ? (int)rt->fmt : -1, ds != NULL, pf);
     T.vkCmdBeginRendering(cb, &ri);
-    if (in_pass_clear) {
-        VkClearAttachment za = { .aspectMask = in_pass_clear,
-                                 .clearValue.depthStencil = { g_back.pend_z, g_back.pend_s } };
-        VkClearRect zr = { .rect = ri.renderArea, .baseArrayLayer = 0, .layerCount = 1 };
-        T.vkCmdClearAttachments(cb, 1, &za, 1, &zr);
-    }
     g_back.pass_open = true;
-    g_back.zeq_wgen = 0;
     g_back.pend_clear = false;
     return true;
 }
@@ -767,7 +729,7 @@ static void close_pass_why(unsigned why)
 {
     hle_back_breaks++;
     if (!g_back.pass_open && g_back.pend_clear) {
-        open_pass(false);                     /* clear-only pass: loadOp=CLEAR */
+        open_pass();                          /* clear-only pass: loadOp=CLEAR */
     }
     if (g_back.pass_open) {
         vis_pass_end(g_back.fr[g_back.cur].cb);
@@ -863,7 +825,6 @@ static void submit(uint64_t value)
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
         .commandBufferInfoCount = has_cb ? 1 : 0, .pCommandBufferInfos = &cbi,
         .signalSemaphoreInfoCount = 1, .pSignalSemaphoreInfos = &sig };
-    hle_tl_gap_serve();
     int64_t ts = hle_prof_begin();
     uint32_t pa = hle_hitch_enter(HLE_ACT_SUBMIT);
     hle_vk_queue_lock();
@@ -1068,18 +1029,16 @@ static void rtd_extras(const char *v)
 
 static void rtd_poll(void)
 {
-#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
     if (g_back.st.swaps < g_rtd.poll) {
         return;
     }
     g_rtd.poll = g_back.st.swaps + 11;  /* odd: either frame parity */
     static HleProp prop;
-    char v[PROP_VALUE_MAX];
+    char v[NC_PROP_VALUE_MAX];
     if (hle_prop_new(&prop, "debug.xbased.rtdump", v)) {
         g_rtd.next = true;
         rtd_extras(v);
     }
-#endif
 }
 
 /* debug: XBASED_HLE_RTDUMP_SWAPS=<first>[-<last>][+id,id...] dumps the frames
@@ -1211,8 +1170,6 @@ typedef struct PixRec {
     uint32_t tbytes;                    /* stage 0's target texture: its texel after the draw */
     uint32_t vbytes;                    /* a small arena draw: its vertex bytes, as recorded */
     uint8_t v[PIX_VBYTES];
-    uint32_t gvbytes;                   /* a draw from guest memory: its first vertex's bytes */
-    uint8_t gv[64];
     uint32_t rs[9];                     /* hle_draw_rs_brief */
     HleCmdDraw c;
     float k[192][4];                    /* the draw's constants (program draws) */
@@ -1233,13 +1190,12 @@ static struct {
 
 static void pix_poll(void)
 {
-#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
     if (g_back.st.swaps < g_pix.poll) {
         return;
     }
     g_pix.poll = g_back.st.swaps + 3;    /* odd: either frame parity */
     static HleProp prop;
-    char v[PROP_VALUE_MAX];
+    char v[NC_PROP_VALUE_MAX];
     if (hle_prop_new(&prop, "debug.xbased.pixhist", v)) {
         unsigned x = 0, y = 0, id = 0;
         bool host = v[0] == 'h';
@@ -1256,7 +1212,6 @@ static void pix_poll(void)
             g_pix.next = true;
         }
     }
-#endif
 }
 
 /* After a draw (c) or a clear (c NULL) of the pixel history's frame. */
@@ -1325,7 +1280,7 @@ static void pix_after(const HleCmdDraw *c)
     }
     /* a few vertices from the arena (a full-screen quad): the bytes now and,
      * copied by the GPU after the draw, the bytes it read; c0..c3 the same */
-    if (c && c->nbind && !(c->guest_vb & 1) && c->bind_stride[0] &&
+    if (c && c->nbind && c->bind_stride[0] &&
         c->count * c->bind_stride[0] <= PIX_VBYTES) {
         r->vbytes = c->count * c->bind_stride[0];
         memcpy(r->v, g_harena.map + c->bind_off[0], r->vbytes);
@@ -1333,16 +1288,6 @@ static void pix_after(const HleCmdDraw *c)
             { c->bind_off[0], PIX_STRIDE * g_pix.n + 16, r->vbytes },
             { c->consts_off, PIX_STRIDE * g_pix.n + 16 + PIX_VBYTES, 64 } };
         T.vkCmdCopyBuffer(cb, g_harena.buf, g_pix.buf, c->vsh ? 2 : 1, bc);
-    }
-    /* a draw reading guest memory: the bytes of the vertex its first index names */
-    if (c && c->nbind && (c->guest_vb & 1) && c->bind_stride[0]) {
-        uint32_t ix = c->ib_off != 0xFFFFFFFFu ? *(const uint16_t *)(g_harena.map + c->ib_off) : 0;
-        uint32_t len = MIN(c->bind_stride[0], (uint32_t)sizeof(r->gv));
-        const uint8_t *gp = hle_pa_ptr(c->bind_off[0] + ix * c->bind_stride[0], len);
-        if (gp) {
-            memcpy(r->gv, gp, len);
-            r->gvbytes = len;
-        }
     }
     if (c) {
         r->c = *c;
@@ -1399,9 +1344,7 @@ static void pix_write(uint64_t value)
                         r->c.count, r->c.prim, r->c.fvf, r->c.tex[0], r->c.tex[1], r->c.tex[2],
                         r->c.tex[3], r->c.nbind);
                 for (uint32_t b = 0; b < r->c.nbind && b < HLE_DRAW_MAX_BIND; b++) {
-                    /* g: guest PA read in place, else an arena copy */
-                    fprintf(f, " %c%08x/%u", (r->c.guest_vb >> b) & 1 ? 'g' : 'a',
-                            r->c.bind_off[b], r->c.bind_stride[b]);
+                    fprintf(f, " a%08x/%u", r->c.bind_off[b], r->c.bind_stride[b]);
                 }
                 fprintf(f, " attr0 %08x ib %08x atest %u/%x/%02x blend %u %x/%08x z %x/%x cw %x",
                         r->c.attr[0], r->c.ib_off, r->rs[0], r->rs[1], r->rs[2] & 0xFF, r->rs[3],
@@ -1410,12 +1353,6 @@ static void pix_write(uint64_t value)
                 for (unsigned a = 0; a < HLE_DRAW_ATTRS; a++) {
                     if (r->c.attr[a] & 0xF0) {
                         fprintf(f, " v%u=%x", a, r->c.attr[a]);
-                    }
-                }
-                if (r->gvbytes) {
-                    fprintf(f, " vertex");
-                    for (uint32_t o = 0; o + 4 <= r->gvbytes; o += 4) {
-                        fprintf(f, " %08x", hle_ldl_le(r->gv + o));
                     }
                 }
                 if (r->tbytes) {
@@ -1662,7 +1599,7 @@ static void cmd_clear(const HleCmdClear *c)
     if ((flags & HLE_CLEAR_TARGET) && (flags & HLE_CLEAR_TARGET) != HLE_CLEAR_TARGET) {
         /* a channel subset: drawn through the write mask, the rest as usual */
         uint32_t rest = flags & ~HLE_CLEAR_TARGET;
-        if (!g_back.pass_open && !open_pass(true)) {
+        if (!g_back.pass_open && !open_pass()) {
             return;
         }
         if (clear_masked(c, rt, ds, flags)) {
@@ -1697,7 +1634,7 @@ static void cmd_clear(const HleCmdClear *c)
         g_back.st.last_rt = g_back.rt;
     }
     if (c->nrects == 0 && !g_back.pass_open) {
-        /* §5.10: a Clear before the first draw becomes loadOp=CLEAR */
+        /* a Clear before the first draw becomes loadOp=CLEAR */
         g_back.pend_flags = (g_back.pend_clear ? g_back.pend_flags : 0) | flags;
         if (flags & HLE_CLEAR_TARGET) {
             g_back.pend_color = color_of(c->color);
@@ -1711,7 +1648,7 @@ static void cmd_clear(const HleCmdClear *c)
         g_back.pend_clear = true;
         return;
     }
-    if (!g_back.pass_open && !open_pass(true)) {
+    if (!g_back.pass_open && !open_pass()) {
         return;
     }
     VkClearAttachment at[2];
@@ -1929,14 +1866,13 @@ static void cmd_swap(const HleCmdSwap *c)
  * (hle_vk_lose) as a driver fault would: the game stops, the app says so */
 static void back_props_poll(uint64_t swap)
 {
-#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
     static int64_t next_poll;
     static HleProp log_prop, lose_prop;
     if ((int64_t)swap < next_poll) {
         return;
     }
     next_poll = swap + 3;
-    char v[PROP_VALUE_MAX] = "";
+    char v[NC_PROP_VALUE_MAX] = "";
     if (hle_prop_get("debug.xbased.visall", v) > 0 && g_vis_dbg.all >= 0 &&
         atoi(v) != g_vis_dbg.all) {
         g_vis_dbg.all = atoi(v) != 0;
@@ -1985,7 +1921,6 @@ static void back_props_poll(uint64_t swap)
                 cut == 3 ? "the passes alone" :
                 cut == 4 ? "3-vertex draws scissored to a pixel" : "none");
     }
-#endif
 }
 
 #define SWAP_MIN_NS 2000000
@@ -2143,7 +2078,7 @@ static void cmd_readback(const HleCmdReadback *c)
     const HleFmtInfo *fi = s ? hle_fmt_info(s->d.xfmt) : NULL;
     /* Linear-row copies only: a swizzled target (OBJ_CREATE pitch 0, or a
      * non-HLE_FI_LIN format) would get linear rows written over its swizzled
-     * guest data (swizzled readback is P4). An image the GPU never wrote
+     * guest data (swizzled readbacks: pb/pbdraw.c). An image the GPU never wrote
      * (layout UNDEFINED) holds nothing newer than guest memory: skip it so
      * CPU-written data survives. */
     bool linear = s && fi && ((s->d.pitch && (fi->flags & HLE_FI_LIN)) ||
@@ -2157,16 +2092,10 @@ static void cmd_readback(const HleCmdReadback *c)
      * old frame, and the title's next write there brought that frame back
      * into the image (a flash of it) */
     const uint32_t rows = c->rows && c->rows < h ? c->rows : h;
-    /* without zero-copy RAM, the arena copy that lands in guest memory */
+    /* the arena copy that lands in guest memory */
     bool fits = c->fb && s && s->texel_bytes && rows &&
                 (uint64_t)c->pitch * (rows - 1) + (uint64_t)w * s->texel_bytes <= c->fb_len;
-    /* ... and with it, the rows the GPU writes in place: inside guest RAM (a surface's offset,
-     * pitch and size are the title's) */
-    const bool in_ram = !g_hram.zero_copy ||
-                        (s && s->texel_bytes && rows &&
-                         (uint64_t)c->pa + (uint64_t)c->pitch * (rows - 1) + (uint64_t)w * s->texel_bytes <=
-                         g_hram.size);
-    if (s && linear && written && in_ram && (g_hram.zero_copy || fits) && hle_surf_ensure(s) &&
+    if (s && linear && written && fits && hle_surf_ensure(s) &&
         (s->aspect & VK_IMAGE_ASPECT_COLOR_BIT) && s->texel_bytes &&
         c->pitch % s->texel_bytes == 0) {
         VkCommandBuffer cb = cb_get();
@@ -2179,18 +2108,13 @@ static void cmd_readback(const HleCmdReadback *c)
             img = hle_surf_down(cb, s, il, 0, 0, w, h);
             il = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
         }
-        bool fb = !g_hram.zero_copy;
         VkBufferImageCopy r = {
-            .bufferOffset = fb ? c->fb - 1 : c->pa, .bufferRowLength = c->pitch / s->texel_bytes,
+            .bufferOffset = c->fb - 1, .bufferRowLength = c->pitch / s->texel_bytes,
             .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
             .imageExtent = { w, rows, 1 } };
         if (img) {
-            T.vkCmdCopyImageToBuffer(cb, img, il,
-                                     !fb ? g_hram.buf : g_hland.buf ? g_hland.buf : g_harena.buf,
-                                     1, &r);
-            if (fb) {
-                hle_tl_land_copied(c->fb - 1, c->pitch, w * s->texel_bytes, rows);
-            }
+            T.vkCmdCopyImageToBuffer(cb, img, il, g_hland.buf ? g_hland.buf : g_harena.buf, 1, &r);
+            hle_tl_land_copied(c->fb - 1, c->pitch, w * s->texel_bytes, rows);
         }
         VkMemoryBarrier2 mb = {
             .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
@@ -2208,9 +2132,9 @@ static void cmd_readback(const HleCmdReadback *c)
     } else {
         if (g_back.st.readback_skips++ < 8) {
             hle_log("xbased-hle-back", "readback of surface %u skipped (linear=%d "
-                    "zero_copy=%d arena copy=%s fmt=0x%x %ux%u aspect %x pitch %u fb_len %u) - "
-                    "guest keeps its memory (P4: swizzled)",
-                    c->surf, linear, g_hram.zero_copy,
+                    "arena copy=%s fmt=0x%x %ux%u aspect %x pitch %u fb_len %u) - "
+                    "guest keeps its memory (swizzled)",
+                    c->surf, linear,
                     !c->fb ? "none" : fits ? "yes" : "too small", s ? s->d.xfmt : 0,
                     s ? s->d.w : 0, s ? s->d.h : 0, s ? (unsigned)s->aspect : 0, c->pitch, c->fb_len);
         }
@@ -2325,8 +2249,7 @@ static void cmd_upload(const HleCmdUpload *c)
 {
     close_pass();
     HleVkSurf *d = hle_surf_get(c->dst);
-    const char *why = !d ? "no surface" : !g_hram.zero_copy && !c->arena ? "guest RAM not mapped" :
-                      d->d.parent ? "a level or face" : !hle_surf_ensure(d) ? "no image" :
+    const char *why = !d ? "no surface" : !c->arena ? "no arena copy" : d->d.parent ? "a level or face" : !hle_surf_ensure(d) ? "no image" :
                       !(d->aspect & VK_IMAGE_ASPECT_COLOR_BIT) ? "not colour" :
                       !d->texel_bytes || c->pitch % d->texel_bytes ? "pitch" : NULL;
     int32_t k = d ? (int32_t)MAX(d->scale, 1u) : 1, n = 0;
@@ -2345,14 +2268,14 @@ static void cmd_upload(const HleCmdUpload *c)
         }
         hle_img_barrier(cb, tmp, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-        /* the rows in guest RAM, or their copy in the arena (from lo) */
+        /* the rows' copy in the arena (from lo) */
         const uint32_t at = c->pa + (uint32_t)r->y1 * c->pitch + (uint32_t)r->x1 * d->texel_bytes;
         VkBufferImageCopy bc = {
-            .bufferOffset = c->arena ? (VkDeviceSize)(c->arena - 1) + (at - c->lo) : at,
+            .bufferOffset = (VkDeviceSize)(c->arena - 1) + (at - c->lo),
             .bufferRowLength = c->pitch / d->texel_bytes,
             .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
             .imageExtent = { (uint32_t)w, (uint32_t)h, 1 } };
-        T.vkCmdCopyBufferToImage(cb, c->arena ? g_harena.buf : g_hram.buf, tmp,
+        T.vkCmdCopyBufferToImage(cb, g_harena.buf, tmp,
                                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &bc);
         hle_img_barrier(cb, tmp, VK_IMAGE_ASPECT_COLOR_BIT,
                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -2536,7 +2459,7 @@ static void dispatch(const HleCmdHdr *h)
         break;
     case HLE_OP_VIS_END:  cmd_vis_end(p); break;
     case HLE_OP_TEX:
-        close_pass_why(PE_TEX);                 /* uploads never split a pass (P3 Task 9 hoists) */
+        close_pass_why(PE_TEX);                 /* uploads never split a pass */
         hle_draw_cmd_tex(p, cb_get());
         break;
     case HLE_OP_DRAW: {
@@ -2546,13 +2469,6 @@ static void dispatch(const HleCmdHdr *h)
         HleVkSurf *fbrt = fb ? hle_surf_get(g_back.rt) : NULL;
         if (fbrt && !fbrt->general && !fbrt->local_read) {
             fbrt->local_read = true;
-            close_pass_why(PE_LREAD);
-        }
-        /* an EQUAL pass reading the depth buffer (hle_draw_zeq): the same */
-        unsigned zq = hle_draw_zeq(p, g_back.ds);
-        HleVkSurf *zds = zq ? hle_surf_get(g_back.ds) : NULL;
-        if (zds && !zds->general && !zds->local_read) {
-            zds->local_read = true;
             close_pass_why(PE_LREAD);
         }
         if (hle_draw_tex_needs_prep(p, g_back.rt)) {
@@ -2568,21 +2484,14 @@ static void dispatch(const HleCmdHdr *h)
         }
         if (g_hle_gpucut == 3) {
             if (!g_back.pass_open) {
-                open_pass(true);        /* debug: the passes alone, no draw state */
+                open_pass();            /* debug: the passes alone, no draw state */
             }
-        } else if (g_back.pass_open || open_pass(hle_draw_lrz_off())) {
+        } else if (g_back.pass_open || open_pass()) {
             vis_draw(g_back.fr[g_back.cur].cb);
-            VkImageView zv = zds ? hle_zread_depth_view(zds) : VK_NULL_HANDLE;
-            if (fbrt || zv) {
-                /* the depth read waits for the pass's depth writes since the last */
-                bool zbar = zv && zds->wgen != g_back.zeq_wgen;
-                hle_draw_fb_bind(g_back.fr[g_back.cur].cb, fbrt, zds, zv, zbar);
-                if (zbar) {
-                    g_back.zeq_wgen = zds->wgen;
-                }
+            if (fbrt) {
+                hle_draw_fb_bind(g_back.fr[g_back.cur].cb, fbrt);
                 g_pt.fb++;
             }
-            g_hle_zeq = zv ? zq : 0;
             hle_draw_cmd_draw(p, g_back.fr[g_back.cur].cb, g_back.rt, g_back.ds, &g_back.vp);
             g_back.st.draws++;
             if (g_pix.active) {
@@ -2602,7 +2511,6 @@ static void dispatch(const HleCmdHdr *h)
     }
 }
 
-#if defined(__x86_64__)
 #include <cpuid.h>
 #include <x86intrin.h>
 
@@ -2648,7 +2556,6 @@ static void x86_wait_line(const volatile uint32_t *p, uint32_t seen)
         }
     }
 }
-#endif
 
 /* After draining: up to ~200 us waiting for the producer's next publish, in
  * WFE on the ring head (its store clears the exclusive monitor; interrupts
@@ -2657,26 +2564,6 @@ static void x86_wait_line(const volatile uint32_t *p, uint32_t seen)
  * never sleeps, so its commits never pay a futex wake. */
 static bool ring_wait_brief(HleRing *r, uint32_t seen)
 {
-#if defined(__aarch64__)
-    uint64_t f, t0, t;
-    __asm__ volatile("mrs %0, cntfrq_el0" : "=r"(f));
-    __asm__ volatile("mrs %0, cntvct_el0" : "=r"(t0));
-    for (;;) {
-        uint32_t h;
-        __asm__ volatile("ldaxr %w0, [%1]" : "=r"(h) : "r"(&r->head) : "memory");
-        if (h != seen) {
-            return true;
-        }
-        if (hle_atomic_read(&g_pend.urgent)) {
-            return false;                       /* a guest waits: submit now */
-        }
-        __asm__ volatile("wfe" ::: "memory");
-        __asm__ volatile("mrs %0, cntvct_el0" : "=r"(t));
-        if (t - t0 > f / 5000) {
-            return false;
-        }
-    }
-#elif defined(__x86_64__)
     /* x86: the same wait on the head's line, in AMD's MONITORX/MWAITX
      * (Zen) or Intel's UMONITOR/UMWAIT (WAITPKG), else PAUSE. Returning at
      * once, the render thread slept after every draw and each commit paid
@@ -2694,9 +2581,6 @@ static bool ring_wait_brief(HleRing *r, uint32_t seen)
             return false;
         }
     }
-#else
-    return false;
-#endif
 }
 
 /* What finished GPU work frees: destroyed surfaces, retired textures and
@@ -2856,8 +2740,7 @@ int hle_back_start(void)
         return r;
     }
     /* DXT decoded on the way in (no BC: pbres.c) takes four to eight times the bytes */
-    const char *what = hle_vk_guest_ram_init() ? "guest RAM" :
-                       hle_vk_arena_init(g_hvk.caps.bc ? 32u << 20 : 64u << 20) ? "the upload arena" :
+    const char *what = hle_vk_arena_init(g_hvk.caps.bc ? 32u << 20 : 64u << 20) ? "the upload arena" :
                        hle_vk_land_init(16u << 20) ? "the readback buffer" :
                        hle_fe_init() ? "the front end" :
                        hle_tl_init(on_complete) ? "the timeline" :
@@ -2891,7 +2774,7 @@ int hle_back_start(void)
     hle_batch_init();
     hle_disp_setup();
     hle_vk_set_ready();                 /* the window's presenter may start */
-    hle_log("xbased-hle-back", "back end started (zero_copy=%d)", g_hram.zero_copy);
+    hle_log("xbased-hle-back", "back end started");
     return 0;
 }
 
@@ -2918,9 +2801,6 @@ void hle_back_urgent(void)
 {
     if (g_back.running) {
         hle_atomic_set(&g_pend.urgent, 1);
-#if defined(__aarch64__)
-        __asm__ volatile("sev" ::: "memory");  /* out of ring_wait_brief's WFE */
-#endif
         hle_event_set(&g_back.kick);
     }
 }

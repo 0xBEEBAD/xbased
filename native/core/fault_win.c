@@ -1,8 +1,9 @@
 /*
  * xbased native core — the core's faults on Windows: a vectored exception
  * handler hands access violations to nc_core_fault (MMIO, the dirty
- * tracking, a title's pager, a guest's own page fault) as Android's
- * SIGSEGV handler does, the exception's CONTEXT as the ucontext. Anything
+ * tracking, a title's pager, a guest's own page fault) as the Linux
+ * build's SIGSEGV handler does (compat/linux/seh.c), the exception's CONTEXT
+ * as the ucontext. Anything
  * else, and faults that aren't the core's, go on to whoever handles them
  * (structured exception handlers: the Vulkan driver's own probes among
  * them), then to the front end's report.

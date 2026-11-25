@@ -6,17 +6,12 @@
 #include "hw/xbox/hle/shader/ff.h"
 
 #include <glslang/Include/glslang_c_interface.h>
-#ifdef __ANDROID__
-#include <android/log.h>
-#define GLSL_LOG(...) __android_log_print(ANDROID_LOG_ERROR, "xbased-hle-glsl", __VA_ARGS__)
-#else
 #define GLSL_LOG(...) fprintf(stderr, __VA_ARGS__)
-#endif
 
 bool g_hle_glsl_vk11;
 
-/* Resource limits: data copied verbatim from hw/xbox/nv2a/pgraph/vk/glsl.c
- * (resource_limits) so HLE does not depend on the LLE renderer. */
+/* Resource limits: glslang's defaults, as xemu's renderer passes them
+ * (hw/xbox/nv2a/pgraph/vk/glsl.c resource_limits). */
 static const glslang_resource_t k_hle_glsl_limits = {
     .max_lights = 32,
     .max_clip_planes = 6,
@@ -128,11 +123,6 @@ void hle_glsl_init(void)
     glslang_initialize_process();
 }
 
-void hle_glsl_finalize(void)
-{
-    glslang_finalize_process();
-}
-
 static void log_failure(const char *phase, const char *info,
                         const char *debug, const char *src)
 {
@@ -146,28 +136,6 @@ static void log_failure(const char *phase, const char *info,
     if (src) {
         GLSL_LOG("[SOURCE]\n%s", src);
     }
-}
-
-/* Input attachment index HLE_IA_DEPTH (shader/ff.h) out of the module: a
- * subpassInput without one reads the depth attachment (local read's default
- * mapping), which GLSL cannot declare. */
-static size_t strip_ia_depth(uint32_t *w, size_t n)
-{
-    size_t o = 5;
-    for (size_t i = 5; i < n;) {
-        uint32_t len = w[i] >> 16;
-        if (!len || i + len > n) {
-            return n;                   /* malformed: as is */
-        }
-        bool drop = (w[i] & 0xFFFF) == 71 /* OpDecorate */ && len == 4 &&
-                    w[i + 2] == 43 /* InputAttachmentIndex */ && w[i + 3] == HLE_IA_DEPTH;
-        if (!drop) {
-            memmove(&w[o], &w[i], len * sizeof(*w));
-            o += len;
-        }
-        i += len;
-    }
-    return o;
 }
 
 uint32_t *hle_glsl_compile(HleShaderStage stage, const char *src,
@@ -227,9 +195,6 @@ uint32_t *hle_glsl_compile(HleShaderStage stage, const char *src,
     glslang_program_SPIRV_get(pr, words);
     glslang_program_delete(pr);
     glslang_shader_delete(sh);
-    if (stage == HLE_SHADER_FRAGMENT && strstr(src, "uniform subpassInput uZ;")) {
-        n = strip_ia_depth(words, n);
-    }
     *nwords = n;
     return words;
 }

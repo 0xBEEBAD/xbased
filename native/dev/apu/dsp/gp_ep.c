@@ -112,21 +112,6 @@ static void scatter_gather_rw(MCPXAPUState *d, uint64_t sge_base,
         if (in_ram && dir) {
             memcpy(&d->ram_ptr[paddr], ptr, bytes_to_copy);
             hle_host_mem_set_dirty(paddr, bytes_to_copy);
-#if defined(__aarch64__)
-            /* Wake any TCG thread parked in WFE on this cache line.
-             * APU DSP writes audio voice descriptors that include
-             * "voice done" / "buffer drained" flags the guest polls
-             * via cmp+jne self-loops (e.g. PGR2 0x1efc00). The ARM
-             * cache-coherent invalidation triggered by the memcpy
-             * above SHOULD trip the spinner's exclusive monitor, but
-             * empirically misses on some scheduler / interrupt
-             * patterns. An explicit SEV is reliable and cheap.
-             *
-             * SEV broadcasts to all cores' event registers; any WFE
-             * waiter (on this or any other core) wakes immediately
-             * and re-checks the polled value. */
-            __asm__ __volatile__("sev" ::: "memory");
-#endif
         } else if (in_ram) {
             memcpy(ptr, &d->ram_ptr[paddr], bytes_to_copy);
         }

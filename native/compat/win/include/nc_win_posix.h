@@ -92,9 +92,7 @@ uint32_t nc_arc4random_uniform(uint32_t bound);
 #define arc4random_uniform nc_arc4random_uniform
 
 size_t nc_strlcpy(char *dst, const char *src, size_t size);
-size_t nc_strlcat(char *dst, const char *src, size_t size);
 #define strlcpy nc_strlcpy
-#define strlcat nc_strlcat
 
 #define fsync _commit
 #define fdatasync _commit

@@ -28,7 +28,7 @@
  *   pal60=0|1        PAL titles at 60 Hz (1, the default: PAL-60 on) or 50
  *   lang=N           its language (XC_LANGUAGE: 1 English ... 9 Portuguese)
  *   langfixed=1      that language kept on a disc that seems to lack it
- *   clock=MS         its clock's distance from the phone's time
+ *   clock=MS         its clock's distance from the computer's time
  *   tz=MINUTES       its time zone, east of UTC
  *   net=off|nat|lan|kai  its network (native/net/net.h); with it dns=,
  *                    lanport=, lanbcast=, lanpeers=, kai=

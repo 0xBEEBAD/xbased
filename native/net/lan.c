@@ -265,7 +265,6 @@ static void twin(const struct sockaddr_in *from)
     inet_ntop(AF_INET, &from->sin_addr, a, sizeof(a));
     nc_log("xbased-native-net", "lan: the console at %s has this one's MAC (its EEPROM a copy of this one's): "
            "they can't see each other", a);
-    nc_net_twin(from->sin_addr.s_addr);     /* the app says so */
 }
 
 static void lan_poll(struct pollfd *fds, int n)

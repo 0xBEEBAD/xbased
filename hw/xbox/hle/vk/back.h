@@ -1,5 +1,5 @@
 /*
- * xbased HLE GPU — back end (spec §5): render thread, timeline, surfaces.
+ * xbased HLE GPU — back end: render thread, timeline, surfaces.
  * No Vulkan types; callable from any HLE module.
  */
 #ifndef HW_XBOX_HLE_VK_BACK_H
@@ -8,8 +8,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* Vulkan device (floor), guest-RAM import, arena, ring, timeline, threads.
- * 0 = ok; negative = the title must use LLE. */
+/* Vulkan device (floor), arena, ring, timeline, threads. 0 = ok; negative:
+ * no usable device (the title can't run). */
 int hle_back_start(void);
 bool hle_back_running(void);
 void hle_back_kick(void);
@@ -17,19 +17,13 @@ void hle_back_kick(void);
  * submitted at once (vCPU thread). */
 void hle_back_urgent(void);
 
-/* Timeline value = GPU time (§5.12). Any thread. */
+/* Timeline value = GPU time. Any thread. */
 uint64_t hle_tl_completed(void);
 uint64_t hle_tl_submitted(void);
 void hle_tl_wait(uint64_t value);
 /* The device lost (hle_vk_lose): every value counts as reached, so no
  * thread waits on the GPU any more. */
 void hle_tl_lose(void);
-/* How long the GPU has been on our work without running out of it (0: it's
- * out now), and a moment of idle GPU asked for: the app's window, on a GPU
- * queue below ours, holds a frame the compositor shows the game's behind
- * (NativeCoreActivity's OverlayPacer). Any thread. */
-int64_t hle_tl_busy_ns(void);
-void hle_tl_gap(void);
 /* len bytes the GPU copies into the arena at arena_off go to guest memory at
  * pa once it reaches value, before any thread sees the value (a readback
  * without zero-copy guest RAM). False if too many wait (nothing queued). */

@@ -10,9 +10,8 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# ThinLTO for Release builds: the decoder and the renderer ~2% lighter (the
-# RP5, DOA2).
-# The cache keeps relinking after a change to the files changed.
+# ThinLTO for Release builds: the decoder and the renderer ~2% lighter. The
+# cache keeps relinking after a change to the files changed.
 option(XBASED_LTO "ThinLTO in Release builds" ON)
 # The dev tools' control of a run (app/win_devctl.c, hw/xbox/hle/vk/devcap.h;
 # a local tool drives it): off, and never in a release.
@@ -30,9 +29,8 @@ if(XBASED_LTO AND CMAKE_BUILD_TYPE STREQUAL "Release")
 endif()
 
 get_filename_component(NC_REPO "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
-# Linux on x86-64 (not Android): the PC edition's other platform, the same
-# translator as Windows (cmake/linux.cmake)
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ANDROID AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+# Linux on x86-64: the same translator as Windows (cmake/linux.cmake)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
   set(NC_LINUX_X64 ON)
 endif()
 if(NC_LINUX_X64)
@@ -101,6 +99,7 @@ add_library(xbased_native STATIC
   core/xbe_load.c
   core/mods.c
   core/options.c
+  core/props.c
   core/cheats.c
   core/xcheat.c
   core/memscan.c
@@ -148,7 +147,7 @@ add_library(xbased_native STATIC
 target_include_directories(xbased_native PUBLIC "${NC_REPO}")
 # xxhash (single header): the savestates' blob store (state/cache.c)
 target_include_directories(xbased_native PRIVATE "${NC_XXHASH_DIR}")
-# The HLE layer's pure modules build without QEMU in this mode.
+# hw/xbox/hle/core/xbe.c here as in the host tests (hle_pure.h: the C library alone)
 target_compile_definitions(xbased_native PRIVATE HLE_HOST_TEST)
 target_link_libraries(xbased_native PUBLIC ${NC_CPU_LIB} xbased_hle xbased_apu nc_slirp ${NC_SYS_LIBS} z)
 target_compile_options(xbased_native PRIVATE -Wall -Wno-unused-parameter)

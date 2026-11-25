@@ -82,8 +82,5 @@ void hle_pipe_flush(bool now);
  * recorded pipelines built, the most recently used first and at most max,
  * each made handed to add on this thread. Nothing when the setting is off. */
 void hle_pipe_prebuild(uint32_t max, void (*add)(uint64_t hash, VkPipeline p));
-/* The prebuild's progress, any thread: pipelines built and to build (0 and 0
- * when none runs). */
-void hle_pipe_progress(uint32_t *done, uint32_t *total);
 
 #endif

@@ -87,16 +87,8 @@ static inline bool apu_spin_trylock(ApuSpin *s)
 static inline void apu_spin_lock(ApuSpin *s)
 {
     while (__atomic_exchange_n(&s->v, 1, __ATOMIC_ACQUIRE)) {
-#if defined(__aarch64__)
-        unsigned v;
-        __asm__ __volatile__("sevl" ::: "memory");
-        do {
-            __asm__ __volatile__("wfe\n\tldaxr %w0, [%1]" : "=&r"(v) : "r"(&s->v) : "memory");
-        } while (v);
-#else
         while (__atomic_load_n(&s->v, __ATOMIC_RELAXED)) {
         }
-#endif
     }
 }
 

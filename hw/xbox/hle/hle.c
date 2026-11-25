@@ -1,5 +1,5 @@
 /*
- * xbased HLE GPU — runtime state, posture, logging, diagnostics.
+ * xbased HLE GPU — runtime state, logging, diagnostics.
  */
 #include "hw/xbox/hle/base.h"
 #include "hw/xbox/hle/hle.h"
@@ -10,15 +10,8 @@
 #include "hw/xbox/hle/mem/barrier.h"
 #include "hw/xbox/hle/mem/guestmem.h"
 
-#ifdef __ANDROID__
-#include <android/log.h>
-#endif
-#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
-#include <sys/system_properties.h>
-#endif
-#ifdef NC_DESKTOP
+#include "native/core/props.h"
 void nc_log(const char *tag, const char *fmt, ...); /* native/core/log.c: the log file */
-#endif
 
 HleRuntime g_hle;
 char g_hle_unavailable[256];
@@ -31,30 +24,7 @@ void hle_log(const char *tag, const char *fmt, ...)
     va_start(ap, fmt);
     vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
-#ifdef __ANDROID__
-    __android_log_print(ANDROID_LOG_INFO, tag, "%s", buf);
-#else
     fprintf(stderr, "%s: %s\n", tag, buf);
-#endif
-}
-
-const char *hle_posture_name(HlePosture p)
-{
-    switch (p) {
-    case HLE_POSTURE_REPLACE: return "replace";
-    default:                  return "off";
-    }
-}
-
-static HlePosture parse_posture(const char *m)
-{
-    if (!m) {
-        return HLE_POSTURE_OFF;
-    }
-    if (strcmp(m, "replace") == 0) {
-        return HLE_POSTURE_REPLACE;
-    }
-    return HLE_POSTURE_OFF;
 }
 
 /* XBASED_HLE_PCHIST=1 (debug): the vCPU's EIP sampled every millisecond
@@ -213,155 +183,18 @@ double g_hle_prof_ns_per_tick = 1.0;
 void hle_prof_init(void)
 {
     g_hle_prof_on = getenv("XBASED_HLE_PROF") != NULL;
-#if defined(__aarch64__)
-    uint64_t f;
-    __asm__ volatile("mrs %0, cntfrq_el0" : "=r"(f));
-    g_hle_prof_ns_per_tick = f ? 1e9 / (double)f : 1.0;
-#elif defined(__x86_64__)
     /* the TSC's rate against the monotonic clock, over 20 ms */
     const int64_t t0 = hle_prof_now(), n0 = hle_now_ns();
     while (hle_now_ns() - n0 < 20000000) {
     }
     const int64_t t1 = hle_prof_now(), n1 = hle_now_ns();
     g_hle_prof_ns_per_tick = t1 > t0 ? (double)(n1 - n0) / (double)(t1 - t0) : 1.0;
-#endif
-}
-
-/* On demand (debug): a new value of the property debug.xbased.perf turns the
- * profile on for debug.xbased.perfsec seconds (default 10); the late-frame
- * report and GPU times follow the profile. */
-#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
-/* Guest PC sampler (debug, during a perf capture): ~1000 times a second the
- * vCPU's EIP (racy: synced at translation-block boundaries) or "halted";
- * the hottest EIPs are logged when the capture ends. */
-#define SMP_SLOTS 4096
-static struct {
-    HleThread th;
-    bool started;
-    volatile bool stop;
-    uint32_t eip[SMP_SLOTS], cnt[SMP_SLOTS];
-    uint64_t n, halted, dropped;
-} g_smp;
-
-static void *smp_thread(void *opaque)
-{
-    while (!g_smp.stop) {
-        HleCpu *cpu = hle_host_cpu();
-        if (cpu) {
-            g_smp.n++;
-            if (hle_atomic_read(&cpu->halted)) {
-                g_smp.halted++;
-            } else {
-                HleCpu *env = cpu;
-                uint32_t eip = (uint32_t)(env->eip);
-                if (g_hle_pc_sampler && !g_hle_pc_sampler(&eip)) {
-                    eip = (uint32_t)(env->eip);
-                } else if (g_hle_pc_sampler && eip == HLE_PC_IDLE) {
-                    g_smp.halted++;
-                    g_usleep(1000);
-                    continue;
-                }
-                unsigned i = (eip * 2654435761u) >> 20 & (SMP_SLOTS - 1), k = 0;
-                while (k < SMP_SLOTS && g_smp.cnt[i] && g_smp.eip[i] != eip) {
-                    i = (i + 1) & (SMP_SLOTS - 1);
-                    k++;
-                }
-                if (k == SMP_SLOTS) {
-                    g_smp.dropped++;
-                } else {
-                    g_smp.eip[i] = eip;
-                    g_smp.cnt[i]++;
-                }
-            }
-        }
-        g_usleep(1000);
-    }
-    return NULL;
-}
-
-static void smp_start(void)
-{
-    if (g_smp.started) {
-        return;
-    }
-    memset(g_smp.eip, 0, sizeof(g_smp.eip));
-    memset(g_smp.cnt, 0, sizeof(g_smp.cnt));
-    g_smp.n = g_smp.halted = g_smp.dropped = 0;
-    g_smp.stop = false;
-    hle_thread_create(&g_smp.th, "hle-sampler", smp_thread, NULL, HLE_THREAD_JOINABLE);
-    g_smp.started = true;
-}
-
-static void smp_stop(void)
-{
-    if (!g_smp.started) {
-        return;
-    }
-    g_smp.stop = true;
-    hle_thread_join(&g_smp.th);
-    g_smp.started = false;
-    uint64_t n = MAX(g_smp.n, 1);
-    hle_log("xbased-hle-prof", "eip samples=%llu halted=%.1f%% dropped=%llu",
-            (unsigned long long)g_smp.n, 100.0 * g_smp.halted / n,
-            (unsigned long long)g_smp.dropped);
-    for (unsigned r = 0; r < 40; r++) {         /* top 40, selection by count */
-        unsigned best = SMP_SLOTS;
-        for (unsigned i = 0; i < SMP_SLOTS; i++) {
-            if (g_smp.cnt[i] && (best == SMP_SLOTS || g_smp.cnt[i] > g_smp.cnt[best])) {
-                best = i;
-            }
-        }
-        if (best == SMP_SLOTS) {
-            break;
-        }
-        const uint32_t e = g_smp.eip[best];
-        if (g_hle_pc_sampler && (e & HLE_PC_HOST) == HLE_PC_HOST) {
-            /* host code: the offset in the core library (addr2line it) */
-            hle_log("xbased-hle-prof", "  host+%06x %5u %.1f%% (%s)", (e & ~(HLE_PC_HOST | HLE_PC_SYSOP)) << 4,
-                    g_smp.cnt[best], 100.0 * g_smp.cnt[best] / n, e & HLE_PC_SYSOP ? "kernel call / hook" : "FEX");
-        } else {
-            hle_log("xbased-hle-prof", "  eip %08x %5u %.1f%%", e, g_smp.cnt[best],
-                    100.0 * g_smp.cnt[best] / n);
-        }
-        g_smp.cnt[best] = 0;
-    }
-}
-#endif
-
-static void prof_poll(void)
-{
-#ifdef __ANDROID__
-    static HleProp prop;
-    static int64_t until;
-    static int env_on = -1;             /* XBASED_HLE_PROF at boot */
-    static bool armed;
-    if (env_on < 0) {
-        env_on = g_hle_prof_on;
-    }
-    char v[PROP_VALUE_MAX];
-    if (hle_prop_new(&prop, "debug.xbased.perf", v)) {
-        char s[PROP_VALUE_MAX] = "";
-        hle_prop_get("debug.xbased.perfsec", s);
-        int sec = atoi(s) > 0 ? atoi(s) : 10;
-        until = hle_now_ns() + (int64_t)sec * 1000000000;
-        g_hle_prof_on = armed = true;
-        smp_start();
-        hle_log("xbased-hle-prof", "perf capture on for %d s", sec);
-    }
-    if (armed && hle_now_ns() >= until) {
-        armed = false;
-        g_hle_prof_on = env_on != 0;
-        smp_stop();
-        hle_log("xbased-hle-prof", "perf capture off");
-    }
-#endif
 }
 
 /* Per second: milliseconds of host time per bucket (calls). */
 void hle_prof_diag(void)
 {
     static uint64_t ns0[HLE_PROF_N], n0[HLE_PROF_N];
-    prof_poll();
     if (!g_hle_prof_on) {
         return;
     }
@@ -383,13 +216,12 @@ void hle_prof_diag(void)
 void hle_init(void)
 {
     memset(&g_hle, 0, sizeof(g_hle));
-    g_hle.posture = parse_posture(getenv("XBASED_HLE_MODE"));
     hle_prof_init();
     hle_barrier_init(hle_ram_size());
-    hle_log("xbased-hle", "init posture=%s", hle_posture_name(g_hle.posture));
+    hle_log("xbased-hle", "init");
     /* the reports every second (the decoder's and the back end's counts, the
      * profile, the debug views): a build made to investigate only */
-    if (XBASED_DIAG && hle_active()) {
+    if (XBASED_DIAG) {
         g_diag_timer = hle_timer_new(diag_tick, NULL);
         hle_timer_mod(g_diag_timer, hle_now_ms() + 1000);
         if (getenv("XBASED_HLE_PCHIST")) {

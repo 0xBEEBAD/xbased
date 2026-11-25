@@ -766,7 +766,7 @@ void nc_kernel_dump_threads(NcKernel *k, int fd)
         const bool cur = t == k->current;
         const uint32_t eip = cur && k->frame ? nc_frame_eip(k->frame) : nc_context_eip(&t->ctx);
         const uint32_t esp = cur && k->frame ? nc_frame_gpr(k->frame, NC_ESP) : nc_context_gpr(&t->ctx, NC_ESP);
-        int n = snprintf(line, sizeof(line), "xbased-native-frontier:   thread t%u %s prio %d%s eip %08x esp %08x",
+        int n = snprintf(line, sizeof(line), "xbased-native:   thread t%u %s prio %d%s eip %08x esp %08x",
                          t->id, k_state[t->state], t->priority, t->suspend ? " suspended" : "", eip, esp);
         if (t->state == NC_T_WAITING) {
             n += snprintf(line + n, sizeof(line) - (size_t)n, " | wait%s%s", t->wait.wait_all ? " all" : "",

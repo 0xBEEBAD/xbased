@@ -234,7 +234,7 @@ bool nc_xbe_load(NcVm *vm, const NcDisc *disc, const char *path, NcKernel *k, Nc
         }
     }
 
-    nc_log("xbased-native-frontier",
+    nc_log("xbased-native",
            "stage S0 xbe loaded: title %08x base %08x image %u KiB (%u KiB in memory), %u/%u sections, "
            "entry %08x, %u kernel imports, tls %08x",
            x->title_id, base, span >> 10, backed >> 10, loaded, x->nsections, x->entry, out->thunks,

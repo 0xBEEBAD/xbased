@@ -25,22 +25,13 @@ extern "C" {
 #define MAP_NORESERVE 0x4000
 #define MAP_POPULATE  0x8000
 #define MAP_FAILED ((void *)-1)
-#define MADV_NORMAL 0
-#define MADV_WILLNEED 3
-#define MADV_DONTNEED 4
-#define MS_ASYNC 1
-#define MS_SYNC 4
 
 void *nc_mmap(void *addr, size_t len, int prot, int flags, int fd, int64_t off);
 int nc_munmap(void *addr, size_t len);
 int nc_mprotect(void *addr, size_t len, int prot);
-int nc_madvise(void *addr, size_t len, int advice);
-int nc_msync(void *addr, size_t len, int flags);
 #define mmap nc_mmap
 #define munmap nc_munmap
 #define mprotect nc_mprotect
-#define madvise nc_madvise
-#define msync nc_msync
 
 #ifdef __cplusplus
 }

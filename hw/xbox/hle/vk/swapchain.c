@@ -29,9 +29,8 @@
  * puts our reads of a frame after its writes, and the render thread's next
  * write of the slot after our reads (its barriers). The device table is the
  * presenter's own: the render thread's wraps its commands for
- * strip batching (batch.c). The surface follows the window: a new
- * ANativeWindow (the activity's surface made again) gets a new surface and
- * swapchain, none drops them.
+ * strip batching (batch.c). The surface follows the window: a new window
+ * gets a new surface and swapchain, none drops them.
  */
 #include "hw/xbox/hle/base.h"
 #include "hw/xbox/hle/hle.h"
@@ -48,7 +47,7 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "native/third_party/stb/stb_image_write.h"
 
-#include "hw/xbox/hle/vk/native_window.h"
+#include "hw/xbox/hle/vk/window.h"
 #include <errno.h>
 #include <string.h>
 #ifdef _WIN32
@@ -56,7 +55,7 @@
 #include "hw/xbox/hle/vk/share.h"
 #include <psapi.h>
 #endif
-#if defined(NC_DESKTOP) && !defined(_WIN32)
+#ifndef _WIN32
 #include <SDL3/SDL_vulkan.h>
 #endif
 
@@ -120,19 +119,18 @@ static struct {
     PsFrame fr[PS_FRAMES];
     unsigned cur;
     /* the window */
-    struct ANativeWindow *win;
+    HleWindow *win;
     int64_t lost_ns;            /* its surface was lost then: tried again a while after */
     VkSurfaceKHR surf;
     VkSwapchainKHR sc;
     VkFormat fmt;
-    VkExtent2D ext, wsize;      /* the images' (the panel's orientation), the window's */
-    float rot[4];               /* the window's clip space into the images' (k_vs) */
+    VkExtent2D ext, wsize;      /* the images', the window's */
     uint32_t nimg, idx;
     VkImage *img;               /* nimg each */
     VkImageView *view;
     VkSemaphore *drawn;         /* its pass done: what its present waits for */
     bool stale;                 /* out of date: made again at the next begin */
-    bool follows;               /* its transform is the panel's: SUBOPTIMAL means it turned */
+    bool follows;               /* the surface's transform is none: SUBOPTIMAL means made again */
     /* the frame shown */
     HleDispFrame f;
     bool have, using;           /* f held; inside hle_disp_use_begin */
@@ -181,24 +179,22 @@ static struct {
 
 /* ---- shaders ---- */
 
-/* rect: x0, y0, x1, y1 in the window's clip space; rot: that space turned
- * into the image's (the panel's orientation: pre-rotated), x' = rot.x x +
- * rot.y y, y' = rot.z x + rot.w y */
+/* rect: x0, y0, x1, y1 in the window's clip space */
 static const char k_vs[] =
     "#version 450\n"
-    "layout(push_constant) uniform P { vec4 rect; vec4 extra; vec4 rot; } pc;\n"
+    "layout(push_constant) uniform P { vec4 rect; vec4 extra; } pc;\n"
     "layout(location = 0) out vec2 v_uv;\n"
     "void main() {\n"
     "  vec2 c = vec2(gl_VertexIndex & 1, gl_VertexIndex >> 1);\n"
     "  v_uv = c;\n"
     "  vec2 p = mix(pc.rect.xy, pc.rect.zw, c);\n"
-    "  gl_Position = vec4(pc.rot.x * p.x + pc.rot.y * p.y, pc.rot.z * p.x + pc.rot.w * p.y, 0.0, 1.0);\n"
+    "  gl_Position = vec4(p, 0.0, 1.0);\n"
     "}\n";
 /* every fragment shader's start: its inputs and the gamma ramp (768 bytes,
  * a channel's 256 after another's, as gamma.c's) */
 static const char k_fs_head[] =
     "#version 450\n"
-    "layout(push_constant) uniform P { vec4 rect; vec4 extra; vec4 rot; } pc;\n"
+    "layout(push_constant) uniform P { vec4 rect; vec4 extra; } pc;\n"
     "layout(set = 0, binding = 0) uniform sampler2D u_tex;\n"
     "layout(set = 0, binding = 1, std140) uniform G { uvec4 w[48]; } g;\n"
     "layout(location = 0) in vec2 v_uv;\n"
@@ -369,11 +365,10 @@ static const char k_fs_kup[] =
     "  o = vec4(s / 12.0, 1.0);\n"
     "}\n";
 /* The overlay's triangles (HleOvVert): window pixels into clip space
- * (rect.xy: 2 / the window's size), turned as the window's (rot); texel
- * times colour. */
+ * (rect.xy: 2 / the window's size); texel times colour. */
 static const char k_vs_ov[] =
     "#version 450\n"
-    "layout(push_constant) uniform P { vec4 rect; vec4 extra; vec4 rot; } pc;\n"
+    "layout(push_constant) uniform P { vec4 rect; vec4 extra; } pc;\n"
     "layout(location = 0) in vec2 a_pos;\n"
     "layout(location = 1) in vec2 a_uv;\n"
     "layout(location = 2) in vec4 a_col;\n"
@@ -383,7 +378,7 @@ static const char k_vs_ov[] =
     "  v_uv = a_uv;\n"
     "  v_col = a_col;\n"
     "  vec2 p = a_pos * pc.rect.xy - 1.0;\n"
-    "  gl_Position = vec4(pc.rot.x * p.x + pc.rot.y * p.y, pc.rot.z * p.x + pc.rot.w * p.y, 0.0, 1.0);\n"
+    "  gl_Position = vec4(p, 0.0, 1.0);\n"
     "}\n";
 static const char k_fs_ov[] =
     "#version 450\n"
@@ -668,7 +663,7 @@ static bool init(void)
         T.vkCreateDescriptorSetLayout(g_hvk.dev, &dci, NULL, &g_ps.dsl) != VK_SUCCESS) {
         return false;
     }
-    VkPushConstantRange pcr = { VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 48 };
+    VkPushConstantRange pcr = { VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 32 };
     VkPipelineLayoutCreateInfo lci = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .setLayoutCount = 1,
         .pSetLayouts = &g_ps.dsl, .pushConstantRangeCount = 1, .pPushConstantRanges = &pcr };
@@ -823,42 +818,17 @@ static bool make_swapchain(uint32_t w, uint32_t h)
             }
         }
     }
-    /* Android may make more images than asked for (10 for 6 on a Dimensity
-     * 8300), so the arrays are sized from what the swapchain reports. */
+    /* A driver may make more images than asked for, so the arrays are sized
+     * from what the swapchain reports. */
     uint32_t n = MAX(caps.minImageCount, 3u);
     if (caps.maxImageCount) {
         n = MIN(n, caps.maxImageCount);
     }
-    /* Pre-rotated: the images in the panel's own orientation (its transform
-     * now), the picture turned into them as it's drawn. An image in the
-     * window's orientation the compositor turns itself, with the GPU at every
-     * refresh (Odin 3 and RP5 panels are portrait): that composition took GPU
-     * time from the game, and the Odin 3 fell to its 60 Hz mode with it.
-     * Qualcomm's EGL had pre-rotated GL's buffers. */
-    static const VkSurfaceTransformFlagBitsKHR k_turns[4] = {
-        VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR, VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR,
-        VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR, VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR };
-    static const float k_rot[4][4] = { { 1, 0, 0, 1 }, { 0, -1, 1, 0 }, { -1, 0, 0, -1 }, { 0, 1, -1, 0 } };
-    unsigned turn = 0;
-    for (unsigned i = 0; i < 4; i++) {
-        if (caps.currentTransform == k_turns[i] && (caps.supportedTransforms & k_turns[i])) {
-            turn = i;
-        }
-    }
-    const VkSurfaceTransformFlagBitsKHR tf = k_turns[turn];
-    g_ps.follows = tf == caps.currentTransform;
-    memcpy(g_ps.rot, k_rot[turn], sizeof(g_ps.rot));
+    /* the window's orientation (no surface transform: the compositor's own) */
+    g_ps.follows = caps.currentTransform == VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
     g_ps.wsize = (VkExtent2D){ w, h };
-    if (turn & 1) {
-        const uint32_t t = w;   /* a quarter turn: the panel's width is the window's height */
-        w = h;
-        h = t;
-    }
     w = MIN(MAX(w, caps.minImageExtent.width), caps.maxImageExtent.width);
     h = MIN(MAX(h, caps.minImageExtent.height), caps.maxImageExtent.height);
-    if (hle_quirk(HLE_QUIRK_SWAP_W32) && (w & ~31u) >= MAX(caps.minImageExtent.width, 32u)) {
-        w &= ~31u;                      /* older PowerVR drivers (quirks.h) */
-    }
     VkCompositeAlphaFlagBitsKHR ca = (caps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR)
                                          ? VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR
                                          : VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR;
@@ -889,7 +859,8 @@ static bool make_swapchain(uint32_t w, uint32_t h)
         .imageExtent = { w, h }, .imageArrayLayers = 1,
         .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
                       (g_ps.shot_can ? VK_IMAGE_USAGE_TRANSFER_SRC_BIT : 0),
-        .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE, .preTransform = tf, .compositeAlpha = ca,
+        .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR, .compositeAlpha = ca,
         .presentMode = pm, .clipped = VK_TRUE, .oldSwapchain = old };
     VkSwapchainKHR sc = VK_NULL_HANDLE;
     VkResult r = T.vkCreateSwapchainKHR(g_hvk.dev, &ci, NULL, &sc);
@@ -947,8 +918,8 @@ static bool make_swapchain(uint32_t w, uint32_t h)
         g_ps.pipe_fmt = fmt.format;
     }
     g_ps.fmt = fmt.format;
-    hle_log("xbased-hle-back", "present: swapchain %ux%u (the window %ux%u, turned %u degrees), %u images, "
-            "format %d", w, h, g_ps.wsize.width, g_ps.wsize.height, turn * 90, ni, fmt.format);
+    hle_log("xbased-hle-back", "present: swapchain %ux%u (the window %ux%u), %u images, format %d", w, h,
+            g_ps.wsize.width, g_ps.wsize.height, ni, fmt.format);
     return g_ps.pipe[P_BILINEAR] != VK_NULL_HANDLE;
 }
 
@@ -1221,9 +1192,9 @@ static bool ov_new(void);
  * screen: Dead or Alive 3's, #193) */
 static bool g_ov_shown;
 
-bool hle_present_unchanged(struct ANativeWindow *win, uint64_t key)
+bool hle_present_unchanged(HleWindow *win, uint64_t key)
 {
-    uint32_t ww = win ? (uint32_t)ANativeWindow_getWidth(win) : 0, wh = win ? (uint32_t)ANativeWindow_getHeight(win) : 0;
+    uint32_t ww = win ? (uint32_t)win->width : 0, wh = win ? (uint32_t)win->height : 0;
     bool have_sc = g_ps.sc != VK_NULL_HANDLE;
 #ifdef _WIN32
     if (g_rm.on) {
@@ -1566,10 +1537,6 @@ static bool remote_make(uint32_t w, uint32_t h)
     /* the window's pass draws into them as into a swapchain's */
     g_ps.ext = (VkExtent2D){ w, h };
     g_ps.wsize = (VkExtent2D){ w, h };
-    g_ps.rot[0] = 1.0f;
-    g_ps.rot[1] = 0.0f;
-    g_ps.rot[2] = 0.0f;
-    g_ps.rot[3] = 1.0f;
     g_ps.shot_can = true;
     if (fmt != g_ps.pipe_fmt) {
         for (unsigned i = 0; i < P_FXAA; i++) {
@@ -1585,7 +1552,7 @@ static bool remote_make(uint32_t w, uint32_t h)
     return g_ps.pipe[P_BILINEAR] != VK_NULL_HANDLE;
 }
 
-static bool remote_begin(struct ANativeWindow *win, uint32_t *w, uint32_t *h)
+static bool remote_begin(HleWindow *win, uint32_t *w, uint32_t *h)
 {
     if (!g_hvk.caps.share || (g_rm.sh && g_rm.sh->failed)) {
         remote_drop();
@@ -1694,7 +1661,7 @@ uint32_t hle_present_remote_mouse(void *out, uint32_t n, int64_t *at)
 }
 #endif
 
-bool hle_present_begin(struct ANativeWindow *win, uint32_t *w, uint32_t *h)
+bool hle_present_begin(HleWindow *win, uint32_t *w, uint32_t *h)
 {
     if (g_ps.failed || !hle_vk_ready() || hle_vk_lost()) {
         return false;
@@ -1724,16 +1691,12 @@ bool hle_present_begin(struct ANativeWindow *win, uint32_t *w, uint32_t *h)
     if (win != g_ps.win && (!win || hle_now_ns() - g_ps.lost_ns > 250000000ll)) {
         drop_window();
         if (win) {
-#if defined(NC_DESKTOP) && !defined(_WIN32)
+#ifndef _WIN32
             if (!SDL_Vulkan_CreateSurface((SDL_Window *)win->sdl_window, g_hvk.inst, NULL, &g_ps.surf)) {
-#elif defined(_WIN32)
+#else
             VkWin32SurfaceCreateInfoKHR sci = { .sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR,
                                                 .hinstance = (HINSTANCE)win->hinstance, .hwnd = (HWND)win->hwnd };
             if (vkCreateWin32SurfaceKHR(g_hvk.inst, &sci, NULL, &g_ps.surf) != VK_SUCCESS) {
-#else
-            VkAndroidSurfaceCreateInfoKHR sci = { .sType = VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR,
-                                                  .window = win };
-            if (vkCreateAndroidSurfaceKHR(g_hvk.inst, &sci, NULL, &g_ps.surf) != VK_SUCCESS) {
 #endif
                 g_ps.surf = VK_NULL_HANDLE;
                 g_ps.lost_ns = hle_now_ns();
@@ -1746,7 +1709,7 @@ bool hle_present_begin(struct ANativeWindow *win, uint32_t *w, uint32_t *h)
     if (!g_ps.surf) {
         return false;
     }
-    const uint32_t ww = (uint32_t)ANativeWindow_getWidth(win), wh = (uint32_t)ANativeWindow_getHeight(win);
+    const uint32_t ww = (uint32_t)win->width, wh = (uint32_t)win->height;
     if ((!g_ps.sc || g_ps.stale || ww != g_ps.wsize.width || wh != g_ps.wsize.height) && !make_swapchain(ww, wh)) {
         return false;
     }
@@ -1780,7 +1743,7 @@ bool hle_present_begin(struct ANativeWindow *win, uint32_t *w, uint32_t *h)
         return false;
     }
     if (r == VK_SUBOPTIMAL_KHR && g_ps.follows) {
-        g_ps.stale = true;              /* the panel turned: this image, then another swapchain */
+        g_ps.stale = true;              /* this image, then another swapchain */
     }
     *w = g_ps.wsize.width;
     *h = g_ps.wsize.height;
@@ -1894,7 +1857,7 @@ static void set_src(PsFrame *f, VkDescriptorSet ds, VkImageView src)
 
 /* A quad of pipeline p over rect (clip space) into the rendering open. */
 static void quad_ds(VkCommandBuffer cb, PsFrame *f, VkDescriptorSet ds, VkPipeline p, VkImageView src,
-                    const float pc[12], uint32_t w, uint32_t h)
+                    const float pc[8], uint32_t w, uint32_t h)
 {
     set_src(f, ds, src);
     VkViewport vp = { 0, 0, (float)w, (float)h, 0.0f, 1.0f };
@@ -1903,27 +1866,25 @@ static void quad_ds(VkCommandBuffer cb, PsFrame *f, VkDescriptorSet ds, VkPipeli
     T.vkCmdSetViewport(cb, 0, 1, &vp);
     T.vkCmdSetScissor(cb, 0, 1, &sc);
     T.vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, g_ps.pl, 0, 1, &ds, 0, NULL);
-    T.vkCmdPushConstants(cb, g_ps.pl, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 48, pc);
+    T.vkCmdPushConstants(cb, g_ps.pl, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 32, pc);
     T.vkCmdDraw(cb, 4, 1, 0, 0);
 }
 
 static void quad(VkCommandBuffer cb, PsFrame *f, unsigned set, VkPipeline p, VkImageView src,
-                 const float pc[12], uint32_t w, uint32_t h)
+                 const float pc[8], uint32_t w, uint32_t h)
 {
     quad_ds(cb, f, f->set[set], p, src, pc, w, h);
 }
 
-/* The picture's quad, cut to the clip rectangle (hle_present_set_clip):
- * the window's axes, swapped for a display turned a quarter */
+/* The picture's quad, cut to the clip rectangle (hle_present_set_clip) */
 static void quad_clipped(VkCommandBuffer cb, PsFrame *f, unsigned set, VkPipeline p, VkImageView src,
-                         const float pc[12], uint32_t w, uint32_t h)
+                         const float pc[8], uint32_t w, uint32_t h)
 {
     if (g_clip_x >= 1.0f && g_clip_y >= 1.0f) {
         quad(cb, f, set, p, src, pc, w, h);
         return;
     }
-    const bool turned = fabsf(g_ps.rot[0]) < 0.5f;
-    const float cx = turned ? g_clip_y : g_clip_x, cy = turned ? g_clip_x : g_clip_y;
+    const float cx = g_clip_x, cy = g_clip_y;
     set_src(f, f->set[set], src);
     VkViewport vp = { 0, 0, (float)w, (float)h, 0.0f, 1.0f };
     const uint32_t sw = (uint32_t)(cx * (float)w + 0.5f), sh = (uint32_t)(cy * (float)h + 0.5f);
@@ -1932,7 +1893,7 @@ static void quad_clipped(VkCommandBuffer cb, PsFrame *f, unsigned set, VkPipelin
     T.vkCmdSetViewport(cb, 0, 1, &vp);
     T.vkCmdSetScissor(cb, 0, 1, &sc);
     T.vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, g_ps.pl, 0, 1, &f->set[set], 0, NULL);
-    T.vkCmdPushConstants(cb, g_ps.pl, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 48, pc);
+    T.vkCmdPushConstants(cb, g_ps.pl, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 32, pc);
     T.vkCmdDraw(cb, 4, 1, 0, 0);
 }
 
@@ -1957,7 +1918,7 @@ static void img_pass_ds(VkCommandBuffer cb, PsFrame *f, VkDescriptorSet ds, PsIm
             VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, 0, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
             VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
     rendering(cb, t->view, t->w, t->h, false);
-    float pc[12] = { -1.0f, -1.0f, 1.0f, 1.0f, 0, 0, 0, 0, 1.0f, 0, 0, 1.0f };
+    float pc[8] = { -1.0f, -1.0f, 1.0f, 1.0f, 0, 0, 0, 0 };
     memcpy(pc + 4, extra, 4 * sizeof(float));
     quad_ds(cb, f, ds, p, src, pc, t->w, t->h);
     T.vkCmdEndRendering(cb);
@@ -2504,7 +2465,7 @@ static uint64_t mix64(uint64_t h, uint64_t v)
 
 /* The picture into comp as the window would show it (p over rect from
  * `from`), and its blur, each when what it shows changed. */
-static void ov_scene(VkCommandBuffer cb, PsFrame *f, unsigned p, const float pc_in[12], VkImageView from,
+static void ov_scene(VkCommandBuffer cb, PsFrame *f, unsigned p, const float pc_in[8], VkImageView from,
                      uint64_t key)
 {
     const uint32_t ww = g_ps.wsize.width, wh = g_ps.wsize.height;
@@ -2527,12 +2488,7 @@ static void ov_scene(VkCommandBuffer cb, PsFrame *f, unsigned p, const float pc_
                 VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
         rendering(cb, g_ov.comp.view, ww, wh, true);
         if (g_ps.have && g_ps.pipe[p]) {
-            float pc[12];
-            memcpy(pc, pc_in, sizeof(pc));
-            pc[8] = 1.0f;               /* the window's orientation: the overlay turns it */
-            pc[9] = pc[10] = 0.0f;
-            pc[11] = 1.0f;
-            quad(cb, f, SET_WINDOW, g_ps.pipe[p], from, pc, ww, wh);   /* the window pass isn't drawn under a cover */
+            quad(cb, f, SET_WINDOW, g_ps.pipe[p], from, pc_in, ww, wh);   /* the window pass isn't drawn under a cover */
         }
         T.vkCmdEndRendering(cb);
         barrier(cb, g_ov.comp.img, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
@@ -2598,8 +2554,7 @@ static void ov_draw(VkCommandBuffer cb, PsFrame *f, uint32_t iw, uint32_t ih, bo
     VkViewport vp = { 0, 0, (float)iw, (float)ih, 0.0f, 1.0f };
     T.vkCmdSetViewport(cb, 0, 1, &vp);
     const float ww = (float)g_ps.wsize.width, wh = (float)g_ps.wsize.height;
-    const float pc[12] = { 2.0f / ww, 2.0f / wh, 0, 0, 0, 0, 0, 0, g_ps.rot[0], g_ps.rot[1], g_ps.rot[2], g_ps.rot[3] };
-    const bool turned = g_ps.rot[0] != 1.0f;  /* clips are the window's: kept only unturned */
+    const float pc[8] = { 2.0f / ww, 2.0f / wh, 0, 0, 0, 0, 0, 0 };
     uint32_t bound = ~0u;
     for (uint32_t i = 0; i < g_ov.nc; i++) {
         const HleOvCmd *c = &g_ov.c[i];
@@ -2619,11 +2574,11 @@ static void ov_draw(VkCommandBuffer cb, PsFrame *f, uint32_t iw, uint32_t ih, bo
         }
         if (c->blend != bound) {
             T.vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, g_ov.pipe[c->blend]);
-            T.vkCmdPushConstants(cb, g_ps.pl, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 48, pc);
+            T.vkCmdPushConstants(cb, g_ps.pl, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 32, pc);
             bound = c->blend;
         }
         VkRect2D sc = { { 0, 0 }, { iw, ih } };
-        if (c->clip[2] > 0 && c->clip[3] > 0 && !turned) {
+        if (c->clip[2] > 0 && c->clip[3] > 0) {
             const int32_t x0 = MAX(c->clip[0], 0), y0 = MAX(c->clip[1], 0);
             const int32_t x1 = MIN(c->clip[0] + c->clip[2], (int32_t)iw);
             const int32_t y1 = MIN(c->clip[1] + c->clip[3], (int32_t)ih);
@@ -2782,9 +2737,7 @@ void hle_present_end(float sx, float sy, bool fxaa, int upscale, bool average, i
      * image (the swap's blit, the gamma pass, the overlay) ends with one
      * into SHADER_READ_ONLY over all later commands of the queue, ours too
      * (a second queue: the CPU saw the frame complete before it was
-     * presented). A barrier of our own drained the GPU at every refresh; a
-     * wait on the render timeline at the frame's value sent the submit down
-     * a slow path on Qualcomm's driver (Halo 2 at 30 fps, Adreno 830). */
+     * presented). A barrier of our own drained the GPU at every refresh. */
     if (g_ps.have && fxaa && g_ps.pipe[P_FXAA]) {
         if (img_target(&g_ps.fx, g_ps.f.w, g_ps.f.h, VK_FORMAT_R8G8B8A8_UNORM, "FXAA")) {
             if (g_ps.fx.serial != g_ps.serial) {
@@ -2842,7 +2795,7 @@ void hle_present_end(float sx, float sy, bool fxaa, int upscale, bool average, i
     }
     /* the picture's pass: p over the frame's place, from `from` */
     unsigned p = P_BILINEAR;
-    float pc[12] = { -sx, -sy, sx, sy, 0.0f, 0.0f, 0.0f, 0.0f, g_ps.rot[0], g_ps.rot[1], g_ps.rot[2], g_ps.rot[3] };
+    float pc[8] = { -sx, -sy, sx, sy, 0.0f, 0.0f, 0.0f, 0.0f };
     VkImageView from = src;
     if (area) {
         p = P_AREA;
@@ -2899,15 +2852,13 @@ void hle_present_end(float sx, float sy, bool fxaa, int upscale, bool average, i
         if (g_osd > 0 && g_ps.pipe[P_OSD]) {
             /* top left, 4 digits each 0.022 of the window's height wide */
             const float dh = 0.045f, dw = dh * 0.62f * (float)wh / (float)ww;
-            float oc[12] = { -0.98f, -0.97f, -0.98f + 4 * dw * 2, -0.97f + dh * 2, g_osd, 0, 0, 0,
-                             g_ps.rot[0], g_ps.rot[1], g_ps.rot[2], g_ps.rot[3] };
+            float oc[8] = { -0.98f, -0.97f, -0.98f + 4 * dw * 2, -0.97f + dh * 2, g_osd, 0, 0, 0 };
             quad(cb, f, SET_OSD, g_ps.pipe[P_OSD], src, oc, iw, ih);
         }
         if (g_osd_ff && g_ps.pipe[P_OSD]) {
             /* fast forward on (#404): its sign top right, three digits wide */
             const float dh = 0.045f, dw = dh * 0.62f * (float)wh / (float)ww;
-            float oc[12] = { 0.98f - 3 * dw * 2, -0.97f, 0.98f, -0.97f + dh * 2, 0, 1, 0, 0,
-                             g_ps.rot[0], g_ps.rot[1], g_ps.rot[2], g_ps.rot[3] };
+            float oc[8] = { 0.98f - 3 * dw * 2, -0.97f, 0.98f, -0.97f + dh * 2, 0, 1, 0, 0 };
             quad(cb, f, SET_OSD, g_ps.pipe[P_OSD], src, oc, iw, ih);
         }
         log_path(p, fxaa_done, dw, dh, (uint32_t)(vw + 0.5f), (uint32_t)(vh + 0.5f));
@@ -2950,18 +2901,14 @@ void hle_present_end(float sx, float sy, bool fxaa, int upscale, bool average, i
     }
     T.vkEndCommandBuffer(cb);
 
-    /* The present waits for the pass on the GPU: Turnip's hands the
-     * compositor a fence over it (Mesa's vk_android.c: a submit and a sync
-     * file), and the window's thread goes on to the next refresh. Waiting
-     * for the pass here, behind the game's frames on the one queue, held
-     * the thread past refreshes whenever the GPU was busy, and the next
-     * front frame was replaced before it was picked up ("UI missed").
+    /* The present waits for the pass on the GPU, and the window's thread
+     * goes on to the next refresh. Waiting for the pass here, behind the
+     * game's frames on the one queue, held the thread past refreshes whenever
+     * the GPU was busy, and the next front frame was replaced before it was
+     * picked up ("UI missed").
      * HLE_QUIRK_PRESENT_CPU_WAIT: the image is presented once it's drawn,
-     * with nothing left to wait for. Presenting with a semaphore to wait on
-     * made Android's present ask Qualcomm's driver for a fence over it,
-     * which waited (3-6 ms a refresh) with the queue's lock held, the render
-     * thread's submits waiting on it; Halo 2 lost 2% of its frames to GL's
-     * presenter. The wait is ours there, unlocked. */
+     * with nothing left to wait for, the wait ours and unlocked, not the
+     * driver's inside the present. */
     const bool cpu_wait = hle_quirk(HLE_QUIRK_PRESENT_CPU_WAIT);
     const uint64_t value = g_ps.submitted + 1;
     VkSemaphoreSubmitInfo wait = { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, .semaphore = f->acquired,

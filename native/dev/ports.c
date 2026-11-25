@@ -1,7 +1,7 @@
 /*
  * xbased native core — x86 I/O ports.
  *
- * Devices claim ports as the frontier shows them used; the rest read as all
+ * Devices claim ports as titles use them; the rest read as all
  * ones and drop writes, as unclaimed ports do on the bus. The first accesses
  * to each port are logged.
  *   0x8008  ACPI power-management timer: free-running at 3.375 MHz

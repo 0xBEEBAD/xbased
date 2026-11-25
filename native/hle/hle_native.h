@@ -14,8 +14,8 @@
 extern "C" {
 #endif
 
-/* Before the guest runs: the HLE layer's init (posture from XBASED_HLE_MODE;
- * off unless set) and, if active, its title start (push-buffer mode). */
+/* Before the guest runs: the HLE layer's init and its title start
+ * (push-buffer mode). */
 void nc_hle_boot(NcKernel *k, NcVm *vm, NcCpu *cpu, const NcCpuContext *boot);
 
 /* Why the title can't run on this device (the HLE GPU did not start), or
@@ -31,8 +31,6 @@ enum { NC_FATAL_NONE, NC_FATAL_DRIVER, NC_FATAL_TITLE, NC_FATAL_STATE, NC_FATAL_
  * couldn't load: NC_FATAL_STATE). */
 void nc_hle_set_fatal(int kind, const char *why);
 int nc_hle_fatal_kind(void);
-/* The title renders by push-buffer decoding (pbmode.h). */
-bool nc_hle_pb_active(void);
 /* Before boot: the HLE GPU's render scale (1-4x the title's resolution). */
 void nc_hle_set_render_scale(int scale);
 /* Anisotropic filtering forced on the game's textures: 0 (the game's own), 2-16. */
@@ -40,9 +38,6 @@ void nc_hle_set_anisotropy(int level);
 /* Before boot: the app's "Asynchronous shader compilation" and "Build cached
  * shaders before starting" settings (hw/xbox/hle/vk/pipeasync.h). */
 void nc_hle_set_pipeline_options(bool async, bool prebuild, bool hybrid);
-/* The pipeline prebuild's progress, any thread: built and to build (0 / 0
- * when none runs). */
-void nc_hle_pipeline_progress(uint32_t *done, uint32_t *total);
 
 /* host_native.c (host.h on this core): the registers probes see, set up at
  * boot; the JIT flush the HLE asked for, at the end of a system op, or

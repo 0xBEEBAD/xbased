@@ -55,7 +55,6 @@ static inline void hle_mutex_unlock(HleMutex *m)
 }
 
 void hle_cond_init(HleCond *c);
-void hle_cond_destroy(HleCond *c);
 static inline void hle_cond_signal(HleCond *c)
 {
     pthread_cond_signal(&c->c);
@@ -81,7 +80,6 @@ bool hle_sem_trywait(HleSem *s);
 bool hle_sem_timedwait(HleSem *s, int ms);
 
 void hle_event_init(HleEvent *e, bool set);
-void hle_event_destroy(HleEvent *e);
 void hle_event_set(HleEvent *e);
 void hle_event_reset(HleEvent *e);
 void hle_event_wait(HleEvent *e);

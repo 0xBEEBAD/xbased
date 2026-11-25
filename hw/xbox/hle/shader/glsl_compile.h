@@ -20,7 +20,6 @@ typedef enum HleShaderStage {
 } HleShaderStage;
 
 void hle_glsl_init(void);
-void hle_glsl_finalize(void);
 /* Returns g_malloc'd SPIR-V words (free with g_free) or NULL; logs errors
  * with tag xbased-hle-glsl. */
 uint32_t *hle_glsl_compile(HleShaderStage stage, const char *src,

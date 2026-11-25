@@ -232,8 +232,8 @@ bool hle_res_info(const HleResDesc *d, HleResInfo *o)
     o->contiguous = true;
     /* Every Format the XDK builds has DMA_A | BORDER_COLOR: D3D's header
      * encoder ends with `or eax, 9` (PGR2 0x1c8f5c) and XGRAPHC's with
-     * `or esi, 9` (0x1e0581); P2 Task 11's CreateDevice verify showed it on
-     * all three device surfaces. */
+     * `or esi, 9` (0x1e0581); CreateDevice's three device surfaces have it
+     * too. */
     const uint32_t base = HLE_FMT_DMA_A | (d->border ? 0 : HLE_FMT_BORDER_COLOR);
     if (fi->flags & HLE_FI_LIN) {
         if (cube || vol || d->w > 4096 || d->h > 4096) {

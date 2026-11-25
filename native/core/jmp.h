@@ -16,11 +16,7 @@
 extern "C" {
 #endif
 
-#if defined(__x86_64__) /* the x86-64 translator (Windows, Linux) */
 typedef uint64_t nc_jmp_buf[32]; /* x64: rbx rbp rdi rsi r12-r15 rsp rip, xmm6-15, mxcsr/fcw (jmp_x64.c) */
-#else
-typedef uint64_t nc_jmp_buf[24];
-#endif
 
 __attribute__((returns_twice)) int nc_setjmp(nc_jmp_buf env);
 __attribute__((noreturn)) void nc_longjmp(nc_jmp_buf env, int val);

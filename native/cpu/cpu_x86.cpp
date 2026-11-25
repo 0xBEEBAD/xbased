@@ -1,7 +1,6 @@
 /*
- * xbased native core â€” the guest CPU on x86-64 hosts (Windows): a dynamic
- * translator from the title's x86-32 code to x86-64, behind the same
- * interface as the FEX embedding (cpu.h).
+ * xbased native core — the guest CPU (cpu.h) on x86-64 hosts (Windows,
+ * Linux): a dynamic translator from the title's x86-32 code to x86-64.
  *
  * The guest's 4 GiB live at host address 0 (core/vm_win.c), so a guest
  * address is a host address: translated instructions keep their guest
@@ -16,14 +15,12 @@
  * control flow ends a block and goes through the dispatcher or a chained
  * jump; FS-relative accesses add the KPCR's address (FS's base is fixed);
  * privileged and system instructions, the kernel calls' INT 0x3F and hooked
- * addresses leave to the core's system-op callback, as FEX's system mode
- * did; RDTSC runs on the host's TSC scaled to the Xbox's 733 MHz.
+ * addresses leave to the core's system-op callback; RDTSC runs on the host's TSC scaled to the Xbox's 733 MHz.
  *
  * Interrupt requests from other threads protect a poll page that every
  * block reads at its start: the fault (vectored exception handler) turns
  * the block's start into an NC_SYSOP_INTERRUPT exit. The x87 runs native,
- * at the precision the title's control word selects, so FEX's reduced-x87
- * switches have nothing to do here.
+ * at the precision the title's control word selects.
  */
 #include "native/cpu/cpu.h"
 #include "native/cpu/x64asm.h"
@@ -2089,9 +2086,9 @@ extern "C" void nc_context_set_eip(NcCpuContext *c, uint32_t eip)
     Saved(c).rip = eip;
 }
 
-/* NcCpuState keeps FEX's layout: flags[] one byte per EFLAGS bit (FEX's
- * flag array is indexed by bit), the x87 stack's eight 80-bit registers in
- * mm[] (16 bytes each), FSW in flags[40..41]. */
+/* NcCpuState's layout (the savestates'): flags[] one byte per EFLAGS bit
+ * (indexed by bit), the x87 stack's eight 80-bit registers in mm[] (16
+ * bytes each), FSW in flags[40..41]. */
 extern "C" void nc_context_export(const NcCpuContext *c, NcCpuState *st)
 {
     const SavedState &s = Saved(c);
@@ -2154,7 +2151,7 @@ extern "C" NcCpu *nc_cpu_create(const NcCpuConfig *cfg, uint32_t fs_base)
 
     cpu->region = (uint8_t *)VirtualAlloc(nullptr, REGION_SIZE, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
     if (!cpu->region) {
-        nc_log("xbased-native", "cpu: no translation buffer (%lu)", GetLastError());
+        nc_log("xbased-native", "cpu: no translation buffer (%lu)", (unsigned long)GetLastError());
         delete cpu;
         return nullptr;
     }
@@ -2477,11 +2474,6 @@ extern "C" void nc_cpu_set_code_limit(NcCpu *cpu, size_t bytes)
 }
 #endif
 
-extern "C" bool nc_cpu_x87_single_check(NcCpu *cpu)
-{
-    return false; /* the host's x87 rounds as the control word says */
-}
-
 extern "C" void nc_cpu_request_interrupt(NcCpu *cpu)
 {
     NcFrame *f = cpu->frame;
@@ -2510,15 +2502,6 @@ extern "C" uint64_t nc_cpu_guest_cycles(NcCpu *cpu)
 extern "C" void nc_cpu_guest_cycles_set(NcCpu *cpu, uint64_t ticks)
 {
     cpu->frame->cycle_offset = rdtsc_now() - ticks;
-}
-
-extern "C" bool nc_cpu_x87_single(NcCpu *cpu)
-{
-    return false;
-}
-
-extern "C" void nc_cpu_x87_single_restore(NcCpu *cpu)
-{
 }
 
 extern "C" void nc_frame_clear_interrupt(NcFrame *f)
@@ -2642,28 +2625,8 @@ extern "C" void nc_cpu_fault_resume(NcCpu *cpu, void *ucontext)
     ctx->R15 = (DWORD64)f;
 }
 
-extern "C" bool nc_cpu_unaligned_fault(NcCpu *cpu, int code, void *ucontext)
-{
-    return false; /* x86 hosts do unaligned atomics */
-}
-
-extern "C" bool nc_cpu_callret_fault(NcCpu *cpu, uintptr_t fault_addr, void *ucontext)
-{
-    return false; /* no call-ret shadow stack */
-}
-
-/* Whether a host pc is translated code (the front end's fault reports). */
-extern "C" bool nc_cpu_in_code(NcCpu *cpu, uintptr_t pc)
-{
-    return cpu && pc >= (uintptr_t)cpu->region && pc < (uintptr_t)cpu->region + REGION_SIZE;
-}
-
 extern "C" uintptr_t nc_cpu_context_pc(const void *ucontext)
 {
     return (uintptr_t)static_cast<const CONTEXT *>(ucontext)->Rip;
 }
 
-extern "C" NcCpu *nc_cpu_current(void)
-{
-    return g_cpu;
-}

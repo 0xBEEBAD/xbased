@@ -1,8 +1,8 @@
 /*
  * xbased native core, app front end — presenting the HLE GPU's front image.
  *
- * Once per display refresh the window's thread hands its Android window to
- * the HLE GPU's presenter (hw/xbox/hle/vk/swapchain.h), which draws the
+ * Once per display refresh the window's thread hands its window to the HLE
+ * GPU's presenter (hw/xbox/hle/vk/swapchain.h), which draws the
  * front frame into it through a Vulkan swapchain: here, the frame's place in
  * the window (letterboxed to the chosen shape) and the anti-aliasing chosen
  * (nc_present_set_fxaa, nc_present_set_upscale).
@@ -13,7 +13,7 @@
 #include "hw/xbox/hle/vk/swapchain.h"
 
 #include <string.h>
-#include <sys/system_properties.h>
+#include "native/core/props.h"
 #include "hw/xbox/hle/prop.h"
 #include <time.h>
 
@@ -164,7 +164,7 @@ static void debug_poll(void)
     if (n++ % 64) {
         return;
     }
-    char v[PROP_VALUE_MAX] = "";
+    char v[NC_PROP_VALUE_MAX] = "";
     hle_prop_get("debug.xbased.present", v);
     g_dbg.fxaa = strstr(v, "nofxaa") ? 0 : strstr(v, "fxaa") ? 1 : -1;
     g_dbg.upscale = strstr(v, "fsr")        ? NC_UPSCALE_FSR
@@ -290,7 +290,6 @@ static void wait_next_vsync(void)
  * 120 Hz), the presents keep to the vsyncs as before: shown as they came
  * there, they were a little less even (0.8 to 1.1 ms of jitter, 0.7 to
  * 0.95 before). */
-#ifdef NC_DESKTOP
 static void wait_next_frame(uint32_t seen)
 {
     const uint64_t now = now_ns(), next = nc_dev_nv2a_next_vsync(now);
@@ -298,20 +297,10 @@ static void wait_next_frame(uint32_t seen)
     const int ms = until > now ? (int)((until - now + 999999ull) / 1000000ull) : 1;
     hle_disp_wait_front(seen, ms);
 }
-#else
-static void wait_next_frame(uint32_t seen)
-{
-    (void)seen;
-}
-#endif
 
-bool nc_present_frame(struct ANativeWindow *win)
+bool nc_present_frame(HleWindow *win)
 {
-#ifdef NC_DESKTOP
     const uint32_t fronts = hle_disp_fronts();     /* before the look: one coming meanwhile ends the wait */
-#else
-    const uint32_t fronts = 0;
-#endif
     count_frames();
     debug_poll();
     const bool fxaa = g_dbg.fxaa < 0 ? g_fxaa : g_dbg.fxaa != 0;
@@ -323,11 +312,7 @@ bool nc_present_frame(struct ANativeWindow *win)
                          (uint64_t)(uint32_t)(g_overscan + 64) << 16 | (uint64_t)(uint32_t)g_crop_h << 24 |
                          (uint64_t)(uint32_t)g_crop_v << 32 | (uint64_t)(nc_dev_nv2a_av_mode() >> 16) << 40 |
                          (uint64_t)nc_dev_nv2a_av_title() << 56;
-#ifdef NC_DESKTOP
     const bool as_they_come = !nc_dev_nv2a_vblank_locked() || nc_dev_nv2a_vblank_timed();
-#else
-    const bool as_they_come = false;
-#endif
     if (!g_tween_t0 && hle_present_unchanged(win, key)) {
         if (as_they_come) {
             wait_next_frame(fronts);

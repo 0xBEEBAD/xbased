@@ -21,11 +21,6 @@ void hle_cond_init(HleCond *c)
     monotonic_cond_init(&c->c);
 }
 
-void hle_cond_destroy(HleCond *c)
-{
-    pthread_cond_destroy(&c->c);
-}
-
 bool hle_cond_timedwait(HleCond *c, HleMutex *m, int ms)
 {
     struct timespec ts;
@@ -87,12 +82,6 @@ void hle_event_init(HleEvent *e, bool set)
     monotonic_cond_init(&e->c);
     e->set = set;
     e->waiters = 0;
-}
-
-void hle_event_destroy(HleEvent *e)
-{
-    pthread_cond_destroy(&e->c);
-    pthread_mutex_destroy(&e->m);
 }
 
 /* Set already: nothing to do (a reset racing it is as if it came after).

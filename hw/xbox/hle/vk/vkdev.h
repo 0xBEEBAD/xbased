@@ -1,26 +1,19 @@
 /*
- * xbased HLE GPU — own Vulkan instance/device (spec §5.1, D7).
- * Include only under CONFIG_VULKAN.
+ * xbased HLE GPU — its own Vulkan instance and device, and what the device
+ * has (HleCaps).
  */
 #ifndef HW_XBOX_HLE_VK_VKDEV_H
 #define HW_XBOX_HLE_VK_VKDEV_H
 
 #include <volk.h>
-#ifdef __ANDROID__
-#include <vulkan/vulkan_android.h>
-#else
-/* the AHB import's names, never present off Android */
-#define VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME     "VK_ANDROID_external_memory_android_hardware_buffer"
-typedef void (*PFN_vkGetAndroidHardwareBufferPropertiesANDROID)(void);
-#endif
 
 /* Command buffers in flight (back.c's ring, one recording each): a slot's
  * recording starts once its previous submission has completed, so the
  * per-slot resources (batch.c's indices, gamma.c, zread.c) hold one each. */
 #define HLE_FRAMES 3
 
-/* VK_KHR_dynamic_rendering_local_read (Vulkan 1.4) for headers older than it
- * (the NDK's): what HleCaps.fbfetch uses */
+/* VK_KHR_dynamic_rendering_local_read (Vulkan 1.4) for headers older than it:
+ * what HleCaps.fbfetch uses */
 #ifndef VK_KHR_dynamic_rendering_local_read
 #define VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME "VK_KHR_dynamic_rendering_local_read"
 #define VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES_KHR \
@@ -42,9 +35,9 @@ typedef struct VkPhysicalDeviceDynamicRenderingLocalReadFeaturesKHR {
 typedef struct HleCaps {
     bool floor_ok;
     char missing[256];          /* floor features absent (comma list) */
-    /* What the other vendors' drivers lack (Mali, Xclipse, PowerVR), each with a
-     * substitute; all true on Adreno. debug.xbased.caps / XBASED_HLE_CAPS turns them
-     * off by name ("-bc,-vids,..."): any device runs the substitutes. */
+    /* What some drivers lack, each with a substitute. debug.xbased.caps /
+     * XBASED_HLE_CAPS turns them off by name ("-bc,-vids,..."): any device runs
+     * the substitutes. */
     bool bc;                    /* BC1-3 sampled: DXT uploaded as is, else decoded to
                                    A8R8G8B8 on the way into the arena (pb/pbres.c) */
     bool vids;                  /* VK_EXT_vertex_input_dynamic_state, else the vertex
@@ -55,17 +48,15 @@ typedef struct HleCaps {
                                    else it is a storage buffer (vk/draw.c, set 3) */
     bool push_desc;             /* VK_KHR_push_descriptor for fbfetch's set 2, else sets
                                    from a pool per command buffer */
-    bool cbc;                   /* VK_EXT_custom_border_color (Mali's r26 has none), else
-                                   cbc_any is off too */
+    bool cbc;                   /* VK_EXT_custom_border_color, else cbc_any is off too */
     bool cbc_any;               /* custom border colours without a format, for every
                                    sampler, else the nearest standard colour */
-    bool x4444;                 /* A4R4G4B4 sampled (VK_EXT_4444_formats, core in 1.3; not
-                                   on Mali's r26), else 4444 textures expand to A8R8G8B8
-                                   on the way into the arena (pb/pbres.c) */
+    bool x4444;                 /* A4R4G4B4 sampled (VK_EXT_4444_formats, core in 1.3),
+                                   else 4444 textures expand to A8R8G8B8 on the way into
+                                   the arena (pb/pbres.c) */
     bool bindless;              /* descriptor indexing (the bindless set, its limits), else
                                    each draw's textures in a set of their own at fixed
-                                   places (vk/draw.c fixed_bind: Mali's Bifrost, PowerVR's
-                                   Rogue) */
+                                   places (vk/draw.c fixed_bind) */
     bool depth_clamp;           /* depthClamp, else a z-clamped draw's vertex shader clamps
                                    z to the depth range (shader/ff.h HLE_ZCLAMP_GLSL) */
     bool d24s8;                 /* D24_UNORM_S8_UINT a sampled, filtered depth attachment,
@@ -73,11 +64,9 @@ typedef struct HleCaps {
     bool vfmt3;                 /* the 3-component 8- and 16-bit vertex formats as the driver
                                    reports them; off (debug), taken as missing, as on AMD's:
                                    their 4-component forms then (vk/draw.c vfmt) */
-    bool bda;                   /* bufferDeviceAddress (the guest RAM import asks for it) */
-    bool ahb;                   /* AHB import: guest RAM used in place, else copied */
-    /* Below Vulkan 1.3 (Mali Valhall on capped or older builds, PowerVR's BXM):
-     * 1.3's parts from their extensions where the driver has them, else
-     * emulated (vk/compat.c); each true on a 1.3 device */
+    /* Below Vulkan 1.3 (older drivers, Mesa's hasvk): 1.3's parts from their
+     * extensions where the driver has them, else emulated (vk/compat.c); each
+     * true on a 1.3 device */
     bool vk13;                  /* else timeline semaphores and descriptor indexing from
                                    their extensions, SPIR-V 1.3 (shader/glsl_compile.c) */
     bool dyn_render;            /* dynamic rendering, else render passes (compat.c) */
@@ -87,7 +76,7 @@ typedef struct HleCaps {
                                    pipelines (vk/draw.c PipeKey.ds) */
     bool eds2;                  /* extended dynamic state 2, else depth bias and primitive
                                    restart enables are too, and strips aren't batched */
-    /* Plus tier, opportunistic (§5.1) */
+    /* enabled where present */
     bool gpl, eds3, descriptor_buffer, maint5, sscaled, local_read;
     bool fbfetch;               /* local read (+ push descriptors or pooled sets):
                                    combiner stages that sample the bound colour target
@@ -96,12 +85,12 @@ typedef struct HleCaps {
     bool exec_props, aniso;
     bool host_query_reset, occl_precise;        /* visibility tests */
     bool wide_lines;            /* enabled when present: lines as wide as the NV2A's
-                                   SET_LINE_WIDTH (Turnip on the Adreno 650 has none) */
+                                   SET_LINE_WIDTH */
     bool fill_lines;            /* fillModeNonSolid: SET_FRONT / BACK_POLYGON_MODE's
                                    lines and points */
     bool cache_control;         /* pipelineCreationCacheControl: a pipeline asked of the
                                    cache only (vk/draw.c, asynchronous builds) */
-    bool swapchain;             /* the Android surface and VK_KHR_swapchain: the window's
+    bool swapchain;             /* the window's surface and VK_KHR_swapchain: the window's
                                    presenter (vk/swapchain.c) */
     bool share;                 /* Windows: images and timeline semaphores exported as NT
                                    handles (the game's frame presents them: vk/share.h) */
@@ -121,7 +110,6 @@ typedef struct HleVk {
                                  * only the struct tag, no typedef) */
     VkPhysicalDeviceProperties props;
     VkPhysicalDeviceMemoryProperties mem;
-    PFN_vkGetAndroidHardwareBufferPropertiesANDROID get_ahb_props;
     HleCaps caps;
 } HleVk;
 

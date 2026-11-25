@@ -234,11 +234,6 @@ void dash_take_folder(void)
     }
 }
 
-static const char *video_mode_name(void)
-{
-    return "";
-}
-
 
 /* the sticks' inverted axes (#324): a camera on the right stick that turns
  * the other way than the player is used to; the game's own or the global */
@@ -285,7 +280,6 @@ void scr_settings(void)
     List l;
     /* the rows end above the selected one's help (dash_help) */
     list_begin(&l, 74, 190, W - 148, dash_list_h(190, 58), 58);
-    (void)video_mode_name;
     (void)H;
     bool removable = false;     /* the selected row a folder or file X takes out of the library */
     switch (D.tab) {

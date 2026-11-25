@@ -6,11 +6,6 @@
 
 #include "hw/xbox/hle/core/xbe.h"
 
-typedef enum HlePosture {
-    HLE_POSTURE_OFF = 0,
-    HLE_POSTURE_REPLACE = 2,
-} HlePosture;
-
 #define HLE_MAX_LIB_RANGES 8
 
 typedef struct HleTitle {
@@ -22,7 +17,6 @@ typedef struct HleTitle {
 } HleTitle;
 
 typedef struct HleRuntime {
-    HlePosture posture;
     HleTitle title;
 } HleRuntime;
 
@@ -33,14 +27,7 @@ extern HleRuntime g_hle;
 extern char g_hle_unavailable[256];
 
 void hle_init(void);
-const char *hle_posture_name(HlePosture p);
 void hle_log(const char *tag, const char *fmt, ...) G_GNUC_PRINTF(2, 3);
-
-/* The HLE GPU renders the titles (XBASED_HLE_MODE=replace). */
-static inline bool hle_active(void)
-{
-    return g_hle.posture != HLE_POSTURE_OFF;
-}
 
 /* Title lifecycle (core/title.c): the XBE mapped now, in push-buffer mode
  * (vCPU thread, before its code runs). */

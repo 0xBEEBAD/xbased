@@ -1,8 +1,6 @@
 /*
- * xbased HLE GPU — Vulkan 1.3's entry points on drivers below it: Mali's
- * Valhall parts on the builds vendors cap at 1.1 or never updated (Samsung's
- * Exynos phones, older Dimensity firmware), PowerVR's BXM, Xclipse's first
- * firmware.
+ * xbased HLE GPU — Vulkan 1.3's entry points on drivers below it (older
+ * drivers that stopped at 1.1 or 1.2, Mesa's hasvk).
  *
  * The back end records Vulkan 1.3: dynamic rendering, synchronization2, the
  * copy commands 2, 1.2's timeline semaphores. Below 1.3 (HleCaps.vk13 off,
@@ -525,7 +523,6 @@ void hle_compat_install(struct VolkDeviceTable *t)
         PICK(vkWaitSemaphores, vkWaitSemaphoresKHR);
         PICK(vkSignalSemaphore, vkSignalSemaphoreKHR);
         PICK(vkGetSemaphoreCounterValue, vkGetSemaphoreCounterValueKHR);
-        PICK(vkGetBufferDeviceAddress, vkGetBufferDeviceAddressKHR);
         PICK(vkResetQueryPool, vkResetQueryPoolEXT);
 #undef PICK
         t->vkCmdBlitImage2 = c_blit2;

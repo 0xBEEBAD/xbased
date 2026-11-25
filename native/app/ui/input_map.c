@@ -508,7 +508,7 @@ static float pad_pressure(SDL_Gamepad *g, int button)
  * well as the mapped ones, on those pads only (#286). */
 static bool duke_bw(SDL_Gamepad *g, bool black)
 {
-#if defined(__linux__) && !defined(__ANDROID__)
+#ifdef __linux__
     if (!g || SDL_GetGamepadVendor(g) != 0x045e) {
         return false;
     }
@@ -639,11 +639,6 @@ static bool mouse_stick(const ImMap *m, float *ox, float *oy)
     }
     im_stick(x, y, 0, m->stick_antidz, m->stick_range, m->stick_round, ox, oy);
     return true;
-}
-
-void im_read(const ImMap *m, int p, const bool *keys, SDL_Gamepad *pad, ImPad *out)
-{
-    im_read_mouse(m, p, keys, pad, false, out);
 }
 
 void im_read_mouse(const ImMap *m, int p, const bool *keys, SDL_Gamepad *pad, bool mouse, ImPad *out)

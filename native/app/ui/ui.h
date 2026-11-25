@@ -46,7 +46,6 @@ bool ui_init(SDL_Window *win, const char *font_dir);
 bool ui_init_overlay(const char *font_dir, void (*present)(void), void (*size)(int *w, int *h));
 bool ui_is_overlay(void);
 void ui_shutdown(void);
-SDL_Renderer *ui_renderer(void);
 /* The frame: its size (pixels) and scale (1 at 720 lines: sizes are given
  * in 720p units and scaled), then drawing, then ui_end presents. */
 void ui_begin(void);

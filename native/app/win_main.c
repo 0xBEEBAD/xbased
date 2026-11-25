@@ -1,13 +1,11 @@
 /*
  * xbased (xbased for PC) — the front end: an SDL3 window, the controllers and
  * the keyboard, the core on its own thread, the HLE GPU's frames presented
- * into the window once per display refresh (present.c), as the Android
- * app's NativeCoreActivity and app_main.c do.
+ * into the window once per display refresh (present.c).
  *
  *   xbased [disc image] [option...]
  *
- * With no disc image, a file dialog asks for one. Options are the Android
- * app's arguments: the core's (native/core/options.h: scale=, loadstate=,
+ * With no disc image, a file dialog asks for one. Options: the core's (native/core/options.h: scale=, loadstate=,
  * video=, lang=, net=, mods=, uncap, ...), the window's (aspect=auto|4:3|
  * 16:9|stretch, fxaa=0|1, upscale=bilinear|fsr), and
  *   hdd=DIR      the hard disk folder (default: hdd beside the executable)
@@ -23,8 +21,8 @@
  * keyboard while no controller is plugged in (win_keys below).
  *
  * Loading a state, a title's relaunch (XLaunchNewImage) and its reboot
- * start the core again: the process runs itself again with the option the
- * Android app passes its activity (loadstate=, relaunch).
+ * start the core again: the process runs itself again with the option for
+ * it (loadstate=, relaunch).
  */
 #include "native/app/app.h"
 #include "native/app/ui/config.h"
@@ -59,7 +57,7 @@
 #include "native/net/net.h"
 #include "native/state/save.h"
 #include "native/hle/hle_native.h"
-#include "hw/xbox/hle/vk/native_window.h"
+#include "hw/xbox/hle/vk/window.h"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
@@ -69,7 +67,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <sys/system_properties.h>
+#include "native/core/props.h"
 #include <unistd.h>
 
 #include "native/app/desk.h"   /* windows.h, or its few calls over POSIX */
@@ -93,7 +91,7 @@ static NcCore g_core;
 static void pause_core(bool on);
 static int g_disc_fd = -1;
 static SDL_AtomicInt g_core_state; /* 0 booting, 1 running, -1 failed or stopped */
-static struct ANativeWindow g_nw;
+static HleWindow g_nw;
 static char g_exe_dir[MAX_PATH];
 static char g_data_dir[MAX_PATH]; /* settings, saves, states, the log (cfg_data_dir) */
 static char g_disc[1024];
@@ -765,7 +763,7 @@ static void state_path(int slot, char *out, size_t n)
     snprintf(out, n, "%s/slot%d.hxs", dir, slot);
 }
 
-/* The save runs on a thread of its own, as NativeCoreActivity's does: it
+/* The save runs on a thread of its own: it
  * waits for the GPU to park at a frame, which the window's thread presents
  * meanwhile (from that thread, it waited on itself). */
 static SDL_AtomicInt g_saving;
@@ -1504,14 +1502,14 @@ static void ingame_menu(SDL_Window *win, bool *paused, bool minimized)
 /* debug.xbased.state ("save:<slot>", "load:<slot>"), as the app's menu would */
 static void state_request_poll(void)
 {
-    static char last[PROP_VALUE_MAX];
+    static char last[NC_PROP_VALUE_MAX];
     static bool primed;
     static unsigned n;
     if (n++ % 30) {
         return;
     }
-    char v[PROP_VALUE_MAX] = "";
-    __system_property_get("debug.xbased.state", v);
+    char v[NC_PROP_VALUE_MAX] = "";
+    nc_prop_get("debug.xbased.state", v);
     if (!primed || !strcmp(v, last)) {
         primed = true;
         snprintf(last, sizeof(last), "%s", v);
@@ -1688,10 +1686,10 @@ static void ff_apply(void)
 {
     const bool on = (g_ff_hold || g_ff_on) && !g_online;
     if (!g_online) {
-        nc_win_prop_set("debug.xbased.uncap", on || g_uncap ? "1" : "0");
+        nc_prop_set("debug.xbased.uncap", on || g_uncap ? "1" : "0");
         char cap[16];
         snprintf(cap, sizeof(cap), "%d", on ? 0 : g_fps_cap);
-        nc_win_prop_set("debug.xbased.fpscap", cap);
+        nc_prop_set("debug.xbased.fpscap", cap);
     }
     hle_present_set_ff(on);
 }
@@ -2040,7 +2038,6 @@ int main(int argc, char *argv[])
         }
     }
     nc_io_set_hdd_root(hdd);
-    setenv("XBASED_HLE_MODE", "replace", 0);
     {
         char base[1100];
         snprintf(base, sizeof(base), "%s/../hle", hdd);

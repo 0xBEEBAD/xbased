@@ -319,11 +319,6 @@ static bool views(HleVkSurf *s)
     return view(s, 0) && view(s, 1);
 }
 
-VkImageView hle_zread_depth_view(HleVkSurf *s)
-{
-    return s->img && view(s, 0) ? s->zr_depth : VK_NULL_HANDLE;
-}
-
 /* A descriptor set of this recording's slot (NULL: none left). */
 static VkDescriptorSet slot_set(unsigned slot)
 {

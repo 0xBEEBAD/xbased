@@ -47,7 +47,6 @@ static struct {
     uint64_t sent, received;
     char pcap_path[128];                /* pcap=: "" none */
     FILE *pcap;                         /* under lock */
-    uint32_t twin;                      /* a console with our MAC, not told yet; 0: none */
 } g_net = {
     .lock = PTHREAD_MUTEX_INITIALIZER,
     .wake_fd = -1,
@@ -246,22 +245,6 @@ bool nc_net_mac(uint8_t mac[6])
     return memcmp(mac, none, 6) != 0;
 }
 
-void nc_net_twin(uint32_t ip)
-{
-    pthread_mutex_lock(&g_net.lock);
-    g_net.twin = ip;
-    pthread_mutex_unlock(&g_net.lock);
-}
-
-bool nc_net_take_twin(char *addr, size_t len)
-{
-    pthread_mutex_lock(&g_net.lock);
-    const struct in_addr a = { .s_addr = g_net.twin };
-    g_net.twin = 0;
-    pthread_mutex_unlock(&g_net.lock);
-    return a.s_addr && inet_ntop(AF_INET, &a, addr, (socklen_t)len);
-}
-
 void nc_net_deliver(const uint8_t *frame, size_t len)
 {
     pthread_mutex_lock(&g_net.lock);
@@ -376,7 +359,7 @@ void nc_net_start(void)
     pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
     pthread_cond_init(&g_net.rx_cond, &attr);
     pthread_condattr_destroy(&attr);
-    /* debug: NC_NET="option option ..." over the app's (via debug.xbased.env) */
+    /* debug: NC_NET="option option ..." over the front end's */
     const char *env = getenv("NC_NET");
     if (env) {
         char buf[256];

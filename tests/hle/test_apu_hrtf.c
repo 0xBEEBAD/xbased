@@ -4,8 +4,7 @@
  * delay moved from the last frame's to the new ones across one frame. The
  * same output within float rounding, over random audio with the parameters
  * moving (new targets every few frames, delays from 0 to the 42-sample limit,
- * fractional and whole) and settled. Built for the host and, with the NDK,
- * for the device (its NEON path). */
+ * fractional and whole) and settled. */
 #include "hle_test.h"
 
 #include <math.h>

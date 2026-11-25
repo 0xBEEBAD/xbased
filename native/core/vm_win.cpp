@@ -9,7 +9,7 @@
  * mapped page-granular at every guest address that reaches it: views of 4
  * KiB at 4 KiB file offsets replace placeholders (MapViewOfFile3 with
  * MEM_REPLACE_PLACEHOLDER, Windows 10 1803 up), as Linux's mmap of a memfd
- * does on Android.
+ * does (core/vm.c).
  *
  * Windows wants a view replaced or protected whole, so the regions (views
  * and placeholders) are kept in a map: mapping over part of a view unmaps

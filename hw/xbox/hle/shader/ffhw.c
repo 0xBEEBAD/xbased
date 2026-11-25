@@ -1,7 +1,7 @@
 /*
  * xbased HLE GPU — the NV2A fixed-function vertex stage as GLSL (pure). See
  * ffhw.h. The transform engine's fixed function, as NV_vertex_program's
- * documentation and the hardware tests describe it (LLE's generator read as
+ * documentation and the hardware tests describe it (xemu's generator read as
  * reference only):
  * - skinning blends the position and normal over model-view matrices 0..n-1
  *   (and their inverses), the last weight generated (1 - the others) in the
@@ -25,7 +25,7 @@ typedef struct Buf {
     bool overflow;
 } Buf;
 
-static void put(Buf *b, const char *fmt, ...)
+static __attribute__((format(printf, 2, 3))) void put(Buf *b, const char *fmt, ...)
 {
     va_list ap;
     va_start(ap, fmt);
@@ -265,7 +265,7 @@ size_t hle_ffhw_glsl(const uint32_t *tokens, unsigned nslots, const HleVshKey *v
 /* D3D turns the material's power into six coefficients of the hardware's
  * specular curve; the exponent comes back from the first (and the fourth,
  * the half power's) by piecewise fits over the powers D3D produces (the
- * curve fit of the hardware tests, LLE's pgraph_kelvin_map.c, read as
+ * curve fit of the hardware tests, xemu's pgraph_kelvin_map.c, read as
  * reference). */
 static float fit(float c0, unsigned i)
 {

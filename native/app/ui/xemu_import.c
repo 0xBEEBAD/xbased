@@ -5,8 +5,7 @@
  * ROM), flashrom_path (the BIOS), eeprom_path (the EEPROM, default beside
  * xemu.toml) and hdd_path (the hard disk: qcow2, or raw). The disk's E:
  * partition is FATX; its UDATA and TDATA trees are copied into the hard
- * disk folder's Partition1, then re-signed as the Android app's
- * SaveResigner does (android/.../data/hdd/SaveResigner.kt):
+ * disk folder's Partition1, then re-signed:
  *
  * Games sign with XAPI's XCalculateSignature: roamable = HMAC-SHA1(title
  * key, data), the title key being HMAC-SHA1(certificate key, the XBE

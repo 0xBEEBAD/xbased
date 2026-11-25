@@ -5,11 +5,12 @@
  * and one that continues execution has its CONTEXT written back. None:
  * the previous disposition (a crash report, the default action).
  *
- * SA_NODEFER: the core leaves a handler by nc_longjmp (fault scopes) as it
- * did out of Android's signal handler, and the signal must not stay
- * blocked behind it.
+ * SA_NODEFER: the core leaves a handler by nc_longjmp (fault scopes), and the
+ * signal must not stay blocked behind it.
  */
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 #include "nc_winapi.h"
 
 #include <signal.h>
@@ -146,16 +147,3 @@ PVOID AddVectoredExceptionHandler(ULONG first, PVECTORED_EXCEPTION_HANDLER h)
     return (PVOID)h;
 }
 
-ULONG RemoveVectoredExceptionHandler(PVOID h)
-{
-    pthread_mutex_lock(&g_mu);
-    for (int i = 0; i < g_n; i++) {
-        if ((PVOID)g_h[i] == h) {
-            memmove(&g_h[i], &g_h[i + 1], sizeof(g_h[0]) * (size_t)(g_n - i - 1));
-            g_n--;
-            break;
-        }
-    }
-    pthread_mutex_unlock(&g_mu);
-    return 1;
-}

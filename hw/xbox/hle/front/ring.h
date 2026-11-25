@@ -1,5 +1,5 @@
 /*
- * xbased HLE GPU — single-producer single-consumer command ring (§5.3).
+ * xbased HLE GPU — single-producer single-consumer command ring.
  * Producer: vCPU thread. Consumer: HLE render thread.
  */
 #ifndef HW_XBOX_HLE_FRONT_RING_H

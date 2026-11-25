@@ -25,7 +25,7 @@ typedef struct Buf {
     bool overflow;
 } Buf;
 
-static void put(Buf *b, const char *fmt, ...)
+static __attribute__((format(printf, 2, 3))) void put(Buf *b, const char *fmt, ...)
 {
     va_list ap;
     va_start(ap, fmt);
@@ -288,7 +288,6 @@ static const char k_vs_tail[] =
     "  vec2 ndc = scr * pc.vp + vec2(-1.0, 1.0);\n"
     "%s"
     "  gl_Position = vec4(ndc * w, (fl & %uu) != 0u ? 0.0 : zN * w, w);\n"
-    "%s"
     "  vW = w;\n"
     "}\n";
 
@@ -297,7 +296,7 @@ static const char k_vs_tail[] =
 static void vs_tail(Buf *b)
 {
     put(b, k_vs_tail, HLE_UBER_V_SPECOFF, HLE_SUBPIXEL_GLSL("scr") HLE_TEXEL_EDGE_GLSL("scr"),
-        HLE_ZNORM_GLSL("oPos.z", "zN"), HLE_UBER_V_WBUF | HLE_UBER_V_ZFREE, g_hle_glsl_zw ? HLE_ZW_NUDGE_GLSL : "");
+        HLE_ZNORM_GLSL("oPos.z", "zN"), HLE_UBER_V_WBUF | HLE_UBER_V_ZFREE);
 }
 
 size_t hle_uber_vs_glsl(char *buf, size_t cap, unsigned set)

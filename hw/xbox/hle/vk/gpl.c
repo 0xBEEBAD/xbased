@@ -367,10 +367,3 @@ HlePbResult hle_gpl_build(const HleGplDesc *d, bool cache_only, bool side, VkPip
     return r;
 }
 
-void hle_gpl_counts(unsigned *vi, unsigned *pre, unsigned *fs, unsigned *out)
-{
-    *vi = g_gl.n[PART_VI];
-    *pre = g_gl.n[PART_PRE];
-    *fs = g_gl.n[PART_FS];
-    *out = g_gl.n[PART_OUT];
-}

@@ -307,9 +307,6 @@ static uint64_t RtlRaiseException(NcKernel *k, NcFrame *f, const uint32_t *a)
  * a fault its own handler would have caught on a console. */
 bool nc_seh_fault(NcKernel *k, NcFrame *f, uint32_t code, uint32_t next_eip, unsigned nparams, uint32_t p0, uint32_t p1)
 {
-#ifndef NC_DESKTOP
-    return false;   /* Android keeps the stop it had: this path was never run there */
-#else
     NcThread *t = k->current;
     const uint32_t esp = nc_frame_gpr(f, NC_ESP), eip = nc_frame_eip(f);
     const uint32_t low = (esp - LV_SIZE) & ~15u;
@@ -345,7 +342,6 @@ bool nc_seh_fault(NcKernel *k, NcFrame *f, uint32_t code, uint32_t next_eip, uns
     }
     step(k, f, t);
     return true;
-#endif
 }
 
 /* RtlUnwind(TargetFrame, TargetIp, ExceptionRecord, ReturnValue): calls the

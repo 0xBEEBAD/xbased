@@ -1,6 +1,6 @@
 /*
  * xbased HLE GPU — Xbox pixel shaders (NV2A register combiners and texture
- * modes) -> GLSL 4.50 (spec §5.8; pure). The key is the pixel-shader
+ * modes) -> GLSL 4.50 (pure). The key is the pixel-shader
  * render-state block (5659 render states 0..56, which SetPixelShader loads
  * from the D3DPIXELSHADERDEF); the combiner constants are push constants.
  *
@@ -79,7 +79,7 @@ typedef struct HlePshKey {
     uint8_t alpha_kill;                 /* stages with D3DTSS_ALPHAKILL (bits 0-3) */
     uint8_t vol;                        /* stages whose texture is a volume (bits 0-3):
                                            2D-coordinate modes fetch it in 3D, as the NV2A
-                                           (LLE): PROJECT2D at r = 0, bump-env at the
+                                           does: PROJECT2D at r = 0, bump-env at the
                                            coordinates' r; HLE_PSH_RECT: the stage the
                                            push block's fog.w names has its linear
                                            texture kept to its own size, part of a

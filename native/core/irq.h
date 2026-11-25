@@ -54,7 +54,7 @@ uint32_t nc_irq_idle_wait(uint64_t deadline_ns, uint64_t max_ns);
  * nc_irq_take_work says whether any was posted since it last asked. */
 void nc_irq_post_work(void);
 bool nc_irq_take_work(void);
-/* The emulation paused or resumed (the activity's onPause / onResume). The
+/* The emulation paused or resumed (the front end's pause). The
  * guest's CPU stops at its next kernel entry (nc_kernel_pause_point); a
  * device thread that runs on its own checks nc_paused and waits in
  * nc_pause_wait (until resumed). */

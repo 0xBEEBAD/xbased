@@ -277,16 +277,13 @@ static bool commit(NcKernel *k, uint32_t va, uint32_t size, bool zero)
 
 /* Memory given back held code that ran, perhaps (a module a title loaded
  * itself): its translations go with it, or the next code put at the same
- * address ran as the old one. The PC's translator finds a range without
- * code at a word per 64 pages; FEX's cost per call isn't known here, so
- * Android keeps what it had. */
+ * address ran as the old one. The translator finds a range without code at
+ * a word per 64 pages. */
 static void code_gone(NcKernel *k, uint32_t va, uint32_t size)
 {
-#ifdef NC_DESKTOP
     if (k->cpu && size) {
         nc_cpu_invalidate(k->cpu, va, size);
     }
-#endif
 }
 
 /* One unmap (a syscall) per run of committed pages, then their physical

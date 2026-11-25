@@ -544,7 +544,7 @@ static uint8_t *eeprom(NcKernel *k)
             }
             nc_log("xbased-native", "ex: a disc for several regions, the language %u's: Japan", lang_now);
         }
-        /* And the time zone, the phone's: its offset from UTC now as the
+        /* And the time zone, the computer's: its offset from UTC now as the
          * bias (UTC = local time + bias, minutes), without daylight saving
          * rules of its own (no names, dates or standard / daylight biases). */
         nc_wr32(g_eeprom + 0x64, (uint32_t)-g_tz_minutes);
@@ -1110,8 +1110,8 @@ void nc_kernel_launch_page_restore(NcKernel *k, const uint8_t page[NC_LAUNCH_PAG
 
 /* HalReturnToFirmware(Routine): 2 (ReturnFirmwareQuickReboot) with a launch
  * data page is XLaunchNewImage. The core can't reboot in place (its state
- * lives for one run), so the page goes to a file and the app starts the core
- * again (NativeCoreActivity), which boots the XBE the page names: on the
+ * lives for one run), so the page goes to a file and the front end starts
+ * the core again, which boots the XBE the page names: on the
  * disc, on the hard disk (when it's there), or the dashboard a title asked
  * a page of (dashboard_page). */
 static uint64_t HalReturnToFirmware(NcKernel *k, NcFrame *f, const uint32_t *a)

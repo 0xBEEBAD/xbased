@@ -13,7 +13,7 @@
  * what they were, before the open files are reopened (FILE), whatever the
  * game wrote to them since.
  *
- * A blob is gzip (level 1), <hash>.gz: the stores of the RP5's 9 games went
+ * A blob is gzip (level 1), <hash>.gz: the stores of 9 games went
  * from 4.5 GB to 2.4 GB (GTA San Andreas' 650 MB drive to 21 MB, Dead or
  * Alive 2's to 87 %). Blobs stored before, <hash> as the file was, still
  * load; the hash is always the content's.

@@ -9,7 +9,6 @@
 
 #include "hw/xbox/hle/host.h"
 
-#include <dlfcn.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
@@ -196,15 +195,6 @@ int hle_host_anisotropy(void)
 void *hle_host_vk_loader(void)
 {
     static PFN_vkGetInstanceProcAddr gipa;
-#ifdef __ANDROID__
-    if (!gipa) {
-        void *lib = dlopen("libvulkan.so", RTLD_NOW | RTLD_LOCAL);
-        gipa = lib ? (PFN_vkGetInstanceProcAddr)dlsym(lib, "vkGetInstanceProcAddr") : NULL;
-        if (!gipa) {
-            nc_log("xbased-native-hle", "no Vulkan loader: %s", dlerror());
-        }
-    }
-#endif
     /* (desktop: none here, volk finds the system's loader, vulkan-1.dll or libvulkan.so.1) */
     return (void *)gipa;
 }
@@ -215,8 +205,3 @@ void hle_host_gpu_lost(const char *why)
     nc_hle_set_fatal(NC_FATAL_GPU_LOST, why);
 }
 
-/* Disc reads aren't counted here. */
-bool hle_host_disc_stats(uint64_t *ops, uint64_t *bytes, uint64_t *ns)
-{
-    return false;
-}

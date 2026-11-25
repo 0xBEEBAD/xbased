@@ -6,7 +6,7 @@
  * emulator itself is what is looked at: nothing outside the hard disk
  * folder, nothing past a table or a buffer of the kernel's.
  *
- *   clang -O1 -g -fsanitize=address -DNC_DESKTOP=1 -I<repo> tests/native/kernel/io_test.c \
+ *   clang -O1 -g -fsanitize=address -I<repo> tests/native/kernel/io_test.c \
  *       native/kernel/io.c native/kernel/ob.c native/kernel/pool.c native/core/xdvdfs.c \
  *       native/state/state.c -lz -lpthread -o io_test
  */

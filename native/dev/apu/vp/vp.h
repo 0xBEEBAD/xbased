@@ -185,7 +185,6 @@ uint64_t mcpx_apu_vp_read(void *opaque, uint32_t addr, unsigned int size);
 void mcpx_apu_vp_write(void *opaque, uint32_t addr, uint64_t val, unsigned int size);
 
 void mcpx_apu_vp_init(MCPXAPUState *d);
-void mcpx_apu_vp_finalize(MCPXAPUState *d);
 void mcpx_apu_vp_frame(MCPXAPUState *d, float mixbins[NUM_MIXBINS][NUM_SAMPLES_PER_FRAME]);
 /* The guest's VOICE_OFFs whose notification waits (vp.c voice_off): any, and
  * all of them notified now, for a frame thread stopped for the guest that

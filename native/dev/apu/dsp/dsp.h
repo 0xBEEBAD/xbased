@@ -42,7 +42,6 @@ DSPState *dsp_init(void *rw_opaque,
 void dsp_destroy(DSPState* dsp);
 void dsp_reset(DSPState* dsp);
 
-void dsp_step(DSPState* dsp);
 void dsp_run(DSPState* dsp, int cycles);
 
 void dsp_bootstrap(DSPState* dsp);

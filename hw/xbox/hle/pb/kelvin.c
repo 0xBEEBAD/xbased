@@ -177,7 +177,7 @@ static void tss(uint32_t *t, unsigned s)
     t[TSS_COLORSIGN] = filt & 0xF0000000u;
     t[TSS_BORDERCOLOR] = R(b + 0x24);
     t[TSS_COLORKEYCOLOR] = R(0x0AE0 + 4 * s);           /* SET_COLOR_KEY_COLOR */
-    /* SET_TEXTURE_SET_BUMP_ENV_MAT 00 01 11 10 (the NV2A's order, as LLE
+    /* SET_TEXTURE_SET_BUMP_ENV_MAT 00 01 11 10 (the NV2A's order, as xemu
      * takes it), SCALE, OFFSET, where written; the stage keeps 00 01 10 11.
      * Read as 00 01 10 11, D3D's 0.5 x identity was (0.5, 0, 0.5, 0): every
      * offset along u, by du + dv, and Burnout 3's lake and Fable's water
@@ -235,7 +235,7 @@ void hle_kelvin_state(HleCmdState *st)
     if (W(0x09C0) || W(0x09C4)) {
         /* SET_FOG_PARAMS as pushed (Conker's meshes: their own fog): the
          * NV2A's linear factor is p0 - 1 + p1 d, exp / exp2 take the density
-         * from p1 (D3D's encoding, as LLE decodes it). The back end's fog
+         * from p1 (D3D's encoding, as xemu decodes it). The back end's fog
          * takes start / end / density: the parameters go back to those. */
         float p0, p1, st, en, dens;
         uint32_t r0 = R(0x09C0), r1 = R(0x09C4);
