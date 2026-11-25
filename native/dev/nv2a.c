@@ -116,6 +116,10 @@ static uint64_t g_disp_vsync_ns, g_disp_period_ns;
  * the vblank followed its own presents, and the game ran at 57 or 62 fps:
  * it runs free instead. */
 static uint64_t g_disp_nominal_ns;
+/* The display's refreshes as its vsyncs counted them (a late one's
+ * interval spans whole periods; two wakes in a refresh count one), for the
+ * limit's cap (cap_refresh_slot). */
+static uint64_t g_disp_refreshes;
 /* The vsyncs as the presenter's swapchain has them (hle_host_display_sync:
  * the driver's own instants, where the compositor's above are a thread's
  * wake after each), the lead its timed presents keep, and when they came
@@ -141,6 +145,7 @@ static unsigned g_pick_n;
 #define VSYNC_STALE  200000000ull
 /* Push-buffer mode (hle_host_pb_mode): the HLE consumes channel 0's FIFO. */
 static bool g_pbmode;
+static void flip_waits(void);
 
 /* debug: NC_NV2A_CENSUS=1 / debug.xbased.nvcensus=1 at boot: the registers the
  * guest reads and writes, by offset: each new one logged as it first comes
@@ -605,6 +610,9 @@ static void nv2a_write(void *opaque, uint32_t off, uint64_t value, unsigned size
         hle_host_gpu_trace(HLE_GTR_PCRTC_CLR, (uint32_t)value);
         __atomic_fetch_and(reg(off), ~(uint32_t)value, __ATOMIC_ACQ_REL);
         update_irq();
+        if ((value & PCRTC_VBLANK) && g_pbmode) {
+            flip_waits();   /* a frame's next early vblank waits for this (wait_vblank) */
+        }
         return;
     case NV_PTIMER_INTR_0:
         __atomic_fetch_and(reg(off), ~(uint32_t)value, __ATOMIC_ACQ_REL);
@@ -666,14 +674,69 @@ void nc_dev_nv2a_display_vsync(uint64_t ns)
     const uint64_t last = __atomic_load_n(&g_disp_vsync_ns, __ATOMIC_ACQUIRE);
     if (last && ns > last) {
         const uint64_t d = ns - last;
-        uint64_t p = __atomic_load_n(&g_disp_period_ns, __ATOMIC_RELAXED);
+        /* the estimate (0: being measured; the published one stays meanwhile) */
+        static uint64_t s_p, s_first[9];
+        static unsigned s_nfirst, s_off;
+        uint64_t p = s_p;
+        const uint64_t pc = p ? p : __atomic_load_n(&g_disp_period_ns, __ATOMIC_RELAXED);
         /* a callback that came late spans whole periods */
-        const uint64_t n = p ? (d + p / 2) / p : 1;
+        const uint64_t n = pc ? (d + pc / 2) / pc : 1;
         const uint64_t one = n ? d / n : d;
-        if (n >= 1 && n <= 4 && one > 5000000ull && one < 50000000ull) {
-            p = p ? p + ((int64_t)one - (int64_t)p) / 16 : one;
+        if (!p) {
+            /* the first: the middle of 9 intervals (one alone can be a
+             * short one, and a period under two thirds of the display's
+             * counts its intervals two to one from then on) */
+            if (d > 5000000ull && d < 50000000ull) {
+                s_first[s_nfirst++] = d;
+                if (s_nfirst == 9) {
+                    for (unsigned i = 1; i < 9; i++) {
+                        for (unsigned j = i; j > 0 && s_first[j - 1] > s_first[j]; j--) {
+                            const uint64_t x = s_first[j];
+                            s_first[j] = s_first[j - 1];
+                            s_first[j - 1] = x;
+                        }
+                    }
+                    p = s_first[4];
+                    s_nfirst = 0;
+                }
+            }
+        } else if (n >= 1 && n <= 4 && one > 5000000ull && one < 50000000ull) {
+            /* every interval, as it was: a wake's lateness counts in the one
+             * before it and against the one after, and the average keeps
+             * clear of it (taken only near whole periods, vsyncs up to 4 ms
+             * late gave 16.0 to 17.2 ms against 16.6 to 16.8) */
+            p = p + ((int64_t)one - (int64_t)p) / 16;
+        }
+        /* A period a whole part of the display mode's (the first interval a
+         * short one, the rest counted two to one since): the mode's. Off it
+         * by more than a tenth for long otherwise, measured again: 60 Hz
+         * vsyncs seen through wakes on a 280 Hz grid (14.3, 17.9, 17.9 ms
+         * apart) hold a period of 10.8 once under 11.9, the 17.9 ones counted
+         * as two of 8.9, and the grid stayed off for the whole run. */
+        const uint64_t nominal = __atomic_load_n(&g_disp_nominal_ns, __ATOMIC_RELAXED);
+        if (p && nominal && llabs((int64_t)p - (int64_t)nominal) > (int64_t)(nominal / 10)) {
+            uint64_t j = 2;
+            while (j <= 4 && llabs((int64_t)(j * p) - (int64_t)nominal) > (int64_t)(nominal / 50)) {
+                j++;
+            }
+            if (j <= 4) {
+                p *= j;
+                s_off = 0;
+            } else if (++s_off >= 64) {
+                p = 0;
+                s_nfirst = 0;
+                s_off = 0;
+            }
+        } else {
+            s_off = 0;
+        }
+        s_p = p;
+        if (p) {
             __atomic_store_n(&g_disp_period_ns, p, __ATOMIC_RELAXED);
         }
+        /* the refreshes since the first (cap_refresh_slot) */
+        __atomic_store_n(&g_disp_refreshes, __atomic_load_n(&g_disp_refreshes, __ATOMIC_RELAXED) + n,
+                         __ATOMIC_RELEASE);
     }
     __atomic_store_n(&g_disp_vsync_ns, ns, __ATOMIC_RELEASE);
 }
@@ -1048,6 +1111,8 @@ int64_t hle_host_flip_min_ns(void)
  * Original, 60 Hz with V-Sync: in 12 s 11 pictures on for two refreshes and
  * 11 never shown; on the grid, every one for one). A pace of a fraction of
  * a refresh (Up to 120 on 60 Hz) on its steps (every_grid). */
+static uint64_t cap_refresh_slot(uint64_t slot, uint64_t pd, uint64_t every, bool take);
+
 int64_t hle_host_flip_slot(int64_t want, int64_t every)
 {
     uint64_t vs, pd;
@@ -1055,6 +1120,9 @@ int64_t hle_host_flip_slot(int64_t want, int64_t every)
     int64_t slot = want;
     if (every > 0 && want > 0 && every_grid((uint64_t)every, &vs, &pd, &at, NULL)) {
         slot = (int64_t)grid_at_or_after((uint64_t)want - pd / 2, vs, pd, at);
+        if (__atomic_load_n(&g_uncap_on, __ATOMIC_RELAXED)) {
+            slot = (int64_t)cap_refresh_slot((uint64_t)slot, pd, (uint64_t)every, true);
+        }
     }
     __atomic_store_n(&g_trap_every_ns, every > 0 ? (uint64_t)every : 0, __ATOMIC_RELAXED);
     __atomic_store_n(&g_trap_slot_ns, every > 0 && slot > 0 ? (uint64_t)slot : 0, __ATOMIC_RELEASE);
@@ -1062,7 +1130,25 @@ int64_t hle_host_flip_slot(int64_t want, int64_t every)
 }
 
 #define EARLY_GAP_NS 1000000ull     /* uncapped: early vblanks at most this often */
+/* ... and a frame's further ones (a presentation interval of 2 flips on the
+ * second), once the guest took the one before: a millisecond each was a
+ * millisecond a frame its flip waited (007 Everything or Nothing uncapped,
+ * 2 to 3 ms a frame of the decoder's in flip stalls, #429) */
+#define EARLY_GAP_AGAIN_NS 100000ull
 #define EARLY_POLL_NS 250000ull
+/* Waits this short are spun (spin_until): the timer's least is about half a
+ * millisecond on Windows */
+#define SPIN_NS 600000ull
+
+static void spin_until(uint64_t until)
+{
+    while (now_ns() < until) {
+#if defined(__x86_64__) || defined(__i386__)
+        __builtin_ia32_pause();
+#endif
+    }
+}
+
 #define FRAME_DUE_SPAN 4000000ull   /* a limit's frame's further early vblanks come within this of its first */
 
 /* Uncapped push-buffer mode: the title's own D3D flips in its vblank
@@ -1127,13 +1213,101 @@ static uint64_t on_limit(uint64_t t, uint64_t at)
     return at <= t && t - at <= ON_LIMIT_WAKE ? at : t;
 }
 
+/* The limit on the display's vsyncs (cap_grid, a trap's handler's flips
+ * lifted: hle_host_flip_slot) lets no more frames through than the display
+ * has refreshes, counted by its vsyncs (g_disp_refreshes) and the time
+ * since the last one. Each frame goes on a step of the grid at least the
+ * limit's pace after the last's, but that is from where the last went: a
+ * grid that moves (its vsyncs a busy compositor's wakes, late and early;
+ * the phase the presenter's pickups give) lets a frame go early each step
+ * it moves back. Spyro A Hero's Tail at Up to 60 ran at 64.5 fps for whole
+ * runs beside a 60 Hz display whose vsyncs counted 16.69 ms (#430): more
+ * frames than refreshes, which this keeps from being whatever the grid
+ * does. Frames are
+ * in units of the grid's steps (a refresh is one, or n of a pace of n a
+ * refresh; a frame one, or the m refreshes of a pace of m), the refresh
+ * under way counted; CAP_CREDIT frames past that are let through, for
+ * vsyncs seen late (counted up to the last refresh only, Crash Bandicoot at
+ * Up to 120 on 60 Hz lost a frame now and then: its two a refresh took the
+ * whole credit). While
+ * frames keep within the refreshes, which is whenever the grid keeps to
+ * the display, nothing waits on it. */
+#define CAP_CREDIT 2
+static struct {
+    uint32_t lock;
+    uint64_t used;              /* the units the frames took, at least the count's (GCRA) */
+    uint64_t gain, cost;        /* units a refresh, a frame (a change starts the count over) */
+} g_cap_rf;
+
+/* the refreshes by t in units, the one under way included */
+static uint64_t cap_refresh_units(uint64_t t, uint64_t gain)
+{
+    const uint64_t w = __atomic_load_n(&g_disp_vsync_ns, __ATOMIC_ACQUIRE);
+    const uint64_t r = __atomic_load_n(&g_disp_refreshes, __ATOMIC_ACQUIRE);
+    const uint64_t p = __atomic_load_n(&g_disp_period_ns, __ATOMIC_RELAXED);
+    return (r + 1 + (p && w && t > w ? (t - w) / p : 0)) * gain;
+}
+
+/* The first step of the grid (pd apart) from slot on where a frame of
+ * every keeps within the refreshes; taken when `take` (it goes there). */
+static uint64_t cap_refresh_slot(uint64_t slot, uint64_t pd, uint64_t every, bool take)
+{
+    const uint64_t p = __atomic_load_n(&g_disp_period_ns, __ATOMIC_RELAXED);
+    if (!p || !pd || !every) {
+        return slot;
+    }
+    /* (the vsyncs' period whole steps of the grid's, else no count to go by:
+     * one a step and a half counted as two or one lets too many or too few) */
+    const uint64_t gain = (p + pd / 2) / pd, cost = (every + pd / 2) / pd;
+    if (gain < 1 || gain > 4 || cost < 1 || cost > 4 || llabs((int64_t)p - (int64_t)(gain * pd)) > (int64_t)(pd / 10)) {
+        return slot;
+    }
+    while (__atomic_exchange_n(&g_cap_rf.lock, 1u, __ATOMIC_ACQUIRE)) {
+    }
+    if (gain != g_cap_rf.gain || cost != g_cap_rf.cost) {
+        g_cap_rf.gain = gain;
+        g_cap_rf.cost = cost;
+        g_cap_rf.used = cap_refresh_units(slot, gain) - gain;
+    }
+    for (unsigned k = 0; k < 8 && g_cap_rf.used + cost > cap_refresh_units(slot, gain) + CAP_CREDIT * cost; k++) {
+        slot += pd;
+    }
+    if (take) {
+        /* (from the start of the refresh under way at the least: no
+         * refreshes left unused before it kept for later) */
+        const uint64_t u = cap_refresh_units(slot, gain) - gain;
+        g_cap_rf.used = (g_cap_rf.used > u ? g_cap_rf.used : u) + cost;
+    }
+    __atomic_store_n(&g_cap_rf.lock, 0u, __ATOMIC_RELEASE);
+    return slot;
+}
+
+/* Unlocked's limit at the display's rate (or Up to that rate) on a 120 Hz
+ * or faster mode: a frame that comes a period of the limit or more after
+ * the last one's (the limit holds none of it) flips at once, not on the
+ * display's next vsync's place. Held to it, it waited half a refresh on
+ * average, the guest's next frame with it: 007 Everything or Nothing at
+ * Unlocked on a 280 Hz display, 1 ms a frame of 11 at 85 fps (#429); and a
+ * variable refresh rate display, which refreshes as the presents come, gains
+ * nothing by it. At 60 Hz the refresh is long, a picture's place in it what
+ * keeps a steady rate even: held as before. */
+#define LATE_UNHELD_PD 8400000ull   /* a 120 Hz mode's period, a little over */
+
+static bool late_unheld(uint64_t t, uint64_t last)
+{
+    const uint64_t cap = __atomic_load_n(&g_cap_ns, __ATOMIC_RELAXED);
+    const uint64_t nominal = __atomic_load_n(&g_disp_nominal_ns, __ATOMIC_RELAXED);
+    return cap && nominal && nominal < LATE_UNHELD_PD && llabs((int64_t)cap - (int64_t)nominal) <= (int64_t)(nominal / 100) &&
+           t >= last + cap;
+}
+
 static uint64_t cap_slot(uint64_t t, uint64_t last, uint64_t vs, uint64_t pd, int64_t at)
 {
     const uint64_t cap = __atomic_load_n(&g_cap_ns, __ATOMIC_RELAXED);
     const uint64_t earliest = last + cap - pd / 2;
     uint64_t from = t > pd / 4 ? t - pd / 4 : 0;
     from = from > earliest ? from : earliest;
-    return grid_at_or_after(from, vs, pd, at);
+    return cap_refresh_slot(grid_at_or_after(from, vs, pd, at), pd, cap, false);
 }
 
 static uint64_t wait_vblank(uint64_t next, uint64_t last)
@@ -1164,15 +1338,23 @@ static uint64_t wait_vblank(uint64_t next, uint64_t last)
             const uint32_t seen = __atomic_load_n(&g_flip_waits, __ATOMIC_ACQUIRE);
             const uint32_t stall = hle_pb_flip_stalls();
             const bool paced = !g_cap_ns || stall == s_stall || t - s_frame_t >= g_cap_ns;
-            if (t - last >= EARLY_GAP_NS && hle_pb_flip_waiting() &&
+            const uint64_t gap = stall == s_stall ? EARLY_GAP_AGAIN_NS : EARLY_GAP_NS;
+            if (t - last >= gap && hle_pb_flip_waiting() &&
                 !(ld(NV_PCRTC_INTR_0) & PCRTC_VBLANK)) {
                 if (aligned && stall != s_stall) {
                     const uint64_t slot = cap_slot(t, s_frame_t, gvs, gpd, gat);
                     if (t + EARLY_POLL_NS >= slot) {
+                        cap_refresh_slot(slot, gpd, g_cap_ns, true);
                         s_stall = stall;
                         s_frame_t = slot;
                         frame_due(slot);
                         return t;
+                    }
+                    if (late_unheld(t, s_frame_t) && cap_refresh_slot(t, gpd, g_cap_ns, false) <= t + EARLY_POLL_NS) {
+                        cap_refresh_slot(t, gpd, g_cap_ns, true);
+                        s_stall = stall;
+                        s_frame_t = t;
+                        return frame_due(t);
                     }
                     const uint64_t until = next < slot ? next : slot;
                     const struct timespec ts = {(time_t)(until / 1000000000ull), (long)(until % 1000000000ull)};
@@ -1198,11 +1380,32 @@ static uint64_t wait_vblank(uint64_t next, uint64_t last)
             /* waiting for a stall (not for the guest's handler to take the
              * last vblank: that it is polled for): until the stall, or a ms
              * short of the vblank due (its wait's timeout is in whole ms) */
-            if (!hle_pb_flip_waiting() && t - last >= EARLY_GAP_NS && next - t > 1500000) {
+            const bool waiting = hle_pb_flip_waiting();
+            if (!waiting && t - last >= EARLY_GAP_NS && next - t > 1500000) {
                 WaitOnAddress((void *)&g_flip_waits, (void *)&seen, 4, (unsigned)((next - t - 500000) / 1000000));
                 continue;
             }
-            const uint64_t until = next < t + EARLY_POLL_NS ? next : t + EARLY_POLL_NS;
+            /* a waiting frame's vblank the guest's handler has yet to take:
+             * till it acknowledges it (nv2a_write wakes this), a ms at most;
+             * polled, a frame's second vblank came 0.5 ms after it at best
+             * (the timer's least wait here, below) */
+            if (waiting && (ld(NV_PCRTC_INTR_0) & PCRTC_VBLANK) && next - t > 1500000) {
+                WaitOnAddress((void *)&g_flip_waits, (void *)&seen, 4, 1);
+                continue;
+            }
+            /* The gap's end, near: waited out on the clock. Windows' timers
+             * end half a millisecond late at best (a high resolution one's
+             * wait of 50, 100 or 250 us took 0.51 to 0.53 ms here): 007
+             * Everything or Nothing uncapped waited 0.5 ms a frame for its
+             * second vblank instead of the 0.1 ms gap (#429). */
+            if (waiting && t - last < gap && last + gap - t <= SPIN_NS) {
+                spin_until(last + gap < next ? last + gap : next);
+                continue;
+            }
+            uint64_t until = next < t + EARLY_POLL_NS ? next : t + EARLY_POLL_NS;
+            if (waiting && t - last < gap && last + gap < until) {
+                until = last + gap;             /* the gap's end, not a poll's */
+            }
             const struct timespec ts = {(time_t)(until / 1000000000ull), (long)(until % 1000000000ull)};
             clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, NULL);
         }
@@ -1223,6 +1426,7 @@ static uint64_t wait_vblank(uint64_t next, uint64_t last)
             }
             const uint64_t t = now_ns();
             if (hle_pb_flip_waiting() && hle_pb_flip_stalls() != s_stall) {
+                cap_refresh_slot(slot, gpd, g_cap_ns, true);
                 s_stall = hle_pb_flip_stalls();
                 s_frame_t = slot;
                 frame_due(slot > next ? slot : next);

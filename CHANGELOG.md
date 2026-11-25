@@ -1,5 +1,28 @@
 # xbased changelog
 
+## 1.2.14 (2026-11)
+
+### Performance
+- Scenes made of many small pieces run much faster. A game that draws lots
+  of small triangle strips one after another has them drawn as one, and each
+  draw uploads only the shader constants it uses. 007 Everything or
+  Nothing's first level, looking at the courtyard, went from 38 to about 135
+  fps uncapped on a fast PC, and at Original it now holds 30 where it
+  dropped to 13 (#429).
+- Interrupts reach the emulated CPU with a single memory write instead of a
+  call into Windows, which made every game's interrupts cheaper.
+- Uncapped games that show a frame every second vblank no longer wait on
+  Windows' timer between the two, which can't wait less than half a
+  millisecond.
+- Unlocked on a 120 Hz or faster display (VRR or not): a frame that comes
+  late is shown at once instead of waiting for the display's next refresh.
+
+### Fixes
+- Frame rate limit: Spyro A Hero's Tail ran at 64.5 fps at Up to 60. The
+  limit followed a vsync grid that slowly moved back, and the display's
+  refresh period could be measured as a fraction of the real one. Frames are
+  now counted against the display's refreshes (#430).
+
 ## 1.2.13 (2026-11)
 
 A cleanup and optimization release: the same emulator, with less code.

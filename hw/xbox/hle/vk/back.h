@@ -11,6 +11,11 @@
 /* Vulkan device (floor), arena, ring, timeline, threads. 0 = ok; negative:
  * no usable device (the title can't run). */
 int hle_back_start(void);
+/* Whether a draw may join strips with primitive restart (HleCmdDraw.restart). */
+bool hle_back_restart_ok(void);
+/* A brief low-power wait (~20 us at most) for a store that changes *p from
+ * seen: MONITORX/MWAITX, UMONITOR/UMWAIT or PAUSE. */
+void hle_wait_line(const volatile uint32_t *p, uint32_t seen);
 bool hle_back_running(void);
 void hle_back_kick(void);
 /* The guest blocks on the timeline: pending fence / kick boundaries are

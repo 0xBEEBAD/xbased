@@ -64,6 +64,7 @@
 #define NV097_SET_ZSTENCIL_CLEAR_VALUE         0x1D8Cu
 #define NV097_SET_COLOR_CLEAR_VALUE            0x1D90u
 #define NV097_SET_SEMAPHORE_OFFSET             0x1D6Cu
+#define NV097_SET_BEGIN_END                    0x17FCu
 #define NV097_BACK_END_WRITE_SEMAPHORE_RELEASE 0x1D70u
 #define NV097_TEXTURE_READ_SEMAPHORE_RELEASE   0x1D74u
 
@@ -75,6 +76,7 @@ static struct {
     HleThread th;
     HleSem kick;
     uint32_t kicks;                     /* hle_pb_kick calls */
+    uint32_t sleeping;                  /* the decode thread asleep on kick (posted only then) */
     HlePusher p;
     bool synced;                        /* the pusher's DMA object and GET are the GPU's */
     uint32_t inst;
@@ -812,6 +814,146 @@ static inline bool packet_start(void)
     return p->left == p->count || p->get - g_pb.last_get >= 256;
 }
 
+/* The pass's PUT (consume_pass): the push buffer up to it is the guest's to
+ * read ahead in. */
+static uint32_t g_run_put;
+
+/* Whether the method after the one being taken is SET_BEGIN_END prim on the
+ * 3D object, in the push buffer given already (no branch before it): what a
+ * strip's end waits for to join the next (pb/pbdraw.c join_end_strip). */
+static int g_nb_hint = -1;              /* do_strip's: the next method known to begin a strip */
+
+bool hle_pb_next_begin(uint32_t prim)
+{
+    if (g_nb_hint >= 0) {
+        return g_nb_hint != 0;
+    }
+    const HlePusher *p = &g_pb.p;
+    const uint32_t put = g_run_put;
+    uint32_t at = p->get + 4;               /* the word after the one being taken */
+    uint32_t m, subch;
+    if (!g_pb.in_run || put <= p->get || at >= put) {
+        return false;
+    }
+    if (p->left > 1) {
+        m = p->noninc ? p->method : p->method + 4;
+        subch = p->subch;
+    } else {
+        const uint32_t *w = fetch(NULL, p->dma_base + at, 1);
+        if (!w || (*w & 0xE0030003u) != 0 || ((*w >> 18) & 0x7FFu) == 0) {
+            return false;                   /* a branch, a non-increasing packet, or none */
+        }
+        m = *w & 0x1FFCu;
+        subch = (*w >> 13) & 7;
+        at += 4;
+        if (at >= put) {
+            return false;
+        }
+    }
+    if (m != NV097_SET_BEGIN_END || g_pb.obj_class[subch & 7] != 0x97) {
+        return false;
+    }
+    const uint32_t *v = fetch(NULL, p->dma_base + at, 1);
+    return v && *v == prim;
+}
+
+#define NV097_ARRAY_ELEMENT16_M 0x1800u
+#define NV097_ARRAY_ELEMENT32_M 0x1808u
+
+/* One strip of strip_burst's: the draw decoder's own way (pb/pbdraw.c
+ * hle_pbd_strip), or word by word where count_run and count_method send
+ * them (the join's check, the register shadow, the draw decoder), the end
+ * known to be followed by a begin of prim. */
+static void do_strip(uint32_t prim, const uint32_t *w, uint32_t k, bool odd, uint32_t oddv)
+{
+    if (hle_pbd_strip(prim, w, k, odd, oddv)) {
+        return;
+    }
+    if (__builtin_expect(g_pbd_join_on, 0)) {
+        hle_pbd_join_check(NV097_ARRAY_ELEMENT16_M, 0, true);
+    }
+    hle_pbd_run(NV097_ARRAY_ELEMENT16_M, true, w, k);
+    const uint32_t m[3] = { NV097_ARRAY_ELEMENT32_M, NV097_SET_BEGIN_END, NV097_SET_BEGIN_END };
+    const uint32_t v[3] = { oddv, 0, prim };
+    for (unsigned i = odd ? 0 : 1; i < 3; i++) {
+        if (__builtin_expect(g_pbd_join_on, 0)) {
+            hle_pbd_join_check(m[i], v[i], true);
+        }
+        hle_kelvin_method(m[i], v[i]);
+        g_nb_hint = i == 1;
+        hle_pbd_method(m[i], v[i]);
+        g_nb_hint = -1;
+    }
+}
+
+/* A strip's packets after its SET_BEGIN_END prim, in one pass: its indices
+ * (ARRAY_ELEMENT16 in a non-increasing packet, an odd last one in an
+ * ARRAY_ELEMENT32 of one word), its end and the next strip's begin of the
+ * same primitive (SET_BEGIN_END packets of one word), again and again while
+ * the push buffer given has them whole: each to the draw decoder at once
+ * (do_strip), past the pusher's and count_method's tests per packet. 007
+ * Everything or Nothing's courtyard draws ~28k strips a frame so, three or
+ * four packets each (#429). Called with the begin's word taken, the last of its packet;
+ * the pusher then goes on past the last begin taken here. */
+static void strip_burst(unsigned subch, uint32_t prim)
+{
+    HlePusher *p = &g_pb.p;
+    const uint32_t put = g_run_put;
+    if (!g_pb.in_run || p->left != 1 || p->noninc || put <= p->get) {
+        return;
+    }
+#if XBASED_DIAG
+    if (g_pblog > 0) {
+        return;
+    }
+#endif
+    const uint32_t sc = subch << 13;
+    const uint32_t h_ae16 = 0x40000000u | sc | NV097_ARRAY_ELEMENT16_M;
+    const uint32_t h_ae32 = sc | NV097_ARRAY_ELEMENT32_M | 1u << 18;
+    const uint32_t h_be = sc | NV097_SET_BEGIN_END | 1u << 18;
+    uint32_t at = p->get + 4;                       /* the header after the begin's word */
+    uint32_t last = p->get;                         /* the last begin's word taken */
+    const uint32_t first = last;
+    while (at < put && at <= p->dma_limit) {
+        const uint32_t room = MIN((put - at) / 4, (p->dma_limit - at) / 4 + 1);
+        const uint32_t *h = room >= 6 ? fetch(NULL, p->dma_base + at, 1) : NULL;
+        if (!h || (*h & 0xE003FFFFu) != h_ae16) {
+            break;
+        }
+        /* [indices: header, k words] [odd one: header, word] [end: header, 0] [begin: header, prim] */
+        const uint32_t k = (*h >> 18) & 0x7FFu;
+        const uint32_t *w = k && room >= k + 5 ? fetch(NULL, p->dma_base + at, MIN(room, k + 7)) : NULL;
+        if (!w) {
+            break;
+        }
+        const bool odd = w[k + 1] == h_ae32;
+        const uint32_t e = odd ? k + 3 : k + 1;     /* the end's header */
+        if (room < e + 4 || w[e] != h_be || w[e + 1] != 0 || w[e + 2] != h_be || w[e + 3] != prim ||
+            !fifo_open()) {
+            break;
+        }
+        boundary_take();
+        if (at + 4 - g_pb.last_get >= 256) {
+            p->get = at + 4;
+            publish_get();
+        }
+        do_strip(prim, w + 1, k, odd, odd ? w[k + 2] : 0);
+        p->words += e + 4;
+        p->headers += odd ? 4 : 3;
+        p->data += odd ? k + 3 : k + 2;
+        last = at + 4 * (e + 3);
+        at += 4 * (e + 4);
+    }
+    if (last == first) {
+        return;                                     /* none taken */
+    }
+    /* the pusher at the last begin's word, its packet's last (count_method's caller goes past it) */
+    p->get = last;
+    p->method = NV097_SET_BEGIN_END;
+    p->noninc = false;
+    p->count = p->left = 1;
+}
+
 static int count_method(void *opaque, unsigned subch, uint32_t m, uint32_t v)
 {
     boundary_take();
@@ -838,6 +980,9 @@ static int count_method(void *opaque, unsigned subch, uint32_t m, uint32_t v)
 #endif
     if (m == NV_NO_OPERATION && !v) {
         return HLE_PB_GO;                       /* padding (Crimson Sea: 1.3M a second) */
+    }
+    if (__builtin_expect(g_pbd_join_on, 0)) {
+        hle_pbd_join_check(m, v, g_pb.obj_class[subch] == 0x97);   /* strips joined: drawn first? */
     }
     if (m == NV_NO_OPERATION && g_pb.runs_ok && ((v & 0x1F) == 3 || (v & 0x1F) == 4) && run_record(v)) {
         g_pb.runs++;
@@ -898,6 +1043,9 @@ static int count_method(void *opaque, unsigned subch, uint32_t m, uint32_t v)
         int r = kelvin(m, v);
         hle_kelvin_method(m, v);                /* its register shadow: the draw state */
         hle_pbd_method(m, v);
+        if (m == NV097_SET_BEGIN_END && v && r == HLE_PB_GO) {
+            strip_burst(subch, v);
+        }
         return r;
     }
     if (m < 0x400) {
@@ -908,9 +1056,12 @@ static int count_method(void *opaque, unsigned subch, uint32_t m, uint32_t v)
 
 /* The methods count_run batches: data no method here acts on. Program and
  * constants (0x0B00-0x0FFC) either way; inline vertices (0x1818) and
- * indices (0x1800, 0x1808) in non-increasing packets. The rest go to
+ * indices (0x1800, 0x1808) in non-increasing packets; and padding, NOPs of
+ * 0 in a non-increasing packet up to the trap word one may end in (007
+ * Everything or Nothing: 17k words a frame after its traps). The rest go to
  * count_method without a call (per word, a sixth of the decoder's work). */
 static const uint8_t k_count_runs[2048] = {
+    [NV_NO_OPERATION / 4] = HLE_PB_RUN_NONINC,
     [0x0B00 / 4 ... 0x0FFC / 4] = HLE_PB_RUN_INC | HLE_PB_RUN_NONINC,
     [0x1800 / 4] = HLE_PB_RUN_NONINC,
     [0x1808 / 4] = HLE_PB_RUN_NONINC,
@@ -926,6 +1077,16 @@ static uint32_t count_run(void *opaque, unsigned subch, uint32_t m, bool noninc,
         return 0;
     }
     publish_get();
+    if (m == NV_NO_OPERATION) {
+        uint32_t k = 0;
+        while (k < n && !w[k]) {
+            k++;
+        }
+        return k;               /* a trap's word (not 0) is count_method's */
+    }
+    if (__builtin_expect(g_pbd_join_on, 0)) {
+        hle_pbd_join_check(m, 0, g_pb.obj_class[subch & 7] == 0x97);
+    }
     if (g_pb.obj_class[subch & 7] == 0x97) {
         hle_pbd_run(m, noninc, w, n);
     }
@@ -1043,9 +1204,13 @@ static void consume_pass(void)
         hle_pbd_gamma(g_pb.gamma);
     }
     if (g_pb.trap_wait) {
-        if (hle_host_gpu_reg(NV_PGRAPH_INTR) & PGRAPH_INTR_ERROR) {
+        /* its handler done: the interrupt cleared and PGRAPH's FIFO access
+         * back. Taken at the clear, a decoder quick to wake (#429) went on
+         * before the handler flipped, the flip not its: Star Wars Republic
+         * Commando's IMMEDIATE presents unpaced, 430 fps at Original. */
+        if ((hle_host_gpu_reg(NV_PGRAPH_INTR) & PGRAPH_INTR_ERROR) || !fifo_open()) {
             hle_pbd_keep_stalled();
-            return;                                 /* the ISR's clear comes back */
+            return;                                 /* the ISR's clear and access come back */
         }
         g_pb.trap_wait = false;
         hle_host_gpu_trace(HLE_GTR_RESUME, 1);
@@ -1112,6 +1277,7 @@ static void consume_pass(void)
         sub_take();
     }
     g_pb.in_run = true;
+    g_run_put = put;
     int e = hle_pb_pusher_run(p, put, fetch, NULL, &k_count);
     g_pb.in_run = false;
     if (e) {
@@ -2039,27 +2205,51 @@ static void *decode_thread(void *opaque)
 {
     hle_hitch_thread(HLE_HT_DECODE);    /* the stutter / hang monitor's (hitch.h) */
     t_decoder = true;
+    uint32_t seen = hle_atomic_read(&g_pb.kicks);  /* the kicks the last pass covers */
     while (!g_pb.stop) {
         /* asleep until a kick: waiting for the guest, the flip it stalls on
          * (FLIP_STALL) or its interrupt handler (a trap); once a sleep, not
          * a method */
         const uint32_t pa = hle_hitch_enter(g_pb.flip_wait || g_pb.pace_until ? HLE_ACT_FLIP :
                                             g_pb.trap_wait ? HLE_ACT_TRAP : HLE_ACT_IDLE);
+        if ((g_pb.trap_wait || g_pb.flip_wait) && !g_pb.pace_until) {
+            /* A trap's handler or the flip's vblank comes in microseconds:
+             * watched for (the kick count's line) up to 100 us before
+             * sleeping, a wake from it taking longer than they do (007
+             * Everything or Nothing's courtyard: ~130 traps a frame, 8 us
+             * each, and its flips 2 ms a frame, #429) */
+            const int64_t t0 = hle_now_ns();
+            while (hle_atomic_read(&g_pb.kicks) == seen && !g_pb.stop && hle_now_ns() - t0 < 100000) {
+                hle_wait_line(&g_pb.kicks, seen);
+            }
+        }
+        /* Asleep only with no kick since the last pass read the registers,
+         * and posted only then (hle_pb_kick): a post at every kick was a
+         * system call at each of the guest's PUT writes, and a wake seen
+         * while watching still waited on the semaphore and drained it (007
+         * Everything or Nothing: ~125 traps a frame, #429). */
         if (g_pb.pace_until) {
             /* a paced flip's hold: until it ends (whole ms, up; the grid
              * keeps the rate) or a kick */
             const int64_t left = g_pb.pace_until - hle_now_ns();
             if (left > 0) {
-                hle_sem_timedwait(&g_pb.kick, (int)((left + 999999) / 1000000));
+                __atomic_store_n(&g_pb.sleeping, 1, __ATOMIC_SEQ_CST);
+                if (__atomic_load_n(&g_pb.kicks, __ATOMIC_SEQ_CST) == seen && !g_pb.stop) {
+                    hle_sem_timedwait(&g_pb.kick, (int)((left + 999999) / 1000000));
+                }
+                __atomic_store_n(&g_pb.sleeping, 0, __ATOMIC_RELEASE);
             }
-        } else {
-            hle_sem_wait(&g_pb.kick);
+        } else if (hle_atomic_read(&g_pb.kicks) == seen) {
+            __atomic_store_n(&g_pb.sleeping, 1, __ATOMIC_SEQ_CST);
+            if (__atomic_load_n(&g_pb.kicks, __ATOMIC_SEQ_CST) == seen && !g_pb.stop) {
+                hle_sem_wait(&g_pb.kick);
+            }
+            __atomic_store_n(&g_pb.sleeping, 0, __ATOMIC_RELEASE);
         }
         hle_hitch_leave(pa);
         if (!g_pb.stop) {
             /* a pass reads the registers fresh: it covers every kick before it */
-            while (hle_sem_trywait(&g_pb.kick)) {
-            }
+            seen = __atomic_load_n(&g_pb.kicks, __ATOMIC_ACQUIRE);
             consume();
             if (park_due()) {
                 park();
@@ -2078,8 +2268,10 @@ void hle_pb_debug_pos(uint32_t *get, uint32_t *put)
 void hle_pb_kick(void)
 {
     if (g_pb.on) {
-        hle_atomic_inc(&g_pb.kicks);
-        hle_sem_post(&g_pb.kick);
+        hle_atomic_inc(&g_pb.kicks);    /* (a full barrier: against the sleeper's flag, then its look) */
+        if (__atomic_load_n(&g_pb.sleeping, __ATOMIC_SEQ_CST)) {
+            hle_sem_post(&g_pb.kick);
+        }
     }
 }
 

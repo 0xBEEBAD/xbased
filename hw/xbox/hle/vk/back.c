@@ -2557,6 +2557,11 @@ static void x86_wait_line(const volatile uint32_t *p, uint32_t seen)
     }
 }
 
+void hle_wait_line(const volatile uint32_t *p, uint32_t seen)
+{
+    x86_wait_line(p, seen);
+}
+
 /* After draining: up to ~200 us waiting for the producer's next publish, in
  * WFE on the ring head (its store clears the exclusive monitor; interrupts
  * and the timer event stream bound each WFE), before sleeping on the kick
@@ -2725,6 +2730,12 @@ static void *render_thread(void *opaque)
     return NULL;
 }
 
+/* Whether a draw may join strips with primitive restart (HleCmdDraw.restart) */
+bool hle_back_restart_ok(void)
+{
+    return g_hvk.caps.eds2;
+}
+
 int hle_back_start(void)
 {
     if (g_back.running) {
@@ -2739,8 +2750,11 @@ int hle_back_start(void)
         }
         return r;
     }
-    /* DXT decoded on the way in (no BC: pbres.c) takes four to eight times the bytes */
-    const char *what = hle_vk_arena_init(g_hvk.caps.bc ? 32u << 20 : 64u << 20) ? "the upload arena" :
+    /* DXT decoded on the way in (no BC: pbres.c) takes four to eight times the
+     * bytes. 64 MiB: 007 Everything or Nothing's courtyard took 80 MiB a frame,
+     * and 32 had the decoder waiting on the GPU for room every frame; larger
+     * ran slower (the copies' cache, 39 fps at 128 and 256 against 43, #429) */
+    const char *what = hle_vk_arena_init(g_hvk.caps.bc ? 64u << 20 : 128u << 20) ? "the upload arena" :
                        hle_vk_land_init(16u << 20) ? "the readback buffer" :
                        hle_fe_init() ? "the front end" :
                        hle_tl_init(on_complete) ? "the timeline" :

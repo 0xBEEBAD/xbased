@@ -267,6 +267,72 @@ static void head(Buf *bp, const HleVshKey *k)
 
 static void tail(Buf *b, const HleVshKey *k, bool fogw);
 
+/* the operands an operation reads, as op_expr turns them into GLSL */
+static unsigned op_inputs(const Nv2aVshOperation *o)
+{
+    switch (o->opcode) {
+    case NV2AOP_MOV: case NV2AOP_ARL: case NV2AOP_RCP: case NV2AOP_RCC: case NV2AOP_RSQ:
+    case NV2AOP_EXP: case NV2AOP_LOG: case NV2AOP_LIT:
+        return 1;
+    case NV2AOP_MUL: case NV2AOP_ADD: case NV2AOP_DP3: case NV2AOP_DP4: case NV2AOP_DPH:
+    case NV2AOP_DST: case NV2AOP_MIN: case NV2AOP_MAX: case NV2AOP_SLT: case NV2AOP_SGE:
+        return 2;
+    case NV2AOP_MAD:
+        return 3;
+    default:
+        return 0;
+    }
+}
+
+static void use_op(const Nv2aVshOperation *o, HleVshUse *u, bool *any)
+{
+    for (unsigned n = op_inputs(o), i = 0; i < n; i++) {
+        const Nv2aVshInput *in = &o->inputs[i];
+        if (in->type == NV2ART_CONTEXT) {
+            if (in->is_relative) {
+                u->rel = true;
+                continue;
+            }
+            const uint8_t ix = (uint8_t)(in->index % 192);  /* as in_str names it */
+            if (!*any) {
+                u->lo = u->hi = ix;
+                *any = true;
+            } else {
+                u->lo = ix < u->lo ? ix : u->lo;
+                u->hi = ix > u->hi ? ix : u->hi;
+            }
+        } else if (in->type == NV2ART_INPUT) {
+            u->inputs |= (uint16_t)(1u << (in->index & 15));
+        }
+    }
+}
+
+bool hle_vsh_uses(const uint32_t *tokens, unsigned nslots, HleVshUse *u)
+{
+    bool any = false;
+    u->lo = 1;      /* no constant named: an empty range */
+    u->hi = 0;
+    u->rel = false;
+    u->inputs = 0;
+    for (unsigned s = 0; s < nslots && s < HLE_VSH_MAX_SLOTS; s++) {
+        Nv2aVshStep st;
+        memset(&st, 0, sizeof(st));
+        if (nv2a_vsh_parse_step(&st, tokens + 4 * s) != NV2AVPR_SUCCESS) {
+            return false;
+        }
+        if (st.mac.opcode != NV2AOP_NOP) {
+            use_op(&st.mac, u, &any);
+        }
+        if (st.ilu.opcode != NV2AOP_NOP) {
+            use_op(&st.ilu, u, &any);
+        }
+        if (st.is_final) {
+            break;
+        }
+    }
+    return true;
+}
+
 size_t hle_vsh_glsl(const uint32_t *tokens, unsigned nslots, const HleVshKey *k,
                     char *buf, size_t cap)
 {

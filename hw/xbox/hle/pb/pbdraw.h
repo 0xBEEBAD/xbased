@@ -21,6 +21,16 @@ void hle_pbd_stop(void);
 void hle_pbd_method(uint32_t m, uint32_t v);
 /* n data words of one packet (method m, then +4 each unless noninc). */
 void hle_pbd_run(uint32_t m, bool noninc, const uint32_t *w, uint32_t n);
+/* Strips drawn back to back joined into one draw (pbdraw.c join_*): while
+ * g_pbd_join_on, hle_pbd_join_check before each method or run the decoder
+ * takes (kelvin: the 3D object's), which draws what was joined unless the
+ * method continues it; hle_pbd_join_flush draws it. */
+extern bool g_pbd_join_on;
+void hle_pbd_join_check(uint32_t m, uint32_t v, bool kelvin);
+void hle_pbd_join_flush(void);
+/* A strip begun: its indices, its end and the next one's begin at once
+ * (pbmode.c do_strip); false: not taken so */
+bool hle_pbd_strip(uint32_t prim, const uint32_t *w, uint32_t k, bool odd, uint32_t oddv);
 /* Decode thread: the guest pointed the display at pa (PCRTC_START). A
  * title that flips that way itself, with no FLIP_INCREMENT_WRITE since the
  * last time (Riddick), gets the render target there presented; flip: D3D's

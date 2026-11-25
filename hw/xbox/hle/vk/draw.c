@@ -5912,9 +5912,16 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         }
         int q = g_probe.nvsh ? probe_begin(cb, c, vfirst, (uint64_t)(uintptr_t)g_rec.pipe)
                                 : -1;
+        const bool restart = c->restart && g_hvk.caps.eds2;
+        if (restart) {
+            T.vkCmdSetPrimitiveRestartEnable(cb, VK_TRUE);
+        }
         if (g_hle_gpucut != 2) {
             T.vkCmdDrawIndexed(cb, g_hle_gpucut == 4 ? MIN(c->count, 3u) : c->count, 1,
                                c->ib_off / 2, (int32_t)vfirst, 0);
+        }
+        if (restart) {
+            T.vkCmdSetPrimitiveRestartEnable(cb, VK_FALSE);  /* on only for these and the strip batches */
         }
         if (q >= 0) {
             T.vkCmdEndQuery(cb, g_probe.pool, (uint32_t)q);

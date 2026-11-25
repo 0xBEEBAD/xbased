@@ -14,10 +14,16 @@ bool g_hland_coherent;
 
 #define T (g_hvk.t)
 
+/* Room past the arena's end that nothing is put in: a program's constant
+ * block is only as long as what it reads (pb/pbdraw.c emit), its binding's
+ * range the whole block's (vk/draw.c HLE_CONST_BYTES), and one at the end
+ * would run past the buffer. */
+#define ARENA_SLACK 4096u
+
 int hle_vk_arena_init(uint32_t size)
 {
     VkBufferCreateInfo bci = {
-        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = size,
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = (VkDeviceSize)size + ARENA_SLACK,
         .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
                  VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                  VK_BUFFER_USAGE_TRANSFER_SRC_BIT,

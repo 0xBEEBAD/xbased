@@ -88,6 +88,8 @@
  * indices: hle_draw_prim_indices) */
 #define NV2A_PRIM_LINE_LOOP 3u
 #define NV2A_PRIM_QUADS     8u
+#define NV2A_PRIM_TRIANGLE_STRIP 6u
+#define JOIN_SEP UINT32_MAX     /* between joined strips in idx (0xFFFF in the indices: restart) */
 
 #define VPSCL 58                            /* the viewport's constant slots */
 #define VPOFF 59
@@ -263,11 +265,16 @@ static struct {
     /* the last program draw's constant block (constants and current
      * attributes), reused while neither changed and the submission it was
      * tagged for is still the one being gathered */
-    uint64_t cgen;                      /* bumped as consts or cur change */
+    uint64_t cgen;                      /* bumped as consts change */
+    uint64_t curgen;                    /* ... and as cur does (a block without them stays good) */
     uint64_t ffgen;                     /* bumped as a register ff_consts reads changes */
-    uint64_t blk_gen, blk_ffgen, blk_value;
+    uint64_t blk_gen, blk_curgen, blk_ffgen, blk_value;
     uint32_t blk_off;
     bool blk_ok, blk_ff;
+    uint8_t blk_lo, blk_hi;             /* a program's block: the constants copied (none: lo > hi) */
+    bool blk_cur;                       /* ... and the current values */
+    HleVshUse vuse;                     /* what the last program() reads (hle_vsh_uses) */
+    bool vuse_ok;
     uint64_t blk_reused;
     uint64_t vb_copied;                 /* vertex ranges copied */
     uint64_t seq_draws;                 /* DRAW_ARRAYS of one run in order, drawn without indices */
@@ -289,6 +296,12 @@ static struct {
     uint32_t ninl;
     uint32_t *idx;
     uint32_t nidx, cap;
+    /* Strips drawn back to back joined into one draw (join_*): the ones
+     * ended in idx[0, join_end), JOIN_SEP after each, the one being
+     * gathered from join_start; join_pending: one ended and the method
+     * after it is the next one's SET_BEGIN_END */
+    bool join_pending;
+    uint32_t join_n, join_end, join_start, join_lo, join_hi;
     uint16_t *idx16;
     HleCmdState st;
     bool st_sent;
@@ -2370,10 +2383,31 @@ static void vsh_forget(void)
     g_vh_prog.ok = g_vh_ff.ok = false;
 }
 
+/* What each program reads of the constant block (hle_vsh_uses), by its
+ * hash: worked out once, the last one's in g_pd.vuse. */
+static struct {
+    uint64_t h;
+    HleVshUse u;
+    bool have, ok;
+} g_vuse[512];
+
+static void program_use(uint64_t h, const void *slots, uint32_t n)
+{
+    const unsigned i = (unsigned)(h ^ (h >> 29)) & 511u;
+    if (!g_vuse[i].have || g_vuse[i].h != h) {
+        g_vuse[i].h = h;
+        g_vuse[i].have = true;
+        g_vuse[i].ok = hle_vsh_uses((const uint32_t *)slots, n, &g_vuse[i].u);
+    }
+    g_pd.vuse = g_vuse[i].u;
+    g_pd.vuse_ok = g_vuse[i].ok;
+}
+
 /* The program from PROGRAM_START to its final instruction. */
 static uint64_t program(void)
 {
     uint32_t start = R(NV097_SET_TRANSFORM_PROGRAM_START);
+    g_pd.vuse_ok = false;
     if (start >= HLE_VSH_MAX_SLOTS) {
         return 0;
     }
@@ -2381,6 +2415,7 @@ static uint64_t program(void)
      * its program, its slots not compared again (up to 2 KB a draw) */
     VshHash *vc = &g_vh_prog;
     if (vc->ok && vc->pgen == g_pd.pgen && vc->start == start) {
+        program_use(vc->h, vc->slots, vc->n);
         return vsh_put(vc->h, vc->slots, vc->n);
     }
     uint32_t n = 0;
@@ -2393,6 +2428,7 @@ static uint64_t program(void)
     const uint64_t h = send_vsh(g_pd.pmem[start], n, vc);
     vc->pgen = g_pd.pgen;
     vc->start = start;
+    program_use(h, g_pd.pmem[start], n);
     return h;
 }
 
@@ -3598,10 +3634,15 @@ static void state(void)
 static void drawlog(const HleCmdDraw *d, bool ff)
 {
     static HleProp prop;
-    static unsigned polls;
+    static uint64_t polled_swap = UINT64_MAX;
     char v[NC_PROP_VALUE_MAX];
-    if ((polls++ & 255) == 0 && hle_prop_new(&prop, "debug.xbased.pbdraws", v)) {
-        g_dlog_left = atoi(v);
+    /* looked at once a frame: every 256 draws, the environment's lookup it
+     * comes to was 1% of the decoder at 25000 draws a frame (#429) */
+    if (polled_swap != g_pd.swaps) {
+        polled_swap = g_pd.swaps;
+        if (hle_prop_new(&prop, "debug.xbased.pbdraws", v)) {
+            g_dlog_left = atoi(v);
+        }
     }
     if (g_dlog_left <= 0) {
         return;
@@ -3917,6 +3958,7 @@ void hle_pbd_front_serve(void)
 
 void hle_pbd_idle(void)
 {
+    hle_pbd_join_flush();                   /* a pass ended: nothing joined waits */
     /* reports ended with nothing after them would wait for the next frame's
      * submission: a title that waits on one (its fence passed) waits as long */
     if (g_pd.on && g_pd.vis_unsent) {
@@ -3964,7 +4006,7 @@ static void carry_apply(uint32_t attrs)
         }
     }
     g_carry.pending &= ~attrs;
-    g_pd.cgen++;
+    g_pd.curgen++;
 }
 
 /* The arrays' elements of vertex `last` (inl: of an inline draw's, the vertex at that word of
@@ -4004,41 +4046,78 @@ static void emit(HleCmdDraw *d)
     const bool ff = (R(NV097_SET_TRANSFORM_EXECUTION_MODE) & 3) != 2;
     uint8_t *cb;
     uint32_t c_off;
+    uint32_t arrays = 0;
+    for (unsigned a = 0; a < ATTRS; a++) {
+        arrays |= (d->attr[a] & 0xFF ? 1u : 0u) << a;
+    }
     if (g_carry.pending) {
         /* the attributes this draw has no array for take their current
          * values: what an earlier draw's last vertex left, first */
-        uint32_t arrays = 0;
-        for (unsigned a = 0; a < ATTRS; a++) {
-            arrays |= (d->attr[a] & 0xFF ? 1u : 0u) << a;
-        }
         carry_apply(~arrays);
     }
+    /* A program's block holds only what it reads: the constants it names
+     * (all of them through A0) and the current values when an input it
+     * reads has no array (vcur); the rest of the block isn't written, and
+     * without the current values not even taken from the arena (the binding's
+     * range runs on into what follows: unread). 007 Everything or Nothing's
+     * courtyard copied 26000 whole blocks a frame, 3.3 KB each: 82 MiB, the
+     * arena round 3 times a frame and the decoder waiting on the GPU there
+     * (#429). */
+    uint64_t prog = 0;
+    uint32_t lo = 0, hi = HLE_VSH_CONSTANTS - 1;
+    bool cur = true;
+    if (!ff) {
+        prog = program();
+        if (g_pd.vuse_ok) {
+            cur = (g_pd.vuse.inputs & ~arrays & 0xFFFFu) != 0;
+            if (!g_pd.vuse.rel) {
+                lo = g_pd.vuse.lo;
+                hi = g_pd.vuse.hi;
+            }
+        }
+    }
+    const bool covered = ff || ((g_pd.blk_cur || !cur) &&
+                                (lo > hi || (g_pd.blk_lo <= g_pd.blk_hi && g_pd.blk_lo <= lo && g_pd.blk_hi >= hi)));
     /* a draw whose constants and current attributes are the last one's, in
      * the same submission (its block lives until that completes): that
      * block. Crimson Sea's 2300 draws a frame copied 3.3 KB each; a
      * fixed-function draw's block (ff_consts) holds while none of the
      * registers it is made of changed (ffgen). */
-    if (g_pd.blk_ok && g_pd.blk_ff == ff && g_pd.blk_gen == g_pd.cgen &&
+    if (g_pd.blk_ok && g_pd.blk_ff == ff && g_pd.blk_gen == g_pd.cgen && covered &&
+        (!(ff || cur) || g_pd.blk_curgen == g_pd.curgen) &&
         (!ff || g_pd.blk_ffgen == g_pd.ffgen) && g_pd.blk_value == hle_fe_last_value()) {
         c_off = g_pd.blk_off;
         g_pd.blk_reused++;
     } else {
-        c_off = arena(sizeof(g_pd.consts) + sizeof(g_pd.cur), &cb);
+        const uint32_t len = ff || cur ? sizeof(g_pd.consts) + sizeof(g_pd.cur) : lo > hi ? 16u : 16u * (hi + 1);
+        c_off = arena(len, &cb);
         if (c_off == HLE_ARENA_FULL) {
             skip(SK_EMIT_ARENA);
             return;
         }
         if (ff) {
             ff_consts((float (*)[4])cb);
+            memcpy(cb + sizeof(g_pd.consts), g_pd.cur, sizeof(g_pd.cur));
+            g_pd.blk_lo = 0;
+            g_pd.blk_hi = HLE_VSH_CONSTANTS - 1;
+            g_pd.blk_cur = true;
         } else {
-            memcpy(cb, g_pd.consts, sizeof(g_pd.consts));
+            if (lo <= hi) {
+                memcpy(cb + 16 * lo, g_pd.consts[lo], 16 * (hi - lo + 1));
+            }
+            if (cur) {
+                memcpy(cb + sizeof(g_pd.consts), g_pd.cur, sizeof(g_pd.cur));
+            }
+            g_pd.blk_lo = (uint8_t)lo;
+            g_pd.blk_hi = (uint8_t)hi;
+            g_pd.blk_cur = cur;
         }
-        memcpy(cb + sizeof(g_pd.consts), g_pd.cur, sizeof(g_pd.cur));
         g_pd.blk_ok = true;
         g_pd.blk_ff = ff;
         g_pd.blk_ffgen = g_pd.ffgen;
         g_pd.blk_off = c_off;
         g_pd.blk_gen = g_pd.cgen;
+        g_pd.blk_curgen = g_pd.curgen;
         g_pd.blk_value = hle_fe_last_value();   /* after arena(): it may have kicked */
     }
     rt_first_write(false);
@@ -4075,7 +4154,7 @@ static void emit(HleCmdDraw *d)
     }
     state();
     uint32_t zf = (R(NV097_SET_SURFACE_FORMAT) >> 4) & 0xF;
-    d->vsh = ff ? ff_program() : program();
+    d->vsh = ff ? ff_program() : prog;
     d->consts_off = c_off;
     /* the integer formats' 2^-n, the shaders adding the rest (HLE_ZNORM_GLSL);
      * a float format's own (zfloat_scale) */
@@ -4177,6 +4256,7 @@ static void draw_inline(void)
 void hle_pbd_boundary(uint64_t value)
 {
     t_decoder = true;
+    hle_pbd_join_flush();                   /* what was decoded before it is in it */
     coh_serve();                            /* a guest thread waits for a landing */
     if (g_pd.on && hle_fe_last_value() < value) {
         g_pd.bnd_kicks++;
@@ -4347,9 +4427,12 @@ static void draw_arrays(void)
 {
     uint32_t n = g_pd.nidx;
     uint32_t lo = UINT32_MAX, hi = 0;
+    const bool joined = g_pd.join_n > 0;    /* strips joined, JOIN_SEP between them */
     for (uint32_t i = 0; i < n; i++) {
-        lo = MIN(lo, g_pd.idx[i]);
-        hi = MAX(hi, g_pd.idx[i]);
+        if (g_pd.idx[i] != JOIN_SEP) {
+            lo = MIN(lo, g_pd.idx[i]);
+            hi = MAX(hi, g_pd.idx[i]);
+        }
     }
     if (hi - lo >= 0xFFFF) {
         skip(SK_DRAW_ARRAYS_SPAN);
@@ -4429,7 +4512,7 @@ static void draw_arrays(void)
      * snowy town as ~17k short strips a frame, which as indexed draws went to
      * the GPU one by one at ~1.7 us each, and the frame took the GPU 30 ms
      * at 2x (26 fps). */
-    if (hi - lo + 1 == n && pt != NV2A_PRIM_QUADS && pt != NV2A_PRIM_LINE_LOOP &&
+    if (!joined && hi - lo + 1 == n && pt != NV2A_PRIM_QUADS && pt != NV2A_PRIM_LINE_LOOP &&
         pt != HLE_PT_QUADLIST_EDGES && pt != HLE_PT_QUADSTRIP_EDGES) {
         bool seq = true;
         for (uint32_t i = 0; i < n && seq; i++) {
@@ -4458,6 +4541,12 @@ static void draw_arrays(void)
             g_pd.idx16[i] = (uint16_t)(g_pd.idx[i] - lo);
         }
         hle_draw_prim_indices(pt, g_pd.idx16, n, 0, (uint16_t *)ib);
+    } else if (joined) {
+        uint16_t *o = (uint16_t *)ib;
+        for (uint32_t i = 0; i < n; i++) {
+            o[i] = g_pd.idx[i] == JOIN_SEP ? 0xFFFFu : (uint16_t)(g_pd.idx[i] - lo);
+        }
+        d.restart = 1;
     } else {
         uint16_t *o = (uint16_t *)ib;
         for (uint32_t i = 0; i < n; i++) {
@@ -4471,6 +4560,107 @@ static void draw_arrays(void)
 }
 
 static void draw_prim(void);
+static void draw(void);
+
+/* Strips drawn back to back (SET_BEGIN_END's end, then the next one's begin
+ * with nothing between) join one draw: their indices one after another,
+ * 0xFFFF between them, drawn with primitive restart (HleCmdDraw.restart),
+ * the triangles each would have given. 007 Everything or Nothing draws its
+ * courtyard as ~27000 strips of ~5 vertices a frame, 95% of them back to
+ * back: one draw each, decoded, copied and recorded alone, it ran at 46 fps
+ * uncapped on a fast PC and 14 to 21 on the reporter's laptop (#429). A
+ * strip waits for the next only when the method after its end, in the push
+ * buffer the guest gave already, is that begin (hle_pb_next_begin); anything
+ * else draws what was joined first (hle_pbd_join_check, hle_pbd_join_flush:
+ * the methods, a pass's end, a boundary, a savestate's park). */
+bool g_pbd_join_on;
+
+static void join_reset(void)
+{
+    g_pd.join_pending = false;
+    g_pd.join_n = g_pd.join_end = g_pd.join_start = 0;
+    g_pbd_join_on = false;
+}
+
+/* The strips ended so far drawn now; one being gathered goes on alone (at
+ * the front of idx). */
+static void join_flush_done(void)
+{
+    if (!g_pd.join_n) {
+        return;
+    }
+    const uint32_t n = g_pd.nidx, start = g_pd.join_start;
+    const bool keep = !g_pd.join_pending && n > start;  /* a strip after them: gathering, or just ended */
+    g_pd.nidx = g_pd.join_end;
+    draw();
+    if (keep) {
+        memmove(g_pd.idx, g_pd.idx + start, (size_t)(n - start) * sizeof(uint32_t));
+        g_pd.nidx = n - start;
+    } else {
+        g_pd.nidx = 0;
+    }
+    join_reset();
+}
+
+void hle_pbd_join_flush(void)
+{
+    if (g_pbd_join_on) {
+        join_flush_done();
+    }
+}
+
+/* Method m (v) is about to be taken (pbmode.c, before its own handling):
+ * unless it continues the join, what was joined is drawn first. */
+void hle_pbd_join_check(uint32_t m, uint32_t v, bool kelvin)
+{
+    if (kelvin) {
+        if (g_pd.join_pending && m == NV097_SET_BEGIN_END && v == g_pd.prim) {
+            return;                             /* the next strip */
+        }
+        if (g_pd.in_draw && !g_pd.join_pending &&
+            (m == NV097_SET_BEGIN_END || m == NV097_ARRAY_ELEMENT16 || m == NV097_ARRAY_ELEMENT32 ||
+             m == NV097_DRAW_ARRAYS)) {
+            return;                             /* its indices, its end */
+        }
+    }
+    join_flush_done();
+}
+
+/* The strip gathered since its begin ended: joined to wait for the next, or
+ * drawn (with the strips joined before it). */
+static void join_end_strip(int nb)
+{
+    const uint32_t start = g_pd.join_start, n = g_pd.nidx;
+    bool can = g_pd.prim == NV2A_PRIM_TRIANGLE_STRIP && !g_pd.nimm && !g_pd.ninl && n > start &&
+               n + 2 < g_pd.cap && hle_back_restart_ok();
+    uint32_t lo = UINT32_MAX, hi = 0;
+    for (uint32_t i = start; can && i < n; i++) {
+        lo = MIN(lo, g_pd.idx[i]);
+        hi = MAX(hi, g_pd.idx[i]);
+    }
+    if (can && g_pd.join_n) {
+        /* one range of vertices copied for them all: not much more than
+         * their own, and short indices */
+        const uint32_t jlo = MIN(lo, g_pd.join_lo), jhi = MAX(hi, g_pd.join_hi);
+        if (jhi - jlo >= 0xFF00u || jhi - jlo > 4 * n + 256) {
+            join_flush_done();                  /* the others drawn: this one starts anew */
+            return join_end_strip(nb);
+        }
+        lo = jlo;
+        hi = jhi;
+    }
+    if (can && hi - lo < 0xFF00u && (nb >= 0 ? nb != 0 : hle_pb_next_begin(g_pd.prim))) {
+        g_pd.join_n++;
+        g_pd.join_end = n;
+        g_pd.join_lo = lo;
+        g_pd.join_hi = hi;
+        g_pd.join_pending = true;
+        g_pbd_join_on = true;
+        return;
+    }
+    draw();
+    join_reset();
+}
 
 /* The draw gathered since SET_BEGIN_END. Under SET_FRONT_POLYGON_MODE
  * GL_LINE a quad list's, strip's or polygon's outline (its sides as lines:
@@ -4547,7 +4737,7 @@ static bool vertex_data(uint32_t m, uint32_t v)
     if (hle_vimm_method(m, v, g_pd.cur, &vertex) < 0) {
         return false;
     }
-    g_pd.cgen++;
+    g_pd.curgen++;
     if (vertex && g_pd.in_draw && g_pd.nimm < MAX_IMM) {
         memcpy(g_pd.imm + (size_t)g_pd.nimm * ATTRS * 4, g_pd.cur, sizeof(g_pd.cur));
         g_pd.nimm++;
@@ -4560,6 +4750,83 @@ static void push_index(uint32_t i)
     if (g_pd.in_draw && g_pd.nidx < g_pd.cap) {
         g_pd.idx[g_pd.nidx++] = i;
     }
+}
+
+/* hle_pbd_method's first part: the register, the fixed-function stage's
+ * generation */
+static inline void strip_reg(uint32_t m, uint32_t v)
+{
+#if XBASED_DIAG
+    if (g_pd.in_draw && g_pd.ndm < 12) {
+        g_pd.dm[g_pd.ndm++] = m << 16 | (v & 0xFFFF);
+    }
+#endif
+    if (g_pd.r[m >> 2] != v && (g_ff_regs[m >> 8] >> ((m >> 2) & 63) & 1)) {
+        g_pd.ffgen++;
+    }
+    g_pd.r[m >> 2] = v;
+}
+
+/* A strip begun (in a draw, nothing joined waiting): its indices (k words
+ * of ARRAY_ELEMENT16, an odd last one of ARRAY_ELEMENT32), its end, whose
+ * next method begins another strip of prim, and that begin; as the join's
+ * check, the register shadows and hle_pbd_run / hle_pbd_method take them
+ * one by one (pb/pbmode.c do_strip), without their dispatch (007
+ * Everything or Nothing's courtyard: 28k strips a frame, #429). False: not
+ * begun so, taken one by one. */
+bool hle_pbd_strip(uint32_t prim, const uint32_t *w, uint32_t k, bool odd, uint32_t oddv)
+{
+    if (!g_pd.on || !g_pd.in_draw || g_pd.join_pending || !k) {
+        return false;
+    }
+    /* the indices (their join check: a strip's own) */
+    {
+        const uint32_t kk = MIN(k, (g_pd.cap - g_pd.nidx) / 2);
+        uint32_t *d = g_pd.idx + g_pd.nidx;
+        for (uint32_t i = 0; i < kk; i++) {
+            d[2 * i] = w[i] & 0xFFFF;
+            d[2 * i + 1] = w[i] >> 16;
+        }
+        g_pd.nidx += 2 * kk;
+        if (kk < k && g_pd.nidx < g_pd.cap) {
+            g_pd.idx[g_pd.nidx++] = w[kk] & 0xFFFF;
+        }
+        g_pd.r[NV097_ARRAY_ELEMENT16 >> 2] = w[k - 1];
+    }
+    if (odd) {
+        hle_kelvin_method(NV097_ARRAY_ELEMENT32, oddv);
+        strip_reg(NV097_ARRAY_ELEMENT32, oddv);
+        carry_apply(~0u);
+        push_index(oddv);
+    }
+    /* the end */
+    hle_kelvin_method(NV097_SET_BEGIN_END, 0);
+    strip_reg(NV097_SET_BEGIN_END, 0);
+    carry_apply(~0u);
+    g_pd.in_draw = false;
+    join_end_strip(1);
+    /* the begin: the next of the join, or (drawn) a strip anew */
+    if (g_pbd_join_on && !(g_pd.join_pending && prim == g_pd.prim)) {
+        join_flush_done();
+    }
+    hle_kelvin_method(NV097_SET_BEGIN_END, prim);
+    strip_reg(NV097_SET_BEGIN_END, prim);
+    carry_apply(~0u);
+    if (prim && g_pd.join_pending && prim == g_pd.prim) {
+        g_pd.idx[g_pd.nidx++] = JOIN_SEP;
+        g_pd.join_start = g_pd.nidx;
+        g_pd.join_pending = false;
+        g_pd.in_draw = true;
+        g_pd.ndm = 0;
+    } else if (prim) {
+        hle_pbd_join_flush();
+        g_pd.in_draw = true;
+        g_pd.prim = prim;
+        g_pd.nidx = g_pd.nimm = g_pd.ninl = 0;
+        g_pd.ndm = 0;
+        join_reset();
+    }
+    return true;
 }
 
 void hle_pbd_run(uint32_t m, bool noninc, const uint32_t *w, uint32_t n)
@@ -4590,6 +4857,43 @@ void hle_pbd_run(uint32_t m, bool noninc, const uint32_t *w, uint32_t n)
             uint32_t k = MIN(n, MAX_INLINE - g_pd.ninl);
             memcpy(g_pd.inl + g_pd.ninl, w, 4 * k);
             g_pd.ninl += k;
+        }
+        return;
+    }
+    /* Runs of program words and of constants (D3D's SetVertexShader and
+     * SetVertexShaderConstant: 23000 and 94000 words a frame in 007
+     * Everything or Nothing's courtyard, #429) taken in one pass, as
+     * hle_pbd_method would word by word: the registers, the load positions,
+     * the generations (bumped once for the run, only on a change) */
+    if (g_pd.on && !noninc && ((m >= NV097_SET_TRANSFORM_PROGRAM && m + 4 * n <= NV097_SET_TRANSFORM_PROGRAM + 0x80) ||
+                               (m >= NV097_SET_TRANSFORM_CONSTANT && m + 4 * n <= NV097_SET_TRANSFORM_CONSTANT + 0x80))) {
+        const bool prog = m < NV097_SET_TRANSFORM_CONSTANT;
+        bool changed = false;
+        for (uint32_t i = 0; i < n; i++) {
+            const uint32_t mm = m + 4 * i, v = w[i];
+            const unsigned comp = (mm >> 2) & 3;
+            if (g_pd.r[mm >> 2] != v && (g_ff_regs[mm >> 8] >> ((mm >> 2) & 63) & 1)) {
+                g_pd.ffgen++;
+            }
+            g_pd.r[mm >> 2] = v;
+            if (prog) {
+                if (g_pd.pload < HLE_VSH_MAX_SLOTS) {
+                    g_pd.pmem[g_pd.pload][comp] = v;
+                    changed = true;
+                }
+                g_pd.pload += comp == 3;
+            } else {
+                if (g_pd.cload < HLE_VSH_CONSTANTS && g_pd.consts[g_pd.cload][comp] != v) {
+                    g_pd.consts[g_pd.cload][comp] = v;
+                    changed = true;
+                }
+                g_pd.cload += comp == 3;
+            }
+        }
+        if (changed && prog) {
+            g_pd.pgen++;
+        } else if (changed) {
+            g_pd.cgen++;
         }
         return;
     }
@@ -4752,7 +5056,9 @@ void hle_pbd_method(uint32_t m, uint32_t v)
     }
     if (m >= NV097_SET_TRANSFORM_CONSTANT && m < NV097_SET_TRANSFORM_CONSTANT + 0x80) {
         unsigned comp = (m >> 2) & 3;
-        if (g_pd.cload < HLE_VSH_CONSTANTS) {
+        if (g_pd.cload < HLE_VSH_CONSTANTS && g_pd.consts[g_pd.cload][comp] != v) {
+            /* (only a change: D3D sends them again unchanged, and the
+             * draw's block could serve the next one too) */
             g_pd.consts[g_pd.cload][comp] = v;
             g_pd.cgen++;
         }
@@ -4760,8 +5066,10 @@ void hle_pbd_method(uint32_t m, uint32_t v)
         return;
     }
     if (m >= NV097_SET_VIEWPORT_OFFSET && m < NV097_SET_VIEWPORT_OFFSET + 16) {
-        g_pd.consts[VPOFF][(m >> 2) & 3] = v;
-        g_pd.cgen++;
+        if (g_pd.consts[VPOFF][(m >> 2) & 3] != v) {
+            g_pd.consts[VPOFF][(m >> 2) & 3] = v;
+            g_pd.cgen++;
+        }
         return;
     }
     if (m < 0x0A60) {
@@ -4776,8 +5084,10 @@ void hle_pbd_method(uint32_t m, uint32_t v)
         }
     }
     if (m >= NV097_SET_VIEWPORT_SCALE && m < NV097_SET_VIEWPORT_SCALE + 16) {
-        g_pd.consts[VPSCL][(m >> 2) & 3] = v;
-        g_pd.cgen++;
+        if (g_pd.consts[VPSCL][(m >> 2) & 3] != v) {
+            g_pd.consts[VPSCL][(m >> 2) & 3] = v;
+            g_pd.cgen++;
+        }
         return;
     }
     switch (m) {
@@ -4802,14 +5112,23 @@ void hle_pbd_method(uint32_t m, uint32_t v)
         }
         break;
     case NV097_SET_BEGIN_END:
-        if (v) {
+        if (v && g_pd.join_pending && v == g_pd.prim) {
+            /* the next strip of a join: after the ones ended */
+            g_pd.idx[g_pd.nidx++] = JOIN_SEP;
+            g_pd.join_start = g_pd.nidx;
+            g_pd.join_pending = false;
+            g_pd.in_draw = true;
+            g_pd.ndm = 0;
+        } else if (v) {
+            hle_pbd_join_flush();
             g_pd.in_draw = true;
             g_pd.prim = v;
             g_pd.nidx = g_pd.nimm = g_pd.ninl = 0;
             g_pd.ndm = 0;
+            join_reset();
         } else if (g_pd.in_draw) {
             g_pd.in_draw = false;
-            draw();
+            join_end_strip(-1);
         }
         break;
     case NV097_ARRAY_ELEMENT16:
@@ -5869,6 +6188,7 @@ void hle_pbd_park(void)
     if (!g_pd.on) {
         return;
     }
+    hle_pbd_join_flush();
     uint64_t lv = 0;
     if (g_pd.device) {
         /* the colour targets the GPU drew since the CPU last wrote their
@@ -5960,6 +6280,7 @@ bool hle_pbd_state_set(const HlePbdState *s, const float *imm, const uint32_t *i
     }
     g_pd.rt_dirty = true;                   /* the targets bound again from the methods */
     g_pd.cgen++;
+    g_pd.curgen++;
     g_pd.ffgen++;
     g_pd.st_sent = false;
     hle_pbd_restored();

@@ -320,6 +320,9 @@ typedef struct HleCmdDraw {
                                    diffuse register's current value (float4), 0 = none */
     float wscale;               /* untransformed FF draws: 1 / the projection's W-buffer
                                    far w (W-buffering stores w / wfar); 0 = keep z */
+    uint32_t restart;           /* 1: strips joined in the indices, 0xFFFF between them
+                                   (drawn with primitive restart; pb/pbdraw.c joins
+                                   draws back to back) */
 } HleCmdDraw;
 
 #define HLE_DRAW_NO_UBO   0xFFFFFFFFu

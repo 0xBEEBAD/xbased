@@ -44,6 +44,20 @@ typedef struct HleVshKey {
                                    fourth read past them: w is 1 (in the padding too) */
 } HleVshKey;
 
+/* What a program reads of the constant block: the constants it names (lo
+ * to hi; none when lo > hi), whether it reaches any through A0 (then any of
+ * them), and its input registers (bit per vN: one no array feeds reads
+ * vcur). The decoder copies only that much into a draw's block. */
+typedef struct HleVshUse {
+    uint8_t lo, hi;
+    bool rel;
+    uint16_t inputs;
+} HleVshUse;
+
+/* u for nslots instructions up to the FINAL one; false when a slot does not
+ * decode (then take it all). */
+bool hle_vsh_uses(const uint32_t *tokens, unsigned nslots, HleVshUse *u);
+
 /* Parses nslots 4-dword instructions (stopping at the FINAL one) and writes
  * the GLSL into buf. Returns the length, or 0 when a slot does not decode,
  * no instruction is FINAL, or the text does not fit. */

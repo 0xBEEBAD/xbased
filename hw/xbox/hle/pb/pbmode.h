@@ -28,6 +28,9 @@ void hle_pb_boundary_request(uint64_t value);
 /* The guest wrote DMA_PUT (its vCPU thread): a kick, and the thread known to
  * the stutter / hang monitor (hitch.h) */
 void hle_pb_put(void);
+/* Whether the method after the one being decoded is SET_BEGIN_END prim on
+ * the 3D object, in the push buffer given already (pbdraw.c joins strips). */
+bool hle_pb_next_begin(uint32_t prim);
 /* pbdraw.c: a frame swapped went to the display (its flip), for the frame
  * latency (pbmode.c fl_hold). Any thread. */
 void hle_pb_frame_flipped(void);

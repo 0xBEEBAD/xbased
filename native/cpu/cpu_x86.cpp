@@ -17,9 +17,10 @@
  * privileged and system instructions, the kernel calls' INT 0x3F and hooked
  * addresses leave to the core's system-op callback; RDTSC runs on the host's TSC scaled to the Xbox's 733 MHz.
  *
- * Interrupt requests from other threads protect a poll page that every
- * block reads at its start: the fault (vectored exception handler) turns
- * the block's start into an NC_SYSOP_INTERRUPT exit. The x87 runs native,
+ * Every block reads a byte at its start through the poll pointer: an
+ * interrupt request from another thread points it at a page no access is
+ * allowed to, and the fault (vectored exception handler) turns the block's
+ * start into an NC_SYSOP_INTERRUPT exit. The x87 runs native,
  * at the precision the title's control word selects.
  */
 #include "native/cpu/cpu.h"
@@ -142,8 +143,10 @@ struct L1Entry {
 #define L1_BITS 16
 #define L1_SIZE (1u << L1_BITS)
 
-#define REGION_POLL   0
-#define REGION_L1     0x1000
+#define REGION_POLL   0               /* the poll's page, readable */
+#define REGION_POLL_TRAP 0x1000       /* ... a page of no access: an interrupt requested */
+#define REGION_POLL_PTR  0x2000       /* ... the poll pointer: one of the two */
+#define REGION_L1     0x3000
 #define REGION_STUBS  (REGION_L1 + L1_SIZE * sizeof(L1Entry))
 #define STUBS_SIZE    0x10000
 #define REGION_CODE   (REGION_STUBS + STUBS_SIZE)
@@ -154,7 +157,8 @@ struct NcCpu {
     NcCpuConfig cfg {};
     uint32_t fs_base = 0;
     uint8_t *region = nullptr;
-    volatile uint8_t *poll = nullptr;
+    volatile uint8_t *poll = nullptr, *poll_trap = nullptr;
+    volatile uint8_t *volatile *poll_ptr = nullptr;
     L1Entry *l1 = nullptr;
     uint8_t *code_begin = nullptr, *code_end = nullptr, *code_p = nullptr;
     /* stubs */
@@ -173,7 +177,6 @@ struct NcCpu {
     std::vector<Block *> graveyard;                     /* dead, freed at the next flush */
     NcFrame *frame = nullptr;
     DWORD thread_id = 0;
-    volatile LONG poll_armed = 0;
     PVOID veh = nullptr;
     uint64_t translated = 0, flushes = 0;
     ZydisDecoder dec {};
@@ -1485,9 +1488,10 @@ static Block *translate(NcCpu *cpu, uint32_t eip, bool bypass)
     Translator t {cpu, Asm(cpu->code_p, cpu->code_end - 4096), b, eip, {}};
     Asm &a = t.a;
 
-    /* the interrupt poll: a load from the poll page, flags untouched */
+    /* the interrupt poll: a load through the poll pointer, flags untouched */
     if (!bypass) {
-        a.op(ZYDIS_MNEMONIC_MOV, {R(ZYDIS_REGISTER_R11B), A((const void *)cpu->poll, 1)});
+        a.op(ZYDIS_MNEMONIC_MOV, {R(ZYDIS_REGISTER_R11), A((const void *)cpu->poll_ptr, 8)});
+        a.op(ZYDIS_MNEMONIC_MOV, {R(ZYDIS_REGISTER_R11B), M(ZYDIS_REGISTER_R11, 0, 1)});
     }
 
     const unsigned max_insns = 256;
@@ -1913,21 +1917,18 @@ extern "C" uint8_t *nc_x86_lookup_entry(NcFrame *f)
 
 /* --------------------------------------------------------- the poll */
 
-/* The page's protection and poll_armed change together: a request (any
- * thread) and the fault's disarming (the vCPU's) racing left the flag set
- * over a readable page, and no interrupt cut into guest code again (a
- * title spinning on its push buffer's space then waited forever). */
-static SRWLOCK g_poll_lock = SRWLOCK_INIT;
-
+/* Armed, the poll pointer points at the page of no access: one store, from
+ * any thread. A request sets the frame's interrupt_pending first and the
+ * fault's disarming comes before the interrupt exit reads it, so a request
+ * racing the disarming is taken by that exit, or arms the poll again (one
+ * exit more, nothing pending). The page's protection changed instead
+ * (VirtualProtect, each time a system call and a TLB flush on every core
+ * the process ran on) cost a request ~4 us on its thread and the fault as
+ * much again on the vCPU's: 007 Everything or Nothing's ~140 trap
+ * interrupts a frame, 1.3 ms of it (#429). */
 static void poll_arm(NcCpu *cpu, bool on)
 {
-    AcquireSRWLockExclusive(&g_poll_lock);
-    if (cpu->poll_armed != (LONG)on) {
-        DWORD old;
-        VirtualProtect((void *)cpu->poll, 0x1000, on ? PAGE_NOACCESS : PAGE_READONLY, &old);
-        cpu->poll_armed = on;
-    }
-    ReleaseSRWLockExclusive(&g_poll_lock);
+    __atomic_store_n(cpu->poll_ptr, on ? cpu->poll_trap : cpu->poll, __ATOMIC_SEQ_CST);
 }
 
 static Block *block_at_host(NcCpu *cpu, uintptr_t pc)
@@ -1964,12 +1965,13 @@ static LONG CALLBACK poll_handler(PEXCEPTION_POINTERS ep)
     NcCpu *cpu = g_cpu;
     const EXCEPTION_RECORD *er = ep->ExceptionRecord;
     if (!cpu || er->ExceptionCode != EXCEPTION_ACCESS_VIOLATION || er->NumberParameters < 2 ||
-        (uintptr_t)er->ExceptionInformation[1] - (uintptr_t)cpu->poll >= 0x1000) {
+        (uintptr_t)er->ExceptionInformation[1] - (uintptr_t)cpu->poll_trap >= 0x1000) {
         return EXCEPTION_CONTINUE_SEARCH;
     }
     CONTEXT *ctx = ep->ContextRecord;
     Block *b = block_at_host(cpu, ctx->Rip);
     poll_arm(cpu, false);
+    ctx->R11 = (DWORD64)(uintptr_t)cpu->poll;   /* the load again reads the readable page */
     InterlockedIncrement64(&g_poll_faults);
     if (!b) {
         InterlockedIncrement64(&g_poll_lost);
@@ -2156,8 +2158,13 @@ extern "C" NcCpu *nc_cpu_create(const NcCpuConfig *cfg, uint32_t fs_base)
         return nullptr;
     }
     cpu->poll = cpu->region + REGION_POLL;
+    cpu->poll_trap = cpu->region + REGION_POLL_TRAP;
+    cpu->poll_ptr = (volatile uint8_t *volatile *)(cpu->region + REGION_POLL_PTR);
+    *cpu->poll_ptr = cpu->poll;
     DWORD old;
     VirtualProtect((void *)cpu->poll, 0x1000, PAGE_READONLY, &old);
+    VirtualProtect((void *)cpu->poll_trap, 0x1000, PAGE_NOACCESS, &old);
+    VirtualProtect((void *)cpu->poll_ptr, 0x1000, PAGE_READWRITE, &old);
     cpu->l1 = (L1Entry *)(cpu->region + REGION_L1);
     cpu->code_begin = cpu->code_p = cpu->region + REGION_CODE;
     cpu->code_end = cpu->region + REGION_SIZE;
@@ -2479,9 +2486,7 @@ extern "C" void nc_cpu_request_interrupt(NcCpu *cpu)
     NcFrame *f = cpu->frame;
     __atomic_store_n(&f->interrupt_pending, 1u, __ATOMIC_RELEASE);
     InterlockedIncrement64(&g_int_requests);
-    if (!cpu->poll_armed) {
-        poll_arm(cpu, true);
-    }
+    poll_arm(cpu, true);
 }
 
 extern "C" void nc_cpu_cycle_offset_add(NcCpu *cpu, uint64_t ticks)

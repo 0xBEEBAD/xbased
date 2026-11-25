@@ -64,6 +64,33 @@ static void test_program(void)
     HT_CHECK(strstr(buf, "layout(location = 0) flat out vec4 vDiffuse;") != NULL);
 }
 
+/* what a program reads of the constant block (pb/pbdraw.c copies only that) */
+static void test_uses(void)
+{
+    HleVshUse u;
+    /* the whole program: c[0], c[58], c[59], c[100] named, c[A0+121] through A0; v0, v3, v4 read */
+    HT_CHECK(hle_vsh_uses(&k_prog[0][0], NSLOTS, &u));
+    HT_CHECK(u.lo == 0 && u.hi == 100);
+    HT_CHECK(u.rel);
+    HT_CHECK(u.inputs == ((1u << 0) | (1u << 3) | (1u << 4)));
+    /* without the ARL and its relative read: the named ones only */
+    uint32_t p[NSLOTS][4];
+    unsigned n = 0;
+    for (unsigned i = 0; i < NSLOTS; i++) {
+        if (i != 4 && i != 5) {
+            memcpy(p[n++], k_prog[i], sizeof(p[0]));
+        }
+    }
+    HT_CHECK(hle_vsh_uses(&p[0][0], n, &u));
+    HT_CHECK(u.lo == 0 && u.hi == 100 && !u.rel);
+    /* MOV oD0, v3 + RCP R1.w, R1.w: no constant (an empty range), v3 */
+    HT_CHECK(hle_vsh_uses(&k_prog[0][0], 1, &u));
+    HT_CHECK(u.lo > u.hi && !u.rel && u.inputs == (1u << 3));
+    /* DP4 oPos.z, v0, c[100] then MUL oPos.xyz, R12.xyz, c[58].xyz: 58 to 100 */
+    HT_CHECK(hle_vsh_uses(&k_prog[1][0], 2, &u));
+    HT_CHECK(u.lo == 58 && u.hi == 100 && u.inputs == 1u);
+}
+
 /* S32K attributes arrive as ivec4, CMP as one packed int */
 static void test_attr_kinds(void)
 {
@@ -129,6 +156,7 @@ static void test_overflow(void)
 int main(void)
 {
     HT_RUN(test_program);
+    HT_RUN(test_uses);
     HT_RUN(test_attr_kinds);
     HT_RUN(test_no_final);
     HT_RUN(test_stops_at_final);
