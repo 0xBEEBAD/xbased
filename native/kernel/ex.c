@@ -150,7 +150,7 @@ void nc_kernel_set_video(int64_t flags, int av_pack)
 }
 
 /* The app's language (nc_kernel_set_language); 0 keeps the stored one.
- * Fixed: the game's own setting, kept even on a disc that seems to lack it. */
+ * Fixed: the game's own setting, which a new EEPROM doesn't take. */
 static int g_language;
 static bool g_language_fixed;
 
@@ -513,23 +513,6 @@ static uint8_t *eeprom(NcKernel *k)
          * Not what an EEPROM kept: one left at surround or mono by another
          * console played that way without a word in the settings. */
         nc_wr32(g_eeprom + 0x98, g_audio_surround ? 0x00010002u : 0);
-        /* A disc without the console's language plays in English, as a
-         * console set to it would have the title choose. Its files in
-         * English under the language's name (io.c's fallback) weren't
-         * enough: Fable checked its Spanish folder, found none, and went
-         * on with half of a language loaded until it crashed. */
-        /* A language set for the game itself is kept: the folders are a
-         * guess, and a disc may keep its languages some other way. */
-        const uint32_t lang = nc_rd32(g_eeprom + 0x90);
-        if (lang >= 2 && nc_io_disc_lacks_language(k->disc, (int)lang)) {
-            if (g_language_fixed) {
-                nc_log("xbased-native", "ex: the disc seems to lack the console's language (%u), kept: the game's own setting", lang);
-            } else {
-                nc_wr32(g_eeprom + 0x90, 1);
-                nc_log("xbased-native", "ex: the disc hasn't the console's language (%u): English (set the language in the "
-                                       "game's settings to keep it)", lang);
-            }
-        }
         /* A disc for North America and Japan both plays as a Japanese
          * console's when the language is Japanese, Korean or Chinese (a
          * console of those markets): Capcom Fighting Evolution's World disc

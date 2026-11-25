@@ -266,8 +266,7 @@ static void game_options(const char *disc)
     /* The console's language and video flags: what changed in the EEPROM
      * taken into the global settings first (console_cfg.c), then the
      * command line's, else the game's own, else the global ones (for "auto"
-     * or none, the interface's language). The game's own language, or the
-     * command line's, is kept even on a disc that seems to lack it. */
+     * or none, the interface's language). */
     cc_sync(&global);
     const char *cl_lang = NULL, *cl_video = NULL;
     for (int i = 0; i < ncmd; i++) {

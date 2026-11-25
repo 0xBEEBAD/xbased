@@ -180,6 +180,13 @@ void hle_draw_rs_brief(uint32_t out[9]);
 bool hle_draw_snap_needed(const HleCmdDraw *c, uint32_t rt_id);
 void hle_draw_snap(VkCommandBuffer cb, HleVkSurf *rt);
 void hle_draw_snap_end(void);
+/* ... or, where the device has feedback loops, rt_id is a target of its own
+ * and no stage reads it as a smaller texture (hle_draw_loop_ok), the target
+ * itself in its feedback loop layout, in a pass opened after the earlier
+ * draws: hle_draw_loop_begin before the draw, hle_draw_loop_end after it. */
+bool hle_draw_loop_ok(const HleCmdDraw *c, uint32_t rt_id);
+void hle_draw_loop_begin(uint32_t rt_id);
+void hle_draw_loop_end(void);
 /* In the open pass: rt's view as input attachment 0 (set 2), after the
  * earlier draws' writes. */
 void hle_draw_fb_bind(VkCommandBuffer cb, HleVkSurf *rt);

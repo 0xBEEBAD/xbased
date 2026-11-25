@@ -456,8 +456,7 @@ void nc_kernel_set_video(int64_t flags, int av_pack);
  * 7 Korean, 8 Chinese (traditional), 9 Portuguese. Before the title starts;
  * any other value keeps the stored one. */
 void nc_kernel_set_language(int language);
-/* ... set for the game itself: kept on a disc whose folders seem to lack it
- * (otherwise such a disc plays in English) */
+/* ... set for the game itself (a console EEPROM made new doesn't take it) */
 void nc_kernel_set_language_fixed(bool fixed);
 /* ex.c: the console's audio setting (XC_AUDIO_FLAGS): stereo, or Dolby
  * Digital on (the games mix six channels). Before the title starts. */
@@ -680,9 +679,6 @@ const char *nc_io_hdd_root(void);
 bool nc_io_host_file(const char *xbox_path, char *out, size_t n);
 /* \??\D:, the directory the title was launched from (its XBE's). */
 void nc_io_set_launch_dir(const char *dir);
-/* Whether the disc has language folders, English's among them, and none for
- * XC_LANGUAGE lang next to it (Fable's Data\lang\English without Spanish). */
-bool nc_io_disc_lacks_language(const struct NcDisc *disc, int lang);
 /* Console timing: reads take the console's drives' time, their thread waiting
  * (io.c): mode 0 off, 1 a quarter of it, 2 all of it (devtime=). */
 void nc_io_set_device_time(int mode);

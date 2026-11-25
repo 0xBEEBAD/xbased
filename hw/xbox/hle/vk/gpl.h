@@ -40,6 +40,7 @@ typedef struct HleGplDesc {
     const VkPipelineRenderingCreateInfo *ri;      /* its pNext: none */
     const void *pre_next;           /* the pre-rasterization part's own chain (discard rectangles), or NULL */
     VkPipelineLayout layout;
+    VkPipelineCreateFlags out_flags;    /* the output part's (and the link's): a feedback loop's */
     HlePbResult (*make)(void *ctx, unsigned which, VkPipelineShaderStageCreateInfo *stages);
     void *make_ctx;
     bool have_only;                 /* the two shader parts as the tables hold them, built:

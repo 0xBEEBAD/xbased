@@ -295,7 +295,7 @@ HlePbResult hle_gpl_build(const HleGplDesc *d, bool cache_only, bool side, VkPip
         .pDepthStencilState = d->ds, .pMultisampleState = d->ms, .pDynamicState = d->dy,
         .layout = d->layout };
     const VkGraphicsPipelineCreateInfo out_ci = {
-        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, .pNext = &ri,
+        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, .pNext = &ri, .flags = d->out_flags,
         .pColorBlendState = d->cb, .pMultisampleState = d->ms, .pDynamicState = d->dy,
         .layout = d->layout };
     const VkGraphicsPipelineCreateInfo *const ci[PART_N] = { &vi_ci, &pre_ci, &fs_ci, &out_ci };
@@ -347,7 +347,7 @@ HlePbResult hle_gpl_build(const HleGplDesc *d, bool cache_only, bool side, VkPip
             .libraryCount = PART_N, .pLibraries = libs };
         const VkGraphicsPipelineCreateInfo link = {
             .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, .pNext = &lci,
-            .flags = cache_only ? VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT : 0,
+            .flags = (cache_only ? VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT : 0) | d->out_flags,
             .layout = d->layout };
         hle_drvcrash_build_enter();
         hle_drvcrash_link_enter();

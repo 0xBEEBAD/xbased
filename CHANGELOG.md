@@ -1,5 +1,23 @@
 # xbased changelog
 
+## 1.2.15 (2026-11)
+
+### Performance
+- Games that read the picture they are drawing as a texture, as Riddick's
+  lighting does about 150 times a frame, no longer copy the whole picture
+  before each of those draws. The picture is read where it is drawn. The
+  copies weigh most on cards with little memory speed: in Escape from
+  Butcher Bay a GTX 1050 at 2x dropped to 35-50 fps, and a fast card at 6x
+  went from 50 to 60 fps in the same scene (#435).
+
+### Fixes
+- Console language: a game now plays in the language the console is set to
+  whenever its disc has it, whatever its language folders are called. Dino
+  Crisis 3's European disc (folders en, fr, ge, it, sp) played in English on
+  a console set to Spanish or German. A disc that lacks the console's
+  language behaves as on a real console: most games fall back to English by
+  themselves (#433).
+
 ## 1.2.14 (2026-11)
 
 ### Performance

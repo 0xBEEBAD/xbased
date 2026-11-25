@@ -42,6 +42,10 @@ static struct {
     bool recording;
     uint32_t rt, ds;
     bool pass_open;
+    /* the open pass renders the target in its feedback loop layout (pass_loop);
+     * something was drawn or cleared in it (pass_used); the next pass opened
+     * for a draw sampling its target (want_loop: hle_draw_loop_begin) */
+    bool pass_loop, pass_used, want_loop;
     bool pend_clear;
     uint32_t pend_flags, pend_s;
     VkClearColorValue pend_color;
@@ -396,9 +400,10 @@ static void gput_end(VkCommandBuffer cb, unsigned slot)
 }
 
 /* Why a pass ended (close_pass_why; the pass profile logs them). */
-enum { PE_OTHER, PE_SUBMIT, PE_SETRT, PE_TEX, PE_PREP, PE_LREAD, PE_SWAP, PE_COPY, PE_N };
+enum { PE_OTHER, PE_SUBMIT, PE_SETRT, PE_TEX, PE_PREP, PE_LREAD, PE_SWAP, PE_COPY, PE_LOOP, PE_N };
 static const char *const k_pe_names[PE_N] = { "other", "submit", "target", "upload",
-                                              "sampled target", "local read", "swap", "copy" };
+                                              "sampled target", "local read", "swap", "copy",
+                                              "feedback loop" };
 static uint64_t g_pe[PE_N];
 
 /* GPU time per render pass while the profile is on (debug): bottom-of-pipe
@@ -641,7 +646,8 @@ static bool open_pass(void)
         /* nothing written yet and no clear: zeros, not the image's undefined
          * contents (what an attachment compressor left) */
         const bool cfresh = rt->layout == VK_IMAGE_LAYOUT_UNDEFINED && !(pf & HLE_CLEAR_TARGET);
-        hle_surf_transition(cb, rt, rt->local_read ? VK_IMAGE_LAYOUT_RENDERING_LOCAL_READ_KHR
+        hle_surf_transition(cb, rt, g_back.want_loop ? VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT :
+                                    rt->local_read ? VK_IMAGE_LAYOUT_RENDERING_LOCAL_READ_KHR
                                                    : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
         hle_surf_written(rt);           /* HLE_OP_ZWRITE compares it with a depth buffer's */
         ca.imageView = rt->view;
@@ -696,6 +702,8 @@ static bool open_pass(void)
     pt_pass_begin(cb, w, h, rt ? (int)rt->fmt : -1, ds != NULL, pf);
     T.vkCmdBeginRendering(cb, &ri);
     g_back.pass_open = true;
+    g_back.pass_loop = rt && g_back.want_loop && rt->layout == VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT;
+    g_back.pass_used = false;
     g_back.pend_clear = false;
     return true;
 }
@@ -1602,6 +1610,7 @@ static void cmd_clear(const HleCmdClear *c)
         if (!g_back.pass_open && !open_pass()) {
             return;
         }
+        g_back.pass_used = true;
         if (clear_masked(c, rt, ds, flags)) {
             if (!g_back.warned_partial) {
                 g_back.warned_partial = true;
@@ -1633,6 +1642,7 @@ static void cmd_clear(const HleCmdClear *c)
         g_back.st.last_color = c->color;
         g_back.st.last_rt = g_back.rt;
     }
+    g_back.pass_used = true;             /* (a clear in the pass writes the target) */
     if (c->nrects == 0 && !g_back.pass_open) {
         /* a Clear before the first draw becomes loadOp=CLEAR */
         g_back.pend_flags = (g_back.pend_clear ? g_back.pend_flags : 0) | flags;
@@ -2470,6 +2480,8 @@ static void dispatch(const HleCmdHdr *h)
         if (fbrt && !fbrt->general && !fbrt->local_read) {
             fbrt->local_read = true;
             close_pass_why(PE_LREAD);
+        } else if (fbrt && g_back.pass_open && g_back.pass_loop) {
+            close_pass_why(PE_LREAD);            /* (a feedback loop's pass: not in local read) */
         }
         if (hle_draw_tex_needs_prep(p, g_back.rt)) {
             close_pass_why(PE_PREP);             /* sampled render targets change layout */
@@ -2478,6 +2490,19 @@ static void dispatch(const HleCmdHdr *h)
         /* combiner stages reading the target at their own coordinates: a
          * copy of it, made outside the pass */
         bool snap = hle_draw_snap_needed(p, g_back.rt);
+        /* or the target itself: a pass in its feedback loop layout, opened after
+         * whatever the pass before drew or cleared (a clear still pending in a
+         * pass of its own first), the earlier writes then seen wherever the
+         * stages read (vk/surf.c hle_surf_transition) */
+        const bool loop = snap && !fbrt && hle_draw_loop_ok(p, g_back.rt);
+        if (loop) {
+            if (g_back.pass_open ? !g_back.pass_loop || g_back.pass_used : g_back.pend_clear) {
+                close_pass_why(PE_LOOP);
+            }
+            g_back.want_loop = true;
+            hle_draw_loop_begin(g_back.rt);
+            snap = false;
+        }
         if (snap) {
             close_pass_why(PE_COPY);
             hle_draw_snap(cb_get(), hle_surf_get(g_back.rt));
@@ -2494,6 +2519,7 @@ static void dispatch(const HleCmdHdr *h)
             }
             hle_draw_cmd_draw(p, g_back.fr[g_back.cur].cb, g_back.rt, g_back.ds, &g_back.vp);
             g_back.st.draws++;
+            g_back.pass_used = true;
             if (g_pix.active) {
                 pix_after(p);
             }
@@ -2502,6 +2528,10 @@ static void dispatch(const HleCmdHdr *h)
         }
         if (snap) {
             hle_draw_snap_end();
+        }
+        if (loop) {
+            hle_draw_loop_end();
+            g_back.want_loop = false;
         }
         break;
     }

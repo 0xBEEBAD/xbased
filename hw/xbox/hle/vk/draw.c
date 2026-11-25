@@ -1121,13 +1121,15 @@ void hle_draw_cmd_tex(const HleCmdTex *c, VkCommandBuffer cb)
  * every other frame once the device's frame buffers were redefined). A
  * texture whose levels or faces are rendered samples all of them (cube:
  * binding 2). ord: a 32-bit texture of another byte order samples the
- * target's texels reordered (hle_surf_order_view), through a slot of its own. */
-static uint32_t surf_slot(HleVkSurf *s, uint32_t ord)
+ * target's texels reordered (hle_surf_order_view), through a slot of its own.
+ * loop: the target the draw renders, sampled in its feedback loop's layout
+ * (hle_draw_loop_begin), a slot of its own too. */
+static uint32_t surf_slot(HleVkSurf *s, uint32_t ord, bool loop)
 {
     VkImageView view = ord ? hle_surf_order_view(s, ord) : VK_NULL_HANDLE, cube = VK_NULL_HANDLE;
     uint64_t gen = s->oview_gen;
-    VkImageLayout layout = s->general ? VK_IMAGE_LAYOUT_GENERAL
-                                      : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    VkImageLayout layout = loop ? VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT :
+                           s->general ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     if (!view) {
         ord = 0;
         view = s->view;
@@ -1140,8 +1142,9 @@ static uint32_t surf_slot(HleVkSurf *s, uint32_t ord)
         }
         gen = s->view_gen;
     }
+    const uint32_t okey = ord | (loop ? 0x100u : 0);    /* (the table's key) */
     for (uint32_t i = 0; i < g_dr.nsslot; i++) {
-        if (g_dr.sslot[i].id == s->id && g_dr.sslot[i].ord == ord) {
+        if (g_dr.sslot[i].id == s->id && g_dr.sslot[i].ord == okey) {
             if (g_dr.sslot[i].view != view || g_dr.sslot[i].cube != cube ||
                 g_dr.sslot[i].gen != gen) {
                 /* Other views: a slot of their own. The bindless set is read
@@ -1171,7 +1174,7 @@ static uint32_t surf_slot(HleVkSurf *s, uint32_t ord)
     }
     uint32_t i = g_dr.nsslot++;
     g_dr.sslot[i].id = s->id;
-    g_dr.sslot[i].ord = ord;
+    g_dr.sslot[i].ord = okey;
     g_dr.sslot[i].view = view;
     g_dr.sslot[i].cube = cube;
     g_dr.sslot[i].gen = gen;
@@ -1481,6 +1484,7 @@ static struct {
 static unsigned g_nsnap;
 static int g_snap_cur = -1;             /* the copy of target g_snap_rt the next draw samples */
 static uint32_t g_snap_rt;
+static uint32_t g_loop_rt;              /* the target the next draw samples itself (hle_draw_loop_begin) */
 
 static bool samples(unsigned mode)
 {
@@ -1602,6 +1606,48 @@ void hle_draw_snap(VkCommandBuffer cb, HleVkSurf *rt)
 void hle_draw_snap_end(void)
 {
     g_snap_cur = -1;
+}
+
+/*
+ * With feedback loops (caps.fbloop) a draw whose stages sample the target it
+ * renders reads the target itself, not a copy of it: the pass it draws in
+ * renders the target in its feedback loop layout, opened after the earlier
+ * draws (vk/back.c HLE_OP_DRAW: their writes then seen wherever the stages
+ * read), and the stages sample it through a slot in that layout. Riddick's
+ * lighting has some 150 such draws a frame, each copying its 1280 x 960
+ * target at 2x, about 1.4 GB a frame: at 6x on an RTX 4080, as at 2x on a
+ * GTX 1050, the copies held it at 50 fps, the target read in place at 60
+ * (#435). What a draw reads where it also writes is the difference: the copy
+ * has it as it was before the draw, a feedback loop may have the draw's own
+ * (the GPU's order, not the NV2A's in-order raster). A stage that reads the
+ * target as a smaller texture (part_of_target: Prince of Persia: The Two
+ * Thrones shrinking its frame in place) keeps the copy. Riddick's reads
+ * differ only on the seams between a draw's triangles (some 400 of 3.7
+ * million pixels at 2x); The Two Thrones' full-screen blur of what is near
+ * the camera reads neighbours it writes and comes out a little other than
+ * with the copy.
+ */
+bool hle_draw_loop_ok(const HleCmdDraw *c, uint32_t rt_id)
+{
+    if (!g_hvk.caps.fbloop || !snap_ok(hle_surf_get(rt_id))) {
+        return false;
+    }
+    for (unsigned st = 0; st < HLE_TSS_STAGES; st++) {
+        if (c->tex[st] == rt_id && part_of_target(c, st, rt_id)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void hle_draw_loop_begin(uint32_t rt_id)
+{
+    g_loop_rt = rt_id;
+}
+
+void hle_draw_loop_end(void)
+{
+    g_loop_rt = 0;
 }
 
 /* A texture object that becomes a render-target surface: its texels now
@@ -1856,6 +1902,10 @@ typedef struct DsKey {
     /* eds2: */
     uint8_t bias;
 } DsKey;
+
+/* PipeKey.wmask: past the colour write mask, the pipeline's draws sample their
+ * own colour target (VK_PIPELINE_CREATE_COLOR_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT) */
+#define HLE_WMASK_LOOP 0x80000000u
 
 typedef struct PipeKey {
     HleFfVsKey vs;
@@ -3196,7 +3246,7 @@ static HlePbResult pipeline_build_now(const void *key, const uint32_t *tok, uint
             .srcColorBlendFactor = blend_factor(k->src), .dstColorBlendFactor = blend_factor(k->dst),
             .colorBlendOp = blend_op(k->op),
             .srcAlphaBlendFactor = blend_factor(k->src), .dstAlphaBlendFactor = blend_factor(k->dst),
-            .alphaBlendOp = blend_op(k->op), .colorWriteMask = k->wmask };
+            .alphaBlendOp = blend_op(k->op), .colorWriteMask = k->wmask & 0xF };
         VkPipelineColorBlendStateCreateInfo cb = {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
             .attachmentCount = k->cfmt ? 1 : 0, .pAttachments = &ba };
@@ -3284,6 +3334,11 @@ static HlePbResult pipeline_build_now(const void *key, const uint32_t *tok, uint
         if (cache_only) {
             gci.flags = VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT;
         }
+        /* its draws sample their own target (a record from a device with feedback loops:
+         * built as any other) */
+        const VkPipelineCreateFlags loopf = (k->wmask & HLE_WMASK_LOOP) && g_hvk.caps.fbloop
+                                                ? VK_PIPELINE_CREATE_COLOR_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT : 0;
+        gci.flags |= loopf;
         bool linked = false;
         if (hle_gpl_on()) {
             /* from its parts (gpl.h), each keyed by what it is made of: the
@@ -3311,7 +3366,9 @@ static HlePbResult pipeline_build_now(const void *key, const uint32_t *tok, uint
                 .vi_key = (uint64_t)ia.topology + 1 + (uber ? 0x100 : 0),
                 .pre_key = key_hash(vsrc, strlen(vsrc)) ^ (key_hash(&rk, sizeof(rk)) * 31),
                 .fs_key = key_hash(fsrc, strlen(fsrc)),
-                .out_key = key_hash(&ok, sizeof(ok)) ^ (uber ? 0x9E3779B97F4A7C15ull : 0),
+                .out_key = key_hash(&ok, sizeof(ok)) ^ (uber ? 0x9E3779B97F4A7C15ull : 0) ^
+                           (loopf ? 0xC2B2AE3D27D4EB4Full : 0),
+                .out_flags = loopf,
                 .pre_stages = pre_st, .npre_stages = 1, .fs_stage = &st[1],
                 .vis = &vis, .ia = &ia, .vp = &vp, .rs = &rs, .ms = &ms, .ds = &ds, .cb = &cb,
                 .dy = &dy, .ri = &ri, .pre_next = ri.pNext, .layout = uber ? g_ub.layout : g_dr.layout,
@@ -3561,8 +3618,12 @@ static uint32_t stage_slot(const HleCmdDraw *c, unsigned st, uint32_t rt_id, uin
         slot = g_snap[g_snap_cur].slot;  /* the target, copied before the draw */
         *flags |= (c->tex_lin >> st & 1) ? (1u << st) | (rt->scale > 1 ? 256u << st : 0) : 0;
         return slot;
+    } else if (c->tex[st] == rt_id && g_loop_rt == rt_id && (rt = hle_surf_get(rt_id)) != NULL) {
+        slot = surf_slot(rt, c->tex_ord >> 2 * st & 3, true);  /* the target itself, its feedback loop */
+        *flags |= (c->tex_lin >> st & 1) ? (1u << st) | (rt->scale > 1 ? 256u << st : 0) : 0;
+        return slot;
     } else if (ts && (ts->general || ts->layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)) {
-        slot = surf_slot(ts, c->tex_ord >> 2 * st & 3);  /* RT as texture (identity) */
+        slot = surf_slot(ts, c->tex_ord >> 2 * st & 3, false);  /* RT as texture (identity) */
         /* linear format: texel coords, of an image at the resolution scale
          * (bit 8 + st) or at 1x (a small target, surf.c surf_scale: its
          * texels are its own, and the scale must not divide them) */
@@ -5362,7 +5423,8 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
     k.wmask = ((cw >> 16) & 1 ? (bgra ? VK_COLOR_COMPONENT_B_BIT : VK_COLOR_COMPONENT_R_BIT) : 0) |
               ((cw >> 8) & 1 ? VK_COLOR_COMPONENT_G_BIT : 0) |
               (cw & 1 ? (bgra ? VK_COLOR_COMPONENT_R_BIT : VK_COLOR_COMPONENT_B_BIT) : 0) |
-              ((cw >> 24) & 1 ? VK_COLOR_COMPONENT_A_BIT : 0);
+              ((cw >> 24) & 1 ? VK_COLOR_COMPONENT_A_BIT : 0) |
+              (g_loop_rt && g_loop_rt == rt_id ? HLE_WMASK_LOOP : 0);
     k.cfmt = rt ? rt->fmt : 0;
     k.dfmt = ds ? ds->fmt : 0;
     if (!k.pk.sblend && !k.ps.sblend) {

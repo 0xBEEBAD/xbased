@@ -424,10 +424,12 @@ bool hle_surf_ensure(HleVkSurf *s)
         .format = s->fmt, .extent = { s->w, s->h, 1 }, .mipLevels = s->nlevels,
         .arrayLayers = s->nfaces, .samples = VK_SAMPLE_COUNT_1_BIT,
         .tiling = VK_IMAGE_TILING_OPTIMAL,
-        /* colour targets as input attachments too, for fbfetch */
+        /* colour targets as input attachments too, for fbfetch, and in
+         * feedback loops (their own draws sample them: vk/draw.c) */
         .usage = (depth ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
                         : VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) |
                  (g_hvk.caps.fbfetch && !depth ? VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT : 0) |
+                 (g_hvk.caps.fbloop && !depth ? VK_IMAGE_USAGE_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT : 0) |
                  VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
                  VK_IMAGE_USAGE_SAMPLED_BIT,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
@@ -778,6 +780,28 @@ void hle_surf_transition(VkCommandBuffer cb, HleVkSurf *s, VkImageLayout to)
          * stays, which made no barrier, and the two ran in either order
          * (the synchronization validation's write after write). */
         hle_img_barrier(cb, s->img, s->aspect, to, to);
+    } else if (to == VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT) {
+        /* A pass whose draw samples the target it renders, after the last
+         * pass's draws and clears into it (in the layout all along, so only
+         * those wrote it): their writes seen by the stages' reads wherever
+         * they read (a barrier inside the pass orders a pixel's own only),
+         * the vertex work of the next pass not held back for them. */
+        VkImageMemoryBarrier2 b = {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+            .srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+            .srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+            .dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
+                            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+            .dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT |
+                             VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+            .oldLayout = to, .newLayout = to,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .image = s->img, .subresourceRange = { s->aspect, 0, 1, 0, 1 } };
+        VkDependencyInfo di = {
+            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+            .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &b };
+        T.vkCmdPipelineBarrier2(cb, &di);
     }
 }
 

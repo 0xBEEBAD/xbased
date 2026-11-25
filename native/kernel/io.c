@@ -1494,145 +1494,6 @@ static uint32_t dir_mismatch(const char *path, uint32_t options, uint32_t st)
     return st;
 }
 
-/* A disc path in a language the disc hasn't (a console set to Spanish, a
- * game without it, or a dump with its other languages taken out): the same
- * path in English, the language every title has, when that's there. A path
- * component (or a file name's stem) naming a language is what's swapped. */
-static bool lang_fallback(const NcDisc *disc, const char *rel, char *out, size_t n, NcDiscFile *df)
-{
-    static const char *const names[][2] = {
-        {"french", "english"}, {"german", "english"}, {"italian", "english"}, {"spanish", "english"},
-        {"japanese", "english"}, {"korean", "english"}, {"chinese", "english"}, {"portuguese", "english"},
-        {"fre", "eng"}, {"fra", "eng"}, {"ger", "eng"}, {"deu", "eng"}, {"ita", "eng"}, {"spa", "eng"},
-        {"esp", "eng"}, {"jpn", "eng"}, {"jap", "eng"}, {"kor", "eng"}, {"chi", "eng"}, {"por", "eng"},
-        {"fr", "en"}, {"de", "en"}, {"it", "en"}, {"es", "en"}, {"ja", "en"}, {"ko", "en"}, {"zh", "en"}, {"pt", "en"},
-        {"francais", "english"}, {"deutsch", "english"}, {"espanol", "english"}, {"castellano", "english"},
-        {"italiano", "english"}, {"portugues", "english"}, {"nihongo", "english"},
-    };
-    const size_t len = strlen(rel);
-    if (len + 8 >= n) {
-        return false;
-    }
-    for (size_t start = 0; start < len;) {
-        size_t end = start;
-        while (end < len && rel[end] != '\\') {
-            end++;
-        }
-        size_t stem = start;
-        while (stem < end && rel[stem] != '.') {
-            stem++;
-        }
-        for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
-            const size_t nl = strlen(names[i][0]);
-            if (stem - start != nl || strncasecmp(rel + start, names[i][0], nl)) {
-                continue;
-            }
-            /* the same case as the disc's: ENGLISH, English or english */
-            char rep[16];
-            const size_t rl = strlen(names[i][1]);
-            const bool all_up = isupper((unsigned char)rel[start]) && (nl < 2 || isupper((unsigned char)rel[start + 1]));
-            for (size_t c = 0; c < rl; c++) {
-                const bool up = all_up || (c == 0 && isupper((unsigned char)rel[start]));
-                rep[c] = up ? (char)toupper((unsigned char)names[i][1][c]) : names[i][1][c];
-            }
-            snprintf(out, n, "%.*s%.*s%s", (int)start, rel, (int)rl, rep, rel + stem);
-            if (nc_disc_find(disc, out, df)) {
-                return true;
-            }
-        }
-        start = end + 1;
-    }
-    return false;
-}
-
-/* Folder names for XC_LANGUAGE's values (1 English ... 9 Portuguese), in
- * English and in the language itself: Rayman 3's Gamedata\Vignette has
- * ENGLISH beside ESPANOL, DEUTSCH, FRANCAIS and ITALIANO, and with only the
- * English names known the European disc looked English-only and played in
- * English whatever the console's language (#428). */
-#define LANG_DIR_NAMES 7
-static const char *const k_lang_dirs[10][LANG_DIR_NAMES] = {
-    {NULL},
-    {"english", "eng", "en", NULL},
-    {"japanese", "jpn", "jap", "ja", "jp", "nihongo", NULL},
-    {"german", "ger", "deu", "de", "deutsch", NULL},
-    {"french", "fre", "fra", "fr", "francais", NULL},
-    {"spanish", "spa", "esp", "es", "espanol", "castellano", NULL},
-    {"italian", "ita", "it", "italiano", NULL},
-    {"korean", "kor", "ko", "kr", NULL},
-    {"chinese", "chi", "zh", "cn", NULL},
-    {"portuguese", "por", "pt", "portugues", NULL},
-};
-
-static bool lang_named(const uint8_t *e, int lang)
-{
-    for (int i = 0; i < LANG_DIR_NAMES && k_lang_dirs[lang][i]; i++) {
-        const size_t n = strlen(k_lang_dirs[lang][i]);
-        if (e[13] == n && !strncasecmp((const char *)e + 14, k_lang_dirs[lang][i], n)) {
-            return true;
-        }
-    }
-    return false;
-}
-
-typedef struct LangScan {
-    int lang;
-    bool english, other;
-    NcDiscFile sub[16]; /* folders to look in next */
-    unsigned nsub;
-} LangScan;
-
-static bool lang_scan_entry(void *ctx, const uint8_t *e)
-{
-    LangScan *s = ctx;
-    if (!(e[12] & 0x10)) {
-        return false;
-    }
-    s->english |= lang_named(e, 1);
-    s->other |= lang_named(e, s->lang);
-    if (s->nsub < 16) {
-        s->sub[s->nsub++] = (NcDiscFile){nc_rd32(e + 4), nc_rd32(e + 8), e[12]};
-    }
-    return false;
-}
-
-bool nc_io_disc_lacks_language(const NcDisc *disc, int lang)
-{
-    if (lang < 2 || lang > 9 || !disc || disc->fd < 0) {
-        return false;
-    }
-    /* The disc's first three levels of folders, breadth first, up to 64. */
-    NcDiscFile queue[64];
-    unsigned depth[64], head = 0, tail = 0;
-    queue[tail] = (NcDiscFile){disc->root_sector, disc->root_size, 0x10};
-    depth[tail++] = 0;
-    bool lacks = false;
-    while (head < tail) {
-        const NcDiscFile d = queue[head];
-        const unsigned dd = depth[head++];
-        if (!d.size || d.size > 0x40000) {
-            continue;
-        }
-        uint8_t *buf = malloc(d.size);
-        if (!buf || !nc_disc_read_orig(disc, &d, 0, buf, d.size)) {
-            free(buf);
-            continue;
-        }
-        LangScan s = {lang, false, false, {{0}}, 0};
-        nc_disc_dir_each(buf, d.size, lang_scan_entry, &s);
-        free(buf);
-        if (s.english && s.other) {
-            return false;
-        }
-        lacks |= s.english;
-        for (unsigned i = 0; i < s.nsub && dd < 2 && tail < 64; i++) {
-            queue[tail] = s.sub[i];
-            depth[tail++] = dd + 1;
-        }
-    }
-    return lacks;
-}
-
 static uint32_t do_open(NcKernel *k, uint32_t access, uint32_t share, uint32_t attrs, uint32_t disposition,
                         uint32_t options, uint32_t *handle, uint32_t *info)
 {
@@ -1673,14 +1534,27 @@ static uint32_t do_open(NcKernel *k, uint32_t access, uint32_t share, uint32_t a
             return STATUS_MEDIA_WRITE_PROTECTED;
         }
         NcDiscFile df;
-        char alt[512];
         if (!nc_disc_find(k->disc, rel, &df)) {
-            if (!lang_fallback(k->disc, rel, alt, sizeof(alt), &df)) {
-                nc_log("xbased-native-io", "open %s: not on the disc", path);
-                return STATUS_OBJECT_NAME_NOT_FOUND;
+            /* As the console's file system answers: a folder on the way
+             * missing (or a file) is a missing path, only the last name
+             * missing a missing name. A title on a console set to a
+             * language its disc hasn't finds that language's folder missing
+             * and goes on as on the console: Fable looks for
+             * Data\lang\Spanish\text.biz and plays in English. No
+             * other file stands in for it, and the console's language
+             * isn't changed for a disc whose folders seem to lack it: Dino
+             * Crisis 3's European disc names them en, fr, ge, it, sp and
+             * played in English on a console set to Spanish (#433). */
+            const char *slash = strrchr(rel, '\\');
+            bool path_gone = false;
+            if (slash && slash > rel) {
+                char parent[512];
+                snprintf(parent, sizeof(parent), "%.*s", (int)(slash - rel), rel);
+                NcDiscFile pd;
+                path_gone = !nc_disc_find(k->disc, parent, &pd) || !(pd.attr & 0x10);
             }
-            nc_log("xbased-native-io", "open %s: not on the disc, its English one instead (%s)", path, alt);
-            rel = alt;
+            nc_log("xbased-native-io", "open %s: not on the disc%s", path, path_gone ? " (nor its folder)" : "");
+            return path_gone ? STATUS_OBJECT_PATH_NOT_FOUND : STATUS_OBJECT_NAME_NOT_FOUND;
         }
         const bool dir = df.attr & 0x10;
         if ((options & FILE_DIRECTORY_FILE) && !dir) {

@@ -26,6 +26,22 @@ typedef struct VkPhysicalDeviceDynamicRenderingLocalReadFeaturesKHR {
 } VkPhysicalDeviceDynamicRenderingLocalReadFeaturesKHR;
 #endif
 
+/* VK_EXT_attachment_feedback_loop_layout for headers older than it: what
+ * HleCaps.fbloop uses */
+#ifndef VK_EXT_attachment_feedback_loop_layout
+#define VK_EXT_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_EXTENSION_NAME "VK_EXT_attachment_feedback_loop_layout"
+#define VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_FEATURES_EXT \
+    ((VkStructureType)1000339000)
+#define VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT ((VkImageLayout)1000339000)
+#define VK_IMAGE_USAGE_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT 0x00080000
+#define VK_PIPELINE_CREATE_COLOR_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT 0x02000000
+typedef struct VkPhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT {
+    VkStructureType sType;
+    void *pNext;
+    VkBool32 attachmentFeedbackLoopLayout;
+} VkPhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT;
+#endif
+
 /* The bindless set (vk/draw.c): images per kind (2D, cube, 3D) and samplers. */
 #define HLE_MAX_IMAGES   4096
 #define HLE_MAX_SAMPLERS 256
@@ -82,6 +98,11 @@ typedef struct HleCaps {
                                    combiner stages that sample the bound colour target
                                    read it as an input attachment (vk/draw.c
                                    hle_draw_fb_stages) */
+    bool fbloop;                /* attachment feedback loops (dynamic rendering's): a draw
+                                   whose stages sample the colour target it renders reads
+                                   the target itself, its pass reopened after the earlier
+                                   draws' writes, not a copy made before it (vk/draw.c
+                                   hle_draw_loop_begin) */
     bool exec_props, aniso;
     bool host_query_reset, occl_precise;        /* visibility tests */
     bool wide_lines;            /* enabled when present: lines as wide as the NV2A's
